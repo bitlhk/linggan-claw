@@ -442,9 +442,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
         const blob = new Blob(audioChunksRef.current, { type: mimeType });
         if (blob.size < 100) return;
         try {
-          const fd = new FormData();
-          fd.append("audio", blob, "voice.webm");
-          const res = await fetch(apiBase + "/api/claw/voice/transcribe", { method: "POST", body: fd, credentials: "include" });
+          const res = await fetch(((import.meta as any).env?.VITE_API_URL || "") + "/api/claw/voice/transcribe", { method: "POST", headers: { "Content-Type": mimeType }, body: blob, credentials: "include" });
           if (res.ok) {
             const data = await res.json();
             if (data.text) setInput(prev => prev + data.text);
@@ -457,7 +455,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
     } catch (err: any) {
       alert("无法启动录音：" + (err.message || "请检查麦克风权限"));
     }
-  }, [recording, apiBase]);
+  }, [recording]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
