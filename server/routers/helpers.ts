@@ -1,0 +1,593 @@
+// 测试模式：仅当显式设置 TEST_MODE=true 时启用（默认关闭）
+export const TEST_MODE = process.env.TEST_MODE === "true";
+
+export const APP_ROOT = process.env.APP_ROOT || "/root/linggan-platform";
+export const OPENCLAW_HOME = process.env.CLAW_OPENCLAW_HOME || "/root/.openclaw";
+
+import { z } from "zod";
+import { TRPCError } from "@trpc/server";
+import { execSync } from "child_process";
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from "fs";
+import {
+  getClawByAdoptId,
+  getSystemConfigValue,
+  getSystemConfigNumber,
+  upsertSystemConfig,
+  getAllExperienceConfigs,
+  createIpAccessLog,
+  getIpAccessCountToday,
+} from "../db";
+import { getClientIp } from "../_core/ip-utils";
+
+export const OPENCLAW_JSON_PATH = process.env.CLAW_OPENCLAW_JSON || "/root/.openclaw/openclaw.json";
+
+// ── 每日对话额度：内存计数器（重启自动清零） ──
+export const clawDailyUsage = (() => {
+  const map = new Map<string, { count: number; date: string }>();
+  const today = () => new Date().toISOString().slice(0, 10);
+  return {
+    increment(adoptId: string): number {
+      const d = today();
+      const entry = map.get(adoptId);
+      if (!entry || entry.date !== d) {
+        map.set(adoptId, { count: 1, date: d });
+        return 1;
+      }
+      entry.count++;
+      return entry.count;
+    },
+    get(adoptId: string): number {
+      const entry = map.get(adoptId);
+      return entry && entry.date === today() ? entry.count : 0;
+    },
+  };
+})();
+
+export type DemoPublishStatus = {
+  status: "success" | "failed" | "running";
+  at: string;
+  error?: string;
+};
+
+export const DEMO_PUBLISH_STATUS_KEY = "demo_route_publish_status_v1";
+export const DEMO_PUBLISH_META_KEY = "demo_route_publish_meta_v1";
+
+export const IFRAME_BYPASS_KEY = "iframe_bypass_experience_ids";
+
+type ClawModelOption = { id: string; name: string; desc?: string; isDefault?: boolean };
+
+export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
+  try {
+    const raw = readFileSync(OPENCLAW_JSON_PATH, "utf8");
+    const cfg = JSON.parse(raw || "{}");
+    const providers = cfg?.models?.providers || {};
+    const out: ClawModelOption[] = [];
+
+    // 1) providers.models
+    for (const [providerId, provider] of Object.entries<any>(providers)) {
+      const models = Array.isArray(provider?.models) ? provider.models : [];
+      for (const m of models) {
+        const mid = String(m?.id || "").trim();
+        if (!mid) continue;
+        const fullId = `${providerId}/${mid}`;
+        out.push({
+          id: fullId,
+          name: String(m?.name || mid),
+          desc: `provider=${providerId}`,
+        });
+      }
+    }
+
+    // 2) agents.defaults.model.primary（即使 providers.models 为空也纳入）
+    const defaultsPrimary = String(cfg?.agents?.defaults?.model?.primary || "").trim();
+    if (defaultsPrimary) {
+      out.push({ id: defaultsPrimary, name: defaultsPrimary, desc: "defaults.primary", isDefault: true });
+    }
+
+    // 3) agents.list[].model（历史切换留下的显式模型）
+    const list = Array.isArray(cfg?.agents?.list) ? cfg.agents.list : [];
+    for (const a of list) {
+      const mv = a?.model;
+      if (typeof mv === "string" && mv.trim()) {
+        out.push({ id: mv.trim(), name: mv.trim(), desc: "agent.override" });
+      } else if (mv && typeof mv === "object") {
+        const p = String((mv as any)?.primary || "").trim();
+        if (p) out.push({ id: p, name: p, desc: "agent.override" });
+      }
+    }
+
+    // 去重（按 id）
+    const uniq = new Map<string, ClawModelOption>();
+    for (const item of out) {
+      if (!uniq.has(item.id)) uniq.set(item.id, item);
+    }
+
+    if (uniq.size === 0) {
+      uniq.set("glm5/glm-5.1", {
+        id: "glm5/glm-5.1",
+        name: "GLM-5.1（默认）",
+        desc: "fallback",
+        isDefault: true,
+      });
+    }
+
+    // 确保有且仅有一个 isDefault（优先保留 defaults.primary，否则标第一个）
+    const arr = Array.from(uniq.values());
+    const hasDefault = arr.some((m) => m.isDefault);
+    if (!hasDefault && arr.length > 0) arr[0] = { ...arr[0], isDefault: true };
+    return arr;
+  } catch {
+    return [
+      { id: "glm5/glm-5.1", name: "GLM-5.1（默认）", desc: "fallback" },
+    ];
+  }
+}
+
+export function setAgentModelInOpenclawConfig(agentId: string, modelId: string): { ok: boolean; error?: string } {
+  try {
+    const raw = readFileSync(OPENCLAW_JSON_PATH, "utf8");
+    const cfg = JSON.parse(raw || "{}");
+    const agents = cfg?.agents?.list;
+    if (!Array.isArray(agents)) {
+      return { ok: false, error: "agents.list missing" };
+    }
+
+    let found = false;
+    for (const a of agents) {
+      if (String(a?.id || "") === agentId) {
+        a.model = modelId;
+        found = true;
+        break;
+      }
+    }
+    if (!found) return { ok: false, error: "agent not found" };
+
+    writeFileSync(OPENCLAW_JSON_PATH, JSON.stringify(cfg, null, 2), "utf8");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
+
+export function buildClawSessionKey(adoptId: string, userId: number) {
+  return `lingganclaw:user:${userId}:adopt:${adoptId}`;
+}
+
+export async function assertClawOwnerOrThrow(ctx: { user?: { id?: number | string } | null }, adoptId: string) {
+  const userId = Number(ctx.user?.id || 0);
+  if (!userId) throw new TRPCError({ code: "UNAUTHORIZED" });
+
+  const claw = await getClawByAdoptId(adoptId);
+  if (!claw) throw new TRPCError({ code: "NOT_FOUND" });
+
+  if (Number((claw as any).userId || 0) !== userId) {
+    throw new TRPCError({ code: "FORBIDDEN" });
+  }
+  return claw;
+}
+
+
+export function bumpClawSessionEpochBestEffort(adoptId: string) {
+  try {
+    const p = `${APP_ROOT}/data/claw-session-epochs.json`;
+    let obj: any = {};
+    if (existsSync(p)) {
+      const raw = String(readFileSync(p, "utf-8") || "{}");
+      obj = JSON.parse(raw || "{}");
+    }
+    const next = (Number(obj?.[adoptId] || 0) || 0) + 1;
+    obj[adoptId] = next;
+    mkdirSync(`${APP_ROOT}/data`, { recursive: true });
+    writeFileSync(p, JSON.stringify(obj, null, 2), 'utf-8');
+    return next;
+  } catch {
+    return 0;
+  }
+}
+
+export async function applyClawSessionModelViaGatewayCommand(params: { agentId: string; sessionKey: string; modelId: string }) {
+  const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
+  const gatewayPort = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
+  const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
+
+  const body = JSON.stringify({
+    model: "openclaw",
+    stream: false,
+    messages: [{ role: "user", content: `/model ${params.modelId}` }],
+  });
+
+  const http = await import("http");
+
+  return await new Promise<{ ok: boolean; statusCode?: number; respText?: string; error?: string }>((resolve) => {
+    const req = http.request(
+      {
+        hostname: remoteHost,
+        port: gatewayPort,
+        path: "/v1/chat/completions",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+          "Authorization": `Bearer ${gatewayToken}`,
+          "x-openclaw-agent-id": params.agentId,
+          "x-openclaw-session-key": params.sessionKey,
+        },
+      },
+      (res: any) => {
+        let buf = "";
+        res.on("data", (c: any) => (buf += c.toString("utf8")));
+        res.on("end", () => {
+          resolve({ ok: (res.statusCode || 0) >= 200 && (res.statusCode || 0) < 300, statusCode: res.statusCode, respText: buf.slice(0, 2000) });
+        });
+      }
+    );
+    req.on("error", (err: any) => resolve({ ok: false, error: String(err?.message || err) }));
+    req.write(body);
+    req.end();
+  });
+}
+
+export function restartOpenclawGatewayBestEffort() {
+  // hot-switch mode: do NOT restart gateway from control-ui backend
+  return;
+}
+
+
+/**
+ * LingganClaw 实例编排（MVP）
+ *
+ * CLAW_PROVISION_MODE=mock         -> 仅占位成功（默认）
+ * CLAW_PROVISION_MODE=local-script -> 调用本地脚本真实创建
+ */
+export function provisionLingganClawInstance(params: {
+  adoptId: string;
+  agentId: string;
+  userId: number;
+  permissionProfile: "starter" | "plus" | "internal";
+  ttlDays: number;
+}) {
+  const mode = (process.env.CLAW_PROVISION_MODE || "mock").trim();
+
+  if (mode === "mock") {
+    return {
+      ok: true,
+      mode,
+      message: "mock provisioned",
+    } as const;
+  }
+
+  if (mode === "local-script") {
+    const scriptPath = process.env.CLAW_PROVISION_SCRIPT || "./scripts/claw-provision.sh";
+    const cmd = [
+      "bash",
+      scriptPath,
+      "create",
+      `--adopt-id=${params.adoptId}`,
+      `--agent-id=${params.agentId}`,
+      `--user-id=${params.userId}`,
+      `--profile=${params.permissionProfile}`,
+      `--ttl-days=${params.ttlDays}`,
+    ].join(" ");
+
+    const out = execSync(cmd, {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    }).trim();
+
+    let parsed: any = null;
+    try {
+      parsed = out ? JSON.parse(out) : null;
+    } catch {
+      parsed = { raw: out };
+    }
+
+    return {
+      ok: true,
+      mode,
+      result: parsed,
+    } as const;
+  }
+
+  throw new Error(`Unsupported CLAW_PROVISION_MODE: ${mode}`);
+}
+
+
+
+export function writeClawExecAudit(entry: {
+  adoptId: string;
+  agentId: string;
+  userId: number | string | null;
+  permissionProfile: string;
+  message: string;
+  ok: boolean;
+  durationMs?: number;
+  error?: string;
+  meta?: any;
+}) {
+  try {
+    const logDir = `${APP_ROOT}/logs`;
+    mkdirSync(logDir, { recursive: true });
+    const line = JSON.stringify({
+      ts: new Date().toISOString(),
+      event: "claw_exec",
+      ...entry,
+      message: String(entry.message || "").slice(0, 500),
+    });
+    appendFileSync(`${logDir}/claw-exec.log`, line + "\n", "utf8");
+  } catch {
+    // ignore
+  }
+}
+export async function ensureIframeBypassExperienceId(experienceId: string, updatedBy?: number) {
+  const raw = await getSystemConfigValue(IFRAME_BYPASS_KEY, "");
+  const set = new Set(
+    (raw || "")
+      .split(/[\n,]/g)
+      .map((x) => x.trim())
+      .filter(Boolean)
+  );
+
+  if (set.has(experienceId)) return { changed: false };
+
+  set.add(experienceId);
+  const value = Array.from(set).join("\n");
+
+  await upsertSystemConfig(
+    {
+      key: IFRAME_BYPASS_KEY,
+      value,
+      description: "不走 iframe 的体验ID列表：每行一个 experienceId，首页将直接打开原始 URL",
+    },
+    updatedBy
+  );
+
+  return { changed: true };
+}
+
+
+export async function readDemoPublishStatusMap(): Promise<Record<string, DemoPublishStatus>> {
+  const raw = await getSystemConfigValue(DEMO_PUBLISH_STATUS_KEY, "{}");
+  try {
+    const obj = JSON.parse(raw || "{}");
+    return obj && typeof obj === "object" ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function writeDemoPublishStatusMap(map: Record<string, DemoPublishStatus>, updatedBy?: number) {
+  await upsertSystemConfig(
+    {
+      key: DEMO_PUBLISH_STATUS_KEY,
+      value: JSON.stringify(map),
+      description: "demo 路由发布状态（按 experienceId）",
+    },
+    updatedBy
+  );
+}
+
+export async function publishDemoRoutingNow(updatedBy?: number): Promise<{ ok: boolean; message: string }> {
+  const activeConfigs = (await getAllExperienceConfigs("all")).filter((c: any) => c.status === "active" && c.url);
+  const statusMap = await readDemoPublishStatusMap();
+  const nowIso = new Date().toISOString();
+
+  for (const c of activeConfigs as any[]) {
+    statusMap[c.experienceId] = { status: "running", at: nowIso };
+  }
+  await writeDemoPublishStatusMap(statusMap, updatedBy);
+
+  let nginxSitePath = process.env.NGINX_SITE_PATH || "/etc/nginx/sites-available/finance-ai-landing";
+  let nginxBackupPath = "";
+
+  try {
+    const demoDomain = process.env.DEMO_ROUTE_DOMAIN || "demo.linggan.top";
+    const siteDomain = process.env.SITE_DOMAIN || "www.linggan.top";
+    nginxSitePath = process.env.NGINX_SITE_PATH || "/etc/nginx/sites-available/finance-ai-landing";
+    const envPath = process.env.DEPLOY_ENV_PATH || "/opt/finance-ai-landing-new/finance-ai-landing/.env.deploy";
+
+    const items: Array<{ id: string; upstream: string; hostHeader: string }> = [];
+    for (const c of activeConfigs as any[]) {
+      try {
+        const u = new URL(c.url);
+        if (!["http:", "https:"].includes(u.protocol)) continue;
+        items.push({
+          id: c.experienceId,
+          upstream: `${u.protocol}//${u.host}`,
+          hostHeader: u.host,
+        });
+      } catch {
+        continue;
+      }
+    }
+
+    const mapUp = ["map $host $demo_upstream {", '    default "";'];
+    const mapHost = ["map $host $demo_host_header {", '    default "";'];
+    const envPairs: string[] = [];
+
+    for (const it of items) {
+      const sub = `${it.id}.${demoDomain}`;
+      // 防止将 demo 域名回写为自己的 upstream（自引用会导致路由死循环）
+      if (it.hostHeader === sub) {
+        console.warn(`[PublishDemoRouting] skip self-referenced upstream: ${it.id} -> ${it.hostHeader}`);
+        continue;
+      }
+      mapUp.push(`    ${sub} ${it.upstream};`);
+      mapHost.push(`    ${sub} ${it.hostHeader};`);
+      envPairs.push(`${it.id}=${sub}`);
+    }
+    mapUp.push("}");
+    mapHost.push("}");
+
+    const mapConn = [
+      "map $http_upgrade $connection_upgrade {",
+      "    default upgrade;",
+      '    "" close;',
+      "}",
+    ];
+
+    const generatedMapBlock = `${mapUp.join("\n")}\n\n${mapHost.join("\n")}\n\n${mapConn.join("\n")}\n`;
+
+    const existingConf = readFileSync(nginxSitePath, "utf8");
+    // 只替换 map 区块，保留现有 server(80/443/专属路由) 以避免覆盖手工增强配置
+    const mapBlockRegex = /map \$host \$demo_upstream \{[\s\S]*?\}\n\nmap \$host \$demo_host_header \{[\s\S]*?\}\n(?:\nmap \$http_upgrade \$connection_upgrade \{[\s\S]*?\}\n)?/m;
+    const conf = mapBlockRegex.test(existingConf)
+      ? existingConf.replace(mapBlockRegex, `${generatedMapBlock}\n`)
+      : `${generatedMapBlock}\n${existingConf}`;
+
+    // 发布前备份，失败可回滚
+    nginxBackupPath = `${nginxSitePath}.bak-publish-${Date.now()}`;
+    writeFileSync(nginxBackupPath, existingConf, "utf8");
+    writeFileSync(nginxSitePath, conf, "utf8");
+
+    // 同步到 sites-enabled（nginx 实际读取的路径）
+    const sitesEnabledPath = nginxSitePath.replace("/sites-available/", "/sites-enabled/");
+    if (sitesEnabledPath !== nginxSitePath) {
+      writeFileSync(sitesEnabledPath, conf, "utf8");
+    }
+
+    let env = readFileSync(envPath, "utf8");
+    env = env
+      .split("\n")
+      .filter((l) => !/^DEMO_HOST_MAP_ENABLED=/.test(l) && !/^DEMO_HOST_MAP_SCHEME=/.test(l) && !/^DEMO_HOST_MAP=/.test(l))
+      .join("\n");
+    if (!env.endsWith("\n")) env += "\n";
+    env += "DEMO_HOST_MAP_ENABLED=true\n";
+    env += `DEMO_HOST_MAP_SCHEME=${process.env.DEMO_HOST_MAP_SCHEME || "http"}\n`;
+    env += `DEMO_HOST_MAP=${envPairs.join(",")}\n`;
+    writeFileSync(envPath, env, "utf8");
+
+    execSync("nginx -t", { stdio: "pipe" });
+    execSync("systemctl reload nginx", { stdio: "pipe" });
+
+    const successAt = new Date().toISOString();
+    for (const c of activeConfigs as any[]) {
+      statusMap[c.experienceId] = { status: "success", at: successAt };
+    }
+    await writeDemoPublishStatusMap(statusMap, updatedBy);
+    await upsertSystemConfig({ key: DEMO_PUBLISH_META_KEY, value: JSON.stringify({ at: successAt, count: items.length }), description: "demo 路由最近发布元信息" }, updatedBy);
+
+    return { ok: true, message: `发布成功，已处理 ${items.length} 个 active demo（Nginx已生效，若新增experienceId需重启服务加载最新DEMO_HOST_MAP）` };
+  } catch (e: any) {
+    // 回滚 nginx 配置（若本次发布已写入过新文件）
+    try {
+      if (nginxBackupPath) {
+        const backupConf = readFileSync(nginxBackupPath, "utf8");
+        writeFileSync(nginxSitePath, backupConf, "utf8");
+        execSync("nginx -t", { stdio: "pipe" });
+        execSync("systemctl reload nginx", { stdio: "pipe" });
+      }
+    } catch (rollbackErr) {
+      console.error("[PublishDemoRouting] rollback failed:", rollbackErr);
+    }
+
+    const err = String(e?.stderr || e?.message || e || "unknown").slice(0, 1200);
+    const failAt = new Date().toISOString();
+    for (const c of activeConfigs as any[]) {
+      statusMap[c.experienceId] = { status: "failed", at: failAt, error: err };
+    }
+    await writeDemoPublishStatusMap(statusMap, updatedBy);
+    await upsertSystemConfig({ key: DEMO_PUBLISH_META_KEY, value: JSON.stringify({ at: failAt, ok: false, error: err }), description: "demo 路由最近发布元信息" }, updatedBy);
+    return { ok: false, message: `发布失败: ${err}` };
+  }
+}
+
+/**
+ * 检查并记录IP访问（未注册用户）
+ * 返回是否允许访问
+ * 注意：登录/注册操作不受访问次数限制，允许用户随时登录/注册
+ */
+export async function checkAndRecordIpAccess(
+  req: any,
+  action: string,
+  userId?: number
+): Promise<{ allowed: boolean; message?: string }> {
+  const clientIP = getClientIp(req);
+
+  // 如果已登录，不限制，直接记录访问日志
+  if (userId) {
+    try {
+      await createIpAccessLog({
+        ip: clientIP,
+        action,
+        path: req.path || "",
+        userAgent: req.headers["user-agent"] || null,
+        userId: userId,
+      });
+    } catch (error) {
+      console.error("[IP Access] Failed to record access log:", error);
+    }
+    return { allowed: true };
+  }
+
+  // 登录/注册操作：不受访问次数限制，允许用户随时登录/注册
+  // 只记录访问日志，不进行限制检查
+  if (action === "login" || action === "register") {
+    try {
+      await createIpAccessLog({
+        ip: clientIP,
+        action,
+        path: req.path || "",
+        userAgent: req.headers["user-agent"] || null,
+        userId: null,
+      });
+      console.log(`[IP Access] ${action} action recorded - IP: ${clientIP} (no limit check)`);
+    } catch (error) {
+      console.error("[IP Access] Failed to record access log:", error);
+    }
+    return { allowed: true };
+  }
+
+  // 其他操作：检查访问次数限制
+  // 注意：这个函数现在主要用于登录/注册，其他操作应该使用 recordExperienceClick
+  try {
+    // 获取配置的每日限制（默认10次）
+    const dailyLimit = await getSystemConfigNumber("unregistered_daily_limit", 10);
+
+    // 获取今日体验按钮点击次数（不包括本次访问）
+    const { getIpAuthAccessCountToday } = await import("../db");
+    const todayCount = await getIpAuthAccessCountToday(clientIP);
+
+    // 检查是否超过限制（在记录本次访问之前）
+    if (todayCount >= dailyLimit) {
+      // 即使超过限制，也记录这次尝试访问（用于统计和分析）
+      try {
+        await createIpAccessLog({
+          ip: clientIP,
+          action,
+          path: req.path || "",
+          userAgent: req.headers["user-agent"] || null,
+          userId: null,
+        });
+      } catch (error) {
+        console.error("[IP Access] Failed to record blocked access log:", error);
+      }
+
+      return {
+        allowed: false,
+        message: `今日访问次数已达上限（${dailyLimit}次），请明天再试或注册账号后继续使用`,
+      };
+    }
+
+    // 允许访问，记录本次访问
+    try {
+      await createIpAccessLog({
+        ip: clientIP,
+        action,
+        path: req.path || "",
+        userAgent: req.headers["user-agent"] || null,
+        userId: null,
+      });
+    } catch (error) {
+      console.error("[IP Access] Failed to record access log:", error);
+    }
+
+    return { allowed: true };
+  } catch (error) {
+    console.error("[IP Access] Failed to check IP access:", error);
+    // 如果检查失败，允许访问（避免阻塞正常请求）
+    return { allowed: true };
+  }
+}

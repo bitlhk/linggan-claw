@@ -1,0 +1,495 @@
+import { bigint, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+
+/**
+ * Core user table backing auth flow.
+ * Extend this file with additional tables as your product grows.
+ * Columns use camelCase to match both database fields and generated types.
+ */
+export const users = mysqlTable("users", {
+  /**
+   * Surrogate primary key. Auto-incremented numeric value managed by the database.
+   * Use this for relations between tables.
+   */
+  id: int("id").autoincrement().primaryKey(),
+  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
+  openId: varchar("openId", { length: 64 }),
+  name: text("name"),
+  email: varchar("email", { length: 320 }),
+  password: varchar("password", { length: 255 }), // 密码哈希值
+  loginMethod: varchar("loginMethod", { length: 64 }),
+  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  accessLevel: mysqlEnum("accessLevel", ["public_only", "all"]).default("public_only").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+});
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+
+/**
+ * 注册用户表 - 存储通过落地页注册的用户信息
+ */
+export const registrations = mysqlTable("registrations", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  company: varchar("company", { length: 200 }).notNull(),
+  partnerType: varchar("partner_type", { length: 50 }), // "financial_institution" or "isv_partner"
+  email: varchar("email", { length: 320 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Registration = typeof registrations.$inferSelect;
+export type InsertRegistration = typeof registrations.$inferInsert;
+
+/**
+ * 访问统计表 - 记录用户点击体验按钮的行为数据
+ */
+export const visitStats = mysqlTable("visit_stats", {
+  id: int("id").autoincrement().primaryKey(),
+  registrationId: int("registrationId").notNull(),
+  scenarioId: varchar("scenarioId", { length: 50 }).notNull(), // acquisition, operations, investment
+  experienceId: varchar("experienceId", { length: 50 }).notNull(), // wealth-assistant, insurance-advisor, etc.
+  experienceTitle: varchar("experienceTitle", { length: 200 }).notNull(),
+  clickedAt: bigint("clickedAt", { mode: "number" }).notNull(), // UTC timestamp in milliseconds
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type VisitStat = typeof visitStats.$inferSelect;
+export type InsertVisitStat = typeof visitStats.$inferInsert;
+
+/**
+ * 安全日志表 - 记录可疑活动和安全事件
+ */
+export const securityLogs = mysqlTable("security_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  ip: varchar("ip", { length: 45 }).notNull(), // IPv6 最长 45 字符
+  path: varchar("path", { length: 500 }).notNull(),
+  method: varchar("method", { length: 10 }).notNull(),
+  userAgent: text("userAgent"),
+  reason: varchar("reason", { length: 200 }).notNull(), // 触发原因
+  details: text("details"), // 详细信息（JSON 格式）
+  severity: mysqlEnum("severity", ["low", "medium", "high", "critical"]).default("medium").notNull(),
+  status: mysqlEnum("status", ["pending", "resolved", "ignored", "blocked"]).default("pending").notNull(), // 处理状态
+  handledBy: int("handledBy"), // 处理人ID（管理员）
+  handledAt: timestamp("handledAt"), // 处理时间
+  handledNote: text("handledNote"), // 处理备注
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SecurityLog = typeof securityLogs.$inferSelect;
+export type InsertSecurityLog = typeof securityLogs.$inferInsert;
+
+/**
+ * IP 管理表 - 存储封禁IP、可疑IP、黑白名单
+ */
+export const ipManagement = mysqlTable("ip_management", {
+  id: int("id").autoincrement().primaryKey(),
+  ip: varchar("ip", { length: 45 }).notNull(), // IPv4 or IPv6
+  type: mysqlEnum("type", ["blacklist", "whitelist", "suspicious", "blocked"]).notNull(), // IP类型
+  reason: varchar("reason", { length: 500 }), // 原因说明
+  severity: mysqlEnum("severity", ["low", "medium", "high", "critical"]).default("medium").notNull(), // 严重程度
+  createdBy: int("createdBy"), // 创建人ID（管理员）
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  expiresAt: timestamp("expiresAt"), // 过期时间（可选，null表示永久）
+  isActive: mysqlEnum("isActive", ["yes", "no"]).default("yes").notNull(), // 是否激活
+  notes: text("notes"), // 备注
+});
+
+export type IpManagement = typeof ipManagement.$inferSelect;
+export type InsertIpManagement = typeof ipManagement.$inferInsert;
+
+/**
+ * 邮箱验证码表 - 存储邮箱验证码
+ */
+export const emailVerificationCodes = mysqlTable("email_verification_codes", {
+  id: int("id").autoincrement().primaryKey(),
+  email: varchar("email", { length: 320 }).notNull(),
+  code: varchar("code", { length: 10 }).notNull(), // 验证码（6位数字）
+  expiresAt: timestamp("expiresAt").notNull(), // 过期时间
+  used: mysqlEnum("used", ["yes", "no"]).default("no").notNull(), // 是否已使用
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type EmailVerificationCode = typeof emailVerificationCodes.$inferSelect;
+export type InsertEmailVerificationCode = typeof emailVerificationCodes.$inferInsert;
+
+/**
+ * SMTP配置表 - 存储邮件服务器配置
+ */
+export const smtpConfig = mysqlTable("smtp_config", {
+  id: int("id").autoincrement().primaryKey(),
+  host: varchar("host", { length: 255 }),
+  port: varchar("port", { length: 10 }),
+  user: varchar("user", { length: 320 }),
+  password: varchar("password", { length: 255 }), // 加密存储
+  from: varchar("from", { length: 320 }),
+  enabled: mysqlEnum("enabled", ["yes", "no"]).default("no").notNull(), // 是否启用
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedBy: int("updatedBy"), // 更新人ID（管理员）
+});
+
+export type SmtpConfig = typeof smtpConfig.$inferSelect;
+export type InsertSmtpConfig = typeof smtpConfig.$inferInsert;
+
+/**
+ * 密码重置token表 - 存储密码重置请求
+ */
+export const passwordResetTokens = mysqlTable("password_reset_tokens", {
+  id: int("id").autoincrement().primaryKey(),
+  email: varchar("email", { length: 320 }).notNull(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  used: mysqlEnum("used", ["yes", "no"]).default("no").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type InsertPasswordResetToken = typeof passwordResetTokens.$inferInsert;
+
+/**
+ * 功能开关表 - 存储系统功能开关配置
+ */
+export const featureFlags = mysqlTable("feature_flags", {
+  id: int("id").autoincrement().primaryKey(),
+  key: varchar("key", { length: 100 }).notNull().unique(), // 功能键名，如 "scenario_experience"
+  name: varchar("name", { length: 200 }).notNull(), // 功能名称，如 "场景体验功能"
+  description: text("description"), // 功能描述
+  enabled: mysqlEnum("enabled", ["yes", "no"]).default("yes").notNull(), // 是否启用
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedBy: int("updatedBy"), // 更新人ID（管理员）
+});
+
+export type FeatureFlag = typeof featureFlags.$inferSelect;
+export type InsertFeatureFlag = typeof featureFlags.$inferInsert;
+
+/**
+ * 场景表 - 存储场景的元信息（标题、图标、描述、排序）
+ */
+export const scenarios = mysqlTable("scenarios", {
+  id: varchar("id", { length: 50 }).primaryKey(), // 场景ID，如 "acquisition", "operations" 等
+  title: varchar("title", { length: 100 }).notNull(), // 场景标题，如 "获客增收"
+  subtitle: varchar("subtitle", { length: 200 }), // 副标题，如 "智能营销获客引擎"
+  description: text("description"), // 场景描述
+  icon: varchar("icon", { length: 50 }), // 图标名称，如 "Users", "Zap", "TrendingUp"
+  displayOrder: int("displayOrder").default(0).notNull(), // 显示顺序
+  status: mysqlEnum("status", ["active", "hidden"]).default("active").notNull(), // 状态：active-显示，hidden-隐藏
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Scenario = typeof scenarios.$inferSelect;
+export type InsertScenario = typeof scenarios.$inferInsert;
+
+/**
+ * 场景体验配置表 - 存储场景体验的配置信息
+ */
+export const experienceConfigs = mysqlTable("experience_configs", {
+  id: int("id").autoincrement().primaryKey(),
+  experienceId: varchar("experienceId", { length: 100 }).notNull().unique(), // 体验ID，如 "wealth-assistant"
+  title: varchar("title", { length: 200 }).notNull(), // 体验标题
+  description: text("description"), // 体验描述
+  url: varchar("url", { length: 500 }).notNull(), // 体验URL地址
+  scenarioId: varchar("scenarioId", { length: 50 }).notNull(), // 所属场景ID，如 "acquisition"
+  status: mysqlEnum("status", ["active", "developing"]).default("active").notNull(), // 状态：active-正常，developing-开发中
+  visibility: mysqlEnum("visibility", ["public", "internal"]).default("public").notNull(), // 可见性：public-公开，internal-内部
+  displayOrder: int("displayOrder").default(0).notNull(), // 显示顺序
+  inToolbox: mysqlEnum("inToolbox", ["yes", "no"]).default("no").notNull(), // 是否在智能工具箱显示
+  icon: varchar("icon", { length: 100 }), // 图标名称，如 "Bot", "Shield", "Mic" 等
+  tag: varchar("tag", { length: 50 }), // 标签，如 "银行", "保险", "证券" 等
+  features: text("features"), // 功能特性列表，JSON格式存储，如 ["功能1", "功能2"]
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedBy: int("updatedBy"), // 更新人ID（管理员）
+});
+
+export type ExperienceConfig = typeof experienceConfigs.$inferSelect;
+export type InsertExperienceConfig = typeof experienceConfigs.$inferInsert;
+
+/**
+ * 每日洞察表 - 存储首页咨询简报
+ */
+export const dailyInsights = mysqlTable("daily_insights", {
+  id: int("id").autoincrement().primaryKey(),
+  date: varchar("date", { length: 20 }).notNull().unique(), // YYYY-MM-DD
+  title: varchar("title", { length: 300 }).notNull(),
+  summary: text("summary"),
+  content: text("content").notNull(),
+  source: varchar("source", { length: 100 }).default("openclaw").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type DailyInsight = typeof dailyInsights.$inferSelect;
+export type InsertDailyInsight = typeof dailyInsights.$inferInsert;
+
+/**
+ * IP访问统计表 - 记录未注册用户的IP访问记录
+ */
+export const ipAccessLogs = mysqlTable("ip_access_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  ip: varchar("ip", { length: 45 }).notNull(), // IPv4 or IPv6
+  action: varchar("action", { length: 50 }).notNull(), // 访问动作：login, register, visit等
+  path: varchar("path", { length: 500 }), // 访问路径
+  userAgent: text("userAgent"), // 用户代理
+  userId: int("userId"), // 如果已登录，记录用户ID
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type IpAccessLog = typeof ipAccessLogs.$inferSelect;
+export type InsertIpAccessLog = typeof ipAccessLogs.$inferInsert;
+
+/**
+ * 系统配置表 - 存储系统级别的配置项
+ */
+export const systemConfigs = mysqlTable("system_configs", {
+  id: int("id").autoincrement().primaryKey(),
+  key: varchar("key", { length: 100 }).notNull().unique(), // 配置键名，如 "unregistered_daily_limit"
+  value: text("value").notNull(), // 配置值（JSON格式或字符串）
+  description: text("description"), // 配置描述
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedBy: int("updatedBy"), // 更新人ID（管理员）
+});
+
+export type SystemConfig = typeof systemConfigs.$inferSelect;
+export type InsertSystemConfig = typeof systemConfigs.$inferInsert;
+
+/**
+ * 访问统计日聚合表 - 后台统计查询专用（全量准确 + 快速查询）
+ * 粒度：date + scenario + experience + userType
+ */
+export const visitStatsDaily = mysqlTable("visit_stats_daily", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  statDate: varchar("statDate", { length: 10 }).notNull(), // YYYY-MM-DD
+  scenarioId: varchar("scenarioId", { length: 64 }).notNull(),
+  experienceId: varchar("experienceId", { length: 128 }).notNull(),
+  userType: mysqlEnum("userType", ["registered", "unlogged"]).notNull(),
+  pv: bigint("pv", { mode: "number" }).default(0).notNull(),
+  uv: bigint("uv", { mode: "number" }).default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type VisitStatsDaily = typeof visitStatsDaily.$inferSelect;
+export type InsertVisitStatsDaily = typeof visitStatsDaily.$inferInsert;
+
+/**
+ * 灵感龙虾方案 - 用户领养实例主表
+ */
+export const clawAdoptions = mysqlTable("claw_adoptions", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  adoptId: varchar("adoptId", { length: 64 }).notNull().unique(),
+  agentId: varchar("agentId", { length: 128 }).notNull().unique(),
+  status: mysqlEnum("status", ["creating", "active", "expiring", "recycled", "failed"]).default("creating").notNull(),
+  permissionProfile: varchar("permissionProfile", { length: 32 }).default("plus").notNull(),
+  ttlDays: int("ttlDays").default(7).notNull(),
+  entryUrl: varchar("entryUrl", { length: 512 }).notNull(),
+  expiresAt: timestamp("expiresAt"), // nullable: null表示永久
+  lastError: text("lastError"),
+  lastActivityAt: timestamp("lastActivityAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ClawAdoption = typeof clawAdoptions.$inferSelect;
+export type InsertClawAdoption = typeof clawAdoptions.$inferInsert;
+
+/**
+ * 灵感龙虾方案 - 领养生命周期事件日志
+ */
+export const clawAdoptionEvents = mysqlTable("claw_adoption_events", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  adoptionId: bigint("adoptionId", { mode: "number" }).notNull(),
+  eventType: mysqlEnum("eventType", [
+    "create_requested",
+    "create_succeeded",
+    "create_failed",
+    "profile_updated",
+    "ttl_extended",
+    "recycle_requested",
+    "recycle_succeeded",
+    "recycle_failed",
+  ]).notNull(),
+  operatorType: mysqlEnum("operatorType", ["system", "user", "admin"]).default("system").notNull(),
+  operatorId: int("operatorId"),
+  detail: text("detail"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ClawAdoptionEvent = typeof clawAdoptionEvents.$inferSelect;
+export type InsertClawAdoptionEvent = typeof clawAdoptionEvents.$inferInsert;
+
+/**
+ * 灵虾个性化设置（灵魂/记忆/上下文）
+ */
+export const clawProfileSettings = mysqlTable("claw_profile_settings", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  adoptionId: bigint("adoptionId", { mode: "number" }).notNull().unique(),
+  displayName: varchar("displayName", { length: 100 }),
+  personaPrompt: text("personaPrompt"),
+  stylePreset: mysqlEnum("stylePreset", ["steady_research", "aggressive_trading", "education_advisor", "custom"]).default("steady_research").notNull(),
+  memoryEnabled: mysqlEnum("memoryEnabled", ["yes", "no"]).default("yes").notNull(),
+  memorySummary: text("memorySummary"),
+  contextTurns: int("contextTurns").default(20).notNull(),
+  model: varchar("model", { length: 128 }),
+  crossSessionContext: mysqlEnum("crossSessionContext", ["yes", "no"]).default("yes").notNull(),
+  updatedBy: int("updatedBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ClawProfileSetting = typeof clawProfileSettings.$inferSelect;
+export type InsertClawProfileSetting = typeof clawProfileSettings.$inferInsert;
+
+/**
+ * 灵虾组织协作 - 协作设置（每个 plus agent 可配置）
+ */
+export const clawCollabSettings = mysqlTable("claw_collab_settings", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  adoptionId: bigint("adoptionId", { mode: "number" }).notNull().unique(),
+  displayName: varchar("displayName", { length: 100 }),
+  headline: varchar("headline", { length: 200 }),
+  visibilityMode: mysqlEnum("visibilityMode", ["private", "org", "public"]).default("private").notNull(),
+  acceptDm: mysqlEnum("acceptDm", ["off", "org", "specified"]).default("off").notNull(),
+  acceptTask: mysqlEnum("acceptTask", ["off", "approval", "auto"]).default("off").notNull(),
+  allowedTaskTypes: text("allowedTaskTypes"),
+  sharingPolicy: mysqlEnum("sharingPolicy", ["result-only", "none"]).default("none").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ClawCollabSetting = typeof clawCollabSettings.$inferSelect;
+export type InsertClawCollabSetting = typeof clawCollabSettings.$inferInsert;
+
+/**
+ * 灵虾组织协作 - 协作请求（task delegation，非 session 直通）
+ */
+export const clawCollabRequests = mysqlTable("claw_collab_requests", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  requesterAdoptId: varchar("requesterAdoptId", { length: 64 }).notNull(),
+  targetAdoptId: varchar("targetAdoptId", { length: 64 }).notNull(),
+  requesterUserId: int("requesterUserId").notNull(),
+  targetUserId: int("targetUserId").notNull(),
+  taskType: varchar("taskType", { length: 64 }).default("general").notNull(),
+  taskSummary: text("taskSummary"),
+  inputPayload: text("inputPayload"),
+  status: mysqlEnum("status", ["pending", "approved", "rejected", "running", "completed", "failed", "cancelled", "partial_success", "waiting_input"]).default("pending").notNull(),
+  resultSummary: text("resultSummary"),
+  approvedAt: timestamp("approvedAt"),
+  completedAt: timestamp("completedAt"),
+  approvedBy: int("approvedBy"),
+  approvalMode: mysqlEnum("approvalMode", ["auto", "manual"]).default("manual").notNull(),
+  executionScope: text("executionScope"),
+  riskLevel: mysqlEnum("riskLevel", ["low", "medium", "high"]).default("low").notNull(),
+  resultMeta: text("resultMeta"),
+  constraintsApplied: text("constraintsApplied"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ClawCollabRequest = typeof clawCollabRequests.$inferSelect;
+export type InsertClawCollabRequest = typeof clawCollabRequests.$inferInsert;
+
+/**
+ * 工具执行审计表
+ * 每次 tool_call 都记录完整的路由+执行+结果链路
+ */
+
+
+/**
+ * 工具执行审计表
+ * 每次 tool_call 都记录完整的路由+执行+结果链路
+ */
+export const toolExecutionAudits = mysqlTable("tool_execution_audits", {
+  auditId:          varchar("audit_id", { length: 64 }).primaryKey(),
+  requestId:        varchar("request_id", { length: 64 }),
+  userId:           int("user_id"),
+  agentId:          varchar("agent_id", { length: 128 }),
+  profile:          mysqlEnum("profile", ["starter","plus","internal"]),
+  toolCallId:       varchar("tool_call_id", { length: 128 }).notNull(),
+  originalToolName: varchar("original_tool_name", { length: 64 }).notNull(),
+  routedToolName:   varchar("routed_tool_name", { length: 64 }).notNull(),
+  command:          text("command"),
+  args:             text("args"),
+  cwd:              varchar("cwd", { length: 256 }),
+  timeoutMs:        int("timeout_ms"),
+  policyDecision:   mysqlEnum("policy_decision", ["allow","deny","rewrite"]).notNull(),
+  denyReason:       varchar("deny_reason", { length: 64 }),
+  deniedReason:     text("denied_reason"),
+  executor:         mysqlEnum("executor", ["sandbox","native","none"]).notNull(),
+  exitCode:         int("exit_code"),
+  stdoutBytes:      int("stdout_bytes"),
+  stderrBytes:      int("stderr_bytes"),
+  truncated:        int("truncated").default(0),
+  durationMs:       int("duration_ms"),
+  createdAt:        timestamp("created_at").defaultNow().notNull(),
+});
+
+export type ToolExecutionAudit = typeof toolExecutionAudits.$inferSelect;
+export type InsertToolExecutionAudit = typeof toolExecutionAudits.$inferInsert;
+
+/**
+ * 业务 Agent 配置表（可配置的协作广场业务能力）
+ */
+export const businessAgents = mysqlTable("business_agents", {
+  id:            varchar("id", { length: 64 }).primaryKey(),
+  name:          varchar("name", { length: 128 }).notNull(),
+  description:   text("description"),
+  kind:          mysqlEnum("kind", ["local", "remote"]).notNull().default("remote"),
+  apiUrl:        varchar("api_url", { length: 512 }),
+  apiToken:      varchar("api_token", { length: 256 }),
+  remoteAgentId: varchar("remote_agent_id", { length: 128 }).default("main"),
+  localAgentId:  varchar("local_agent_id", { length: 128 }),
+  skills:        text("skills"),
+  icon:          varchar("icon", { length: 8 }).default("🤖"),
+  enabled:       int("enabled").notNull().default(1),
+  sortOrder:     int("sort_order").notNull().default(0),
+  expiresAt:     timestamp("expires_at"),
+  maxDailyRequests: int("max_daily_requests").notNull().default(0),
+  healthStatus:  mysqlEnum("health_status", ["healthy", "degraded", "offline", "unknown"]).notNull().default("unknown"),
+  lastHealthCheck: timestamp("last_health_check"),
+  allowedProfiles: varchar("allowed_profiles", { length: 128 }).default("plus,internal"),
+  tags:          varchar("tags", { length: 256 }).default(""),
+  createdAt:     timestamp("created_at").defaultNow().notNull(),
+  updatedAt:     timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type BusinessAgent = typeof businessAgents.$inferSelect;
+export type InsertBusinessAgent = typeof businessAgents.$inferInsert;
+
+// ── Agent 调用日志 ──
+export const agentCallLogs = mysqlTable("agent_call_logs", {
+  id:           int("id").autoincrement().primaryKey(),
+  agentId:      varchar("agent_id", { length: 64 }).notNull(),
+  userId:       int("user_id"),
+  adoptId:      varchar("adopt_id", { length: 64 }),
+  status:       mysqlEnum("status", ["success", "error", "timeout"]).notNull().default("success"),
+  durationMs:   int("duration_ms").default(0),
+  errorMessage: text("error_message"),
+  createdAt:    timestamp("created_at").defaultNow().notNull(),
+});
+
+export type AgentCallLog = typeof agentCallLogs.$inferSelect;
+
+// ── 技能市场 ──
+export const skillMarketplace = mysqlTable("skill_marketplace", {
+  id:            int("id").autoincrement().primaryKey(),
+  skillId:       varchar("skill_id", { length: 64 }).notNull(),
+  name:          varchar("name", { length: 128 }).notNull(),
+  description:   text("description"),
+  author:        varchar("author", { length: 128 }),
+  authorUserId:  int("author_user_id"),
+  version:       varchar("version", { length: 32 }).default("1.0.0"),
+  category:      mysqlEnum("category", ["finance", "dev", "data", "writing", "general"]).default("general"),
+  status:        mysqlEnum("status", ["pending", "approved", "rejected", "offline"]).default("pending").notNull(),
+  reviewNote:    text("review_note"),
+  downloadCount: int("download_count").notNull().default(0),
+  license:       varchar("license", { length: 64 }).default("MIT"),
+  packagePath:   varchar("package_path", { length: 512 }),
+  createdAt:     timestamp("created_at").defaultNow().notNull(),
+  updatedAt:     timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type SkillMarketItem = typeof skillMarketplace.$inferSelect;
+export type InsertSkillMarketItem = typeof skillMarketplace.$inferInsert;

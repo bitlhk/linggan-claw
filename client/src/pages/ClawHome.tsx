@@ -1,0 +1,435 @@
+/**
+ * ClawHome — 灵虾独立首页（路径模式）
+ * 风格：白色主题，与灵感官网一致
+ * 功能：Hero + 功能介绍 + 领养/进入
+ */
+
+import { useState } from "react";
+import { BrandIcon } from "@/components/BrandIcon";
+import { useLocation } from "wouter";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import {
+  Loader2, LogIn, LogOut, Settings, ArrowRight,
+  MessageCircle, Brain, Cpu, Zap, Shield, Network,
+} from "lucide-react";
+import { motion } from "framer-motion";
+import { toast } from "sonner";
+import { useBrand } from "@/lib/useBrand";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+
+// ── 动画变体 ──
+const fadeInUp = {
+  hidden: { opacity: 0, y: 24 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
+};
+const staggerContainer = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.1 } },
+};
+const scaleIn = {
+  hidden: { opacity: 0, scale: 0.8 },
+  visible: { opacity: 1, scale: 1, transition: { duration: 0.6, ease: "easeOut" } },
+};
+
+// ── 灵虾 SVG Logo 动画组件 ──
+function AnimatedLogo({ size = 120 }: { size?: number }) {
+  return (
+    <motion.svg
+      width={size}
+      height={size}
+      viewBox="0 0 128 128"
+      xmlns="http://www.w3.org/2000/svg"
+      initial="hidden"
+      animate="visible"
+    >
+      <defs>
+        <linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#ff5a5f" />
+          <stop offset="100%" stopColor="#e11d48" />
+        </linearGradient>
+      </defs>
+      {/* 背景方块 */}
+      <motion.rect
+        x="8" y="8" width="112" height="112" rx="24" fill="#fff5f5"
+        variants={{ hidden: { opacity: 0, scale: 0.5 }, visible: { opacity: 1, scale: 1, transition: { duration: 0.4 } } }}
+      />
+      {/* 身体弧线 */}
+      <motion.path
+        d="M34 78c0-16 12-28 30-28s30 12 30 28"
+        fill="none" stroke="url(#logo-g)" strokeWidth="10" strokeLinecap="round"
+        variants={{ hidden: { pathLength: 0 }, visible: { pathLength: 1, transition: { duration: 0.8, delay: 0.3 } } }}
+      />
+      {/* 左眼 */}
+      <motion.circle
+        cx="50" cy="52" r="6" fill="#111827"
+        variants={{ hidden: { opacity: 0, scale: 0 }, visible: { opacity: 1, scale: 1, transition: { duration: 0.3, delay: 0.8 } } }}
+      />
+      {/* 右眼 */}
+      <motion.circle
+        cx="78" cy="52" r="6" fill="#111827"
+        variants={{ hidden: { opacity: 0, scale: 0 }, visible: { opacity: 1, scale: 1, transition: { duration: 0.3, delay: 0.9 } } }}
+      />
+      {/* 微笑 */}
+      <motion.path
+        d="M44 90c6 6 14 9 20 9s14-3 20-9"
+        fill="none" stroke="#be123c" strokeWidth="6" strokeLinecap="round"
+        variants={{ hidden: { pathLength: 0 }, visible: { pathLength: 1, transition: { duration: 0.5, delay: 1.0 } } }}
+      />
+      {/* 左触角 */}
+      <motion.path
+        d="M22 38l12 8"
+        stroke="#fb7185" strokeWidth="6" strokeLinecap="round"
+        variants={{ hidden: { pathLength: 0, opacity: 0 }, visible: { pathLength: 1, opacity: 1, transition: { duration: 0.3, delay: 1.2 } } }}
+      />
+      {/* 右触角 */}
+      <motion.path
+        d="M106 38l-12 8"
+        stroke="#fb7185" strokeWidth="6" strokeLinecap="round"
+        variants={{ hidden: { pathLength: 0, opacity: 0 }, visible: { pathLength: 1, opacity: 1, transition: { duration: 0.3, delay: 1.3 } } }}
+      />
+    </motion.svg>
+  );
+}
+
+// ── 功能特性 ──
+const features = [
+  {
+    icon: MessageCircle,
+    title: "智能对话",
+    desc: "支持多轮对话、上下文记忆，理解你的需求并持续学习",
+  },
+  {
+    icon: Zap,
+    title: "技能扩展",
+    desc: "可安装和管理技能插件，按需扩展 Agent 的能力边界",
+  },
+  {
+    icon: Brain,
+    title: "长期记忆",
+    desc: "自动积累交互记忆，越用越懂你，打造个性化 AI 助手",
+  },
+  {
+    icon: Shield,
+    title: "安全沙箱",
+    desc: "代码执行在隔离容器中运行，确保安全可控",
+  },
+  {
+    icon: Cpu,
+    title: "多模型支持",
+    desc: "灵活切换底层大模型，选择最适合场景的 AI 引擎",
+  },
+  {
+    icon: Network,
+    title: "企业级部署",
+    desc: "支持私有化部署，数据不出内网，满足合规要求",
+  },
+];
+
+export default function ClawHome() {
+  const brand = useBrand();
+  const [, setLocation] = useLocation();
+  const { user, logout } = useAuth();
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionStep, setProvisionStep] = useState("");
+
+  const { data: clawMe, refetch: refetchClawMe, isLoading } = trpc.claw.me.useQuery(undefined, {
+    enabled: !!user,
+    retry: false,
+  });
+
+  const trpcUtils = trpc.useUtils();
+
+  const adoptMutation = trpc.claw.adopt.useMutation({
+    retry: false,
+    onError: (e: any) => toast.error(e?.message || "领养失败，请稍后重试"),
+  });
+
+  const handleAdopt = async () => {
+    if (!user) {
+      setLocation("/login?redirect=/");
+      return;
+    }
+    try {
+      setProvisioning(true);
+      setProvisionStep("正在初始化专属实例…");
+
+      const result = await adoptMutation.mutateAsync();
+      const adoptId = result?.adoption?.adoptId;
+      if (!adoptId) throw new Error("未获取到实例信息");
+
+      const currentStatus = result?.adoption?.status;
+      if (currentStatus !== "active") {
+        const startedAt = Date.now();
+        let status = currentStatus;
+        while (Date.now() - startedAt < 60000) {
+          const elapsed = Date.now() - startedAt;
+          if (elapsed < 15000) setProvisionStep("正在创建实例身份与路由…");
+          else if (elapsed < 35000) setProvisionStep("正在注入默认能力与安全配置…");
+          else setProvisionStep("即将完成…");
+
+          await new Promise((r) => setTimeout(r, 1500));
+          const latest = await trpcUtils.claw.getByAdoptId.fetch({ adoptId });
+          status = latest?.status;
+          if (status === "active") break;
+          if (status === "failed") throw new Error("创建失败，请稍后重试");
+        }
+        if (status !== "active") throw new Error("创建时间较长，请刷新页面后重试");
+      }
+
+      toast.success(result.reused ? `已为你打开${brand.name}` : "领养成功！");
+      await refetchClawMe();
+      setLocation(`/claw/${adoptId}`);
+    } catch (error: any) {
+      toast.error(error?.message || "领养失败，请稍后重试");
+    } finally {
+      setProvisioning(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    window.location.reload();
+  };
+
+  const adoption = clawMe?.adoption;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50/80">
+      {/* ── Header ── */}
+      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-border/50">
+        <div className="container flex items-center justify-between h-14 px-6">
+          <div className="flex items-center gap-2.5">
+            <BrandIcon size={32} />
+            <span className="text-base font-bold text-gray-900">{brand.name}</span>
+            <span className="text-xs text-muted-foreground hidden sm:inline">AI Agent Platform</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {user && (user as any)?.role === "admin" && (
+              <Button variant="ghost" size="sm" onClick={() => setLocation("/admin")} className="text-muted-foreground">
+                <Settings className="w-4 h-4 mr-1.5" />
+                管理
+              </Button>
+            )}
+            {user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="gap-2">
+                    <Avatar className="w-6 h-6">
+                      <AvatarFallback className="text-xs bg-primary/10 text-primary">
+                        {((user as any)?.name || "U")[0].toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="hidden sm:inline">{(user as any)?.name || (user as any)?.email}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
+                    <LogOut className="w-4 h-4 mr-2" />
+                    退出登录
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button size="sm" onClick={() => setLocation("/login?redirect=/")} className="bg-primary hover:bg-primary/90 text-white">
+                <LogIn className="w-4 h-4 mr-1.5" />
+                登录
+              </Button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* ── Hero Section ── */}
+      <section className="relative pt-16 pb-12 overflow-hidden">
+        {/* 装饰背景 */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-20 left-1/4 w-72 h-72 bg-primary/5 rounded-full blur-3xl" />
+          <div className="absolute top-40 right-1/4 w-96 h-96 bg-rose-500/5 rounded-full blur-3xl" />
+        </div>
+
+        <div className="container px-6 relative">
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={staggerContainer}
+            className="flex flex-col items-center text-center"
+          >
+            {/* Logo 动画 */}
+            <motion.div variants={scaleIn} className="mb-6">
+              <AnimatedLogo size={120} />
+            </motion.div>
+
+            <motion.div variants={fadeInUp} className="mb-3">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-primary/10 rounded-full">
+                <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
+                <span className="text-xs font-medium text-primary">你的专属 AI Agent</span>
+              </div>
+            </motion.div>
+
+            <motion.h1 variants={fadeInUp} className="text-3xl md:text-5xl font-bold leading-tight mb-4">
+              <span className="text-gray-900">领养一只</span>
+              <span className="bg-gradient-to-r from-primary via-rose-500 to-primary bg-clip-text text-transparent">{brand.name}</span>
+            </motion.h1>
+
+            <motion.p variants={fadeInUp} className="text-base text-muted-foreground mb-2 max-w-lg">
+              具备对话、技能、记忆、安全沙箱的 AI Agent 助手
+            </motion.p>
+            <motion.p variants={fadeInUp} className="text-sm text-muted-foreground/70 mb-8">
+              Open-source &middot; Self-hosted &middot; Enterprise-ready
+            </motion.p>
+
+            {/* CTA 区域 */}
+            <motion.div variants={fadeInUp} className="w-full max-w-sm space-y-3">
+              {user && isLoading && (
+                <div className="flex items-center justify-center py-6">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+              )}
+
+              {/* 已有虾 → 进入 */}
+              {user && !isLoading && adoption && (
+                <Card className="border-border/50 bg-white/80 backdrop-blur-sm overflow-hidden">
+                  <div className="p-5">
+                    <div className="flex items-center gap-3 mb-4">
+                      <BrandIcon size={40} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-gray-900">我的{brand.name}</p>
+                        <p className="text-xs font-mono text-muted-foreground">{adoption.adoptId}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${adoption.status === "active" ? "bg-green-500 animate-pulse" : "bg-yellow-500"}`} />
+                        <span className={`text-xs font-medium ${adoption.status === "active" ? "text-green-600" : "text-yellow-600"}`}>
+                          {adoption.status === "active" ? "在线" : adoption.status}
+                        </span>
+                      </div>
+                    </div>
+                    <Button
+                      className="w-full bg-primary hover:bg-primary/90 text-white"
+                      onClick={() => setLocation(`/claw/${adoption.adoptId}`)}
+                    >
+                      进入控制台
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  </div>
+                </Card>
+              )}
+
+              {/* 没有虾 → 领养 */}
+              {user && !isLoading && !adoption && (
+                <Button
+                  size="lg"
+                  className="w-full bg-primary hover:bg-primary/90 text-white h-12 text-base"
+                  onClick={handleAdopt}
+                  disabled={provisioning}
+                >
+                  {provisioning ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      {provisionStep}
+                    </>
+                  ) : (
+                    <>
+                      一键领养
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </>
+                  )}
+                </Button>
+              )}
+
+              {/* 未登录 */}
+              {!user && (
+                <Button
+                  size="lg"
+                  className="w-full bg-primary hover:bg-primary/90 text-white h-12 text-base"
+                  onClick={() => setLocation("/login?redirect=/")}
+                >
+                  <LogIn className="w-4 h-4 mr-2" />
+                  登录开始
+                </Button>
+              )}
+            </motion.div>
+
+            {/* 装饰分隔 */}
+            <motion.div variants={fadeInUp} className="flex items-center gap-3 mt-10">
+              <div className="h-px w-16 bg-gradient-to-r from-transparent to-primary/30" />
+              <div className="flex items-center gap-1.5">
+                <Brain className="w-4 h-4 text-primary/50" />
+                <Cpu className="w-4 h-4 text-primary/40" />
+                <Network className="w-4 h-4 text-primary/30" />
+              </div>
+              <div className="h-px w-16 bg-gradient-to-l from-transparent to-primary/30" />
+            </motion.div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ── Features ── */}
+      <section className="py-16">
+        <div className="container px-6">
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-50px" }}
+            variants={staggerContainer}
+            className="text-center mb-10"
+          >
+            <motion.h2 variants={fadeInUp} className="text-2xl font-bold text-gray-900 mb-2">
+              能力一览
+            </motion.h2>
+            <motion.p variants={fadeInUp} className="text-sm text-muted-foreground">
+              {`每只${brand.name}都是一个独立的 AI Agent 实例`}
+            </motion.p>
+          </motion.div>
+
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-50px" }}
+            variants={staggerContainer}
+            className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl mx-auto"
+          >
+            {features.map((f) => (
+              <motion.div key={f.title} variants={fadeInUp}>
+                <Card className="h-full border-border/50 bg-white/80 backdrop-blur-sm p-5 hover:shadow-md hover:border-primary/20 transition-all duration-200">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-primary/10 to-rose-500/10 border border-primary/20 flex items-center justify-center shrink-0">
+                      <f.icon className="w-4.5 h-4.5 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 mb-1">{f.title}</h3>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{f.desc}</p>
+                    </div>
+                  </div>
+                </Card>
+              </motion.div>
+            ))}
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ── Footer ── */}
+      <footer className="py-6 border-t border-border/50">
+        <div className="container px-6 flex items-center justify-between text-xs text-muted-foreground">
+          <span>{`Powered by ${brand.nameEn}`}</span>
+          <a
+            href={brand.githubUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-primary transition-colors"
+          >
+            GitHub
+          </a>
+        </div>
+      </footer>
+    </div>
+  );
+}

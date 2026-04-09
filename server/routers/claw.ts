@@ -1,0 +1,1047 @@
+import { publicProcedure, protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import { z } from "zod";
+import { TRPCError } from "@trpc/server";
+import { nanoid } from "nanoid";
+import { execSync } from "child_process";
+import { existsSync } from "fs";
+import {
+  getCurrentClawByUserId,
+  getClawByAdoptId,
+  createClawAdoption,
+  updateClawAdoptionStatus,
+  listClawAdoptionsAdmin,
+  updateClawAdoptionAdmin,
+  batchUpdateClawAdoptionAdmin,
+  appendClawAdoptionEvent,
+  getClawProfileSettings,
+  upsertClawProfileSettings,
+  getSystemConfigValue,
+  getSystemConfigNumber,
+  upsertSystemConfig,
+  listSkillMarketItems,
+  listApprovedSkillMarketItems,
+  getSkillMarketItem,
+  insertSkillMarketItem,
+  updateSkillMarketItem,
+  deleteSkillMarketItem,
+  incrementSkillDownload,
+  touchClawActivity,
+} from "../db";
+import {
+  APP_ROOT,
+  OPENCLAW_HOME,
+  OPENCLAW_JSON_PATH,
+  clawDailyUsage,
+  getAvailableClawModelsFromConfig,
+  buildClawSessionKey,
+  assertClawOwnerOrThrow,
+  bumpClawSessionEpochBestEffort,
+  applyClawSessionModelViaGatewayCommand,
+  provisionLingganClawInstance,
+  writeClawExecAudit,
+} from "./helpers";
+
+export const clawRouter = router({
+    me: protectedProcedure.query(async ({ ctx }) => {
+      const userId = ctx.user!.id;
+      const current = await getCurrentClawByUserId(userId);
+      const normalized = current
+        ? {
+            ...current,
+            entryUrl: String((current as any).entryUrl || "")
+              .replace("http://", "https://")
+              .replace(".demo.linggantest.top", ".demo.linggan.top"),
+          }
+        : null;
+      return {
+        hasClaw: !!normalized,
+        adoption: normalized,
+      };
+    }),
+
+    getByAdoptId: publicProcedure
+      .input(z.object({ adoptId: z.string().min(1).max(64) }))
+      .query(async ({ input }) => {
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) return null;
+        const profile = await getClawProfileSettings(Number((claw as any).id || 0));
+        return {
+          adoptId: claw.adoptId,
+          status: claw.status,
+          entryUrl: claw.entryUrl,
+          expiresAt: claw.expiresAt,
+          displayName: String((profile as any)?.displayName || "灵虾"),
+          permissionProfile: String(claw.permissionProfile || "starter"),
+        };
+      }),
+
+    publicConfig: publicProcedure.query(async () => {
+      const visibility = (await getSystemConfigValue("claw_visibility", "internal")).trim() || "internal";
+      return { visibility: visibility === "internal" ? "internal" : "public" };
+    }),
+
+    getAvailableModels: publicProcedure.query(() => {
+      return getAvailableClawModelsFromConfig();
+    }),
+
+    switchModel: protectedProcedure
+      .input(z.object({ adoptId: z.string().min(1).max(64), modelId: z.string().min(1).max(120) }))
+      .mutation(async ({ input, ctx }) => {
+        const allowed = new Set(getAvailableClawModelsFromConfig().map((m) => m.id));
+        if (!allowed.has(input.modelId)) {
+          throw new Error("不支持的模型");
+        }
+
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new Error("灵虾实例不存在");
+        if (Number(claw.userId) !== Number(ctx.user!.id)) {
+          throw new Error("无权修改该灵虾设置");
+        }
+
+        // 1) 保存到业务设置（用于页面回显）
+        await upsertClawProfileSettings(Number(claw.id), {
+          model: input.modelId,
+          updatedBy: ctx.user!.id,
+        } as any);
+
+        // 2) 通过 OpenClaw 会话命令即时切换（不重启 gateway）
+        const sessionKey = buildClawSessionKey(String((claw as any).adoptId || input.adoptId), Number((claw as any).userId || 0));
+        const applied = await applyClawSessionModelViaGatewayCommand({
+          agentId: String((claw as any).agentId || ""),
+          sessionKey,
+          modelId: input.modelId,
+        });
+
+        return {
+          ok: true,
+          model: input.modelId,
+          applied: applied.ok,
+          statusCode: applied.statusCode || null,
+          applyError: applied.ok ? null : applied.error || applied.respText || null,
+        };
+      }),
+
+    adminList: adminProcedure
+      .input(z.object({ keyword: z.string().optional(), status: z.enum(["all", "creating", "active", "expiring", "recycled", "failed"]).optional() }).optional())
+      .query(async ({ input }) => {
+        const rows = await listClawAdoptionsAdmin({ keyword: input?.keyword, status: input?.status || "all", limit: 300 });
+        const summary = {
+          total: rows.length,
+          creating: rows.filter((r) => r.status === "creating").length,
+          active: rows.filter((r) => r.status === "active").length,
+          expiring: rows.filter((r) => r.status === "expiring").length,
+          recycled: rows.filter((r) => r.status === "recycled").length,
+          failed: rows.filter((r) => r.status === "failed").length,
+        };
+        return { summary, rows };
+      }),
+
+    adminUpdate: adminProcedure
+      .input(z.object({
+        id: z.number().int().positive(),
+        permissionProfile: z.enum(["starter", "plus", "internal"]).optional(),
+        ttlDays: z.number().int().min(1).max(365).optional(),
+        status: z.enum(["creating", "active", "expiring", "recycled", "failed"]).optional(),
+        expiresAt: z.string().datetime().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        await updateClawAdoptionAdmin(input.id, {
+          permissionProfile: input.permissionProfile as any,
+          ttlDays: input.ttlDays,
+          status: input.status as any,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : undefined,
+        });
+        return { ok: true };
+      }),
+
+    adminBatchUpdate: adminProcedure
+      .input(z.object({
+        ids: z.array(z.number().int().positive()).min(1),
+        permissionProfile: z.enum(["starter", "plus", "internal"]).optional(),
+        ttlDays: z.number().int().min(1).max(365).optional(),
+        status: z.enum(["creating", "active", "expiring", "recycled", "failed"]).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        await batchUpdateClawAdoptionAdmin(input.ids, {
+          permissionProfile: input.permissionProfile as any,
+          ttlDays: input.ttlDays,
+          status: input.status as any,
+        });
+        return { ok: true, count: input.ids.length };
+      }),
+
+    // ── 技能市场管理 ──
+
+    // 管理员列表（从 DB + 文件系统）
+    adminListMarketSkills: adminProcedure
+      .input(z.object({ status: z.string().optional() }).optional())
+      .query(async ({ input }) => {
+        return listSkillMarketItems(input?.status);
+      }),
+
+    // 管理员上传技能包（zip）— 通过 Express 路由处理，这里只做元数据入库
+    adminPublishSkill: adminProcedure
+      .input(z.object({
+        skillId: z.string().min(1).max(64),
+        name: z.string().min(1).max(128),
+        description: z.string().optional(),
+        author: z.string().optional(),
+        version: z.string().optional(),
+        category: z.enum(["finance", "dev", "data", "writing", "general"]).optional(),
+        license: z.string().optional(),
+        status: z.enum(["pending", "approved", "rejected", "offline"]).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const marketDir = `${process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root"}/.openclaw/skill-market`;
+        const status = input.status || "approved";
+        const id = await insertSkillMarketItem({
+          skillId: input.skillId,
+          name: input.name,
+          description: input.description || null,
+          author: input.author || "官方",
+          authorUserId: ctx.user!.id,
+          version: input.version || "1.0.0",
+          category: input.category || "general",
+          status,
+          license: input.license || "MIT",
+          packagePath: `${marketDir}/${status}/${input.skillId}`,
+        });
+        return { ok: true, id };
+      }),
+
+    // 审核（通过/拒绝/下架）— 同时移动文件目录
+    adminReviewSkill: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.enum(["approved", "rejected", "offline"]),
+        reviewNote: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const item = await getSkillMarketItem(input.id);
+        if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+        const marketDir = `${process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root"}/.openclaw/skill-market`;
+        const { execSync } = await import("child_process");
+        const oldDir = item.packagePath || `${marketDir}/${item.status}/${item.skillId}`;
+        const newDir = `${marketDir}/${input.status}/${item.skillId}`;
+        if (oldDir !== newDir) {
+          try {
+            execSync(`mkdir -p ${newDir} && cp -r ${oldDir}/* ${newDir}/ 2>/dev/null; rm -rf ${oldDir}`, { stdio: "ignore" });
+          } catch {}
+        }
+        await updateSkillMarketItem(input.id, {
+          status: input.status,
+          reviewNote: input.reviewNote || null,
+          packagePath: newDir,
+        });
+        return { ok: true };
+      }),
+
+    // 查看技能源码（SKILL.md + 脚本列表）
+    adminViewSkillSource: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const item = await getSkillMarketItem(input.id);
+        if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+        const { readFileSync, readdirSync, existsSync } = await import("fs");
+        const dir = item.packagePath || "";
+        let skillMd = "";
+        let scripts: string[] = [];
+        try { skillMd = readFileSync(`${dir}/SKILL.md`, "utf8"); } catch {}
+        try { if (existsSync(`${dir}/scripts`)) scripts = readdirSync(`${dir}/scripts`); } catch {}
+        return { skillMd, scripts, dir };
+      }),
+
+    // 删除
+    adminDeleteMarketSkill: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const item = await getSkillMarketItem(input.id);
+        if (item?.packagePath) {
+          const { execSync } = await import("child_process");
+          try { execSync(`rm -rf ${item.packagePath}`, { stdio: "ignore" }); } catch {}
+        }
+        await deleteSkillMarketItem(input.id);
+        return { ok: true };
+      }),
+
+    // 用户端浏览已上架技能
+    marketList: publicProcedure.query(async () => {
+      return listApprovedSkillMarketItems();
+    }),
+
+    // 用户安装（复制到 workspace/skills/）
+    marketInstall: protectedProcedure
+      .input(z.object({ marketId: z.number(), adoptId: z.string().min(1).max(64) }))
+      .mutation(async ({ input }) => {
+        const item = await getSkillMarketItem(input.marketId);
+        if (!item || item.status !== "approved") throw new TRPCError({ code: "NOT_FOUND", message: "技能不存在或未上架" });
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new TRPCError({ code: "NOT_FOUND", message: "实例不存在" });
+        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+        // 用 SKILL.md 中的 name 作为安装目录名
+        let installName = item.skillId;
+        try {
+          const { readFileSync: rfs } = await import("fs");
+          const md = rfs(`${item.packagePath}/SKILL.md`, "utf8");
+          const nm = md.match(/^name:\s*"?([^"\n]+)"?/m);
+          if (nm) installName = nm[1].trim();
+        } catch {}
+        const targetDir = `${remoteHome}/.openclaw/workspace-${claw.agentId}/skills/${installName}`;
+        const { execSync } = await import("child_process");
+        try {
+          execSync(`mkdir -p ${targetDir} && cp -r ${item.packagePath}/* ${targetDir}/`, { stdio: "ignore" });
+        } catch (e: any) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "安装失败: " + e.message });
+        }
+        await incrementSkillDownload(input.marketId);
+        return { ok: true, skillId: item.skillId, name: item.name };
+      }),
+
+        adminListSharedSkills: adminProcedure.query(async () => {
+      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+      const sharedDir = `${remoteHome}/.openclaw/skills-shared`;
+      const { readdirSync, readFileSync, existsSync, statSync } = await import("fs");
+      const skills: Array<{ id: string; name: string; description: string; hasScripts: boolean }> = [];
+      try {
+        const dirs = readdirSync(sharedDir).filter(d => statSync(`${sharedDir}/${d}`).isDirectory());
+        for (const id of dirs) {
+          let name = id;
+          let description = "";
+          let hasScripts = existsSync(`${sharedDir}/${id}/scripts`);
+          try {
+            const md = readFileSync(`${sharedDir}/${id}/SKILL.md`, "utf8");
+            const fm = md.match(/^---\n([\s\S]*?)\n---/);
+            if (fm) {
+              const nameMatch = fm[1].match(/^name:\s*"?([^"\n]+)"?/m);
+              const descMatch = fm[1].match(/^description:\s*"?([^"\n]+)"?/m);
+              if (nameMatch) name = nameMatch[1].trim();
+              if (descMatch) description = descMatch[1].trim().slice(0, 200);
+            }
+          } catch {}
+          skills.push({ id, name, description, hasScripts });
+        }
+      } catch {}
+      return skills;
+    }),
+
+        adminGetConfig: adminProcedure.query(async () => {
+      const visibility = (await getSystemConfigValue("claw_visibility", "internal")).trim() || "internal";
+      const defaultTtlDays = await getSystemConfigNumber("claw_default_ttl_days", 15);
+      const defaultProfile = (await getSystemConfigValue("claw_default_profile", "plus")).trim() || "plus";
+      return {
+        visibility: visibility === "internal" ? "internal" : "public",
+        defaultTtlDays,
+        defaultProfile: defaultProfile as "starter" | "plus" | "internal",
+      };
+    }),
+
+    adminSetConfig: adminProcedure
+      .input(z.object({
+        visibility: z.enum(["public", "internal"]).optional(),
+        defaultTtlDays: z.number().int().min(1).max(365).optional(),
+        defaultProfile: z.enum(["starter", "plus", "internal"]).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (input.visibility) {
+          await upsertSystemConfig(
+            { key: "claw_visibility", value: input.visibility, description: "灵虾可见性：public/internal" },
+            ctx.user!.id
+          );
+        }
+        if (typeof input.defaultTtlDays === "number") {
+          await upsertSystemConfig(
+            { key: "claw_default_ttl_days", value: String(input.defaultTtlDays), description: "灵虾默认有效期（天）" },
+            ctx.user!.id
+          );
+        }
+        if (input.defaultProfile) {
+          await upsertSystemConfig(
+            { key: "claw_default_profile", value: input.defaultProfile, description: "新领养灵虾默认套餐：starter/plus/internal" },
+            ctx.user!.id
+          );
+        }
+        return { ok: true };
+      }),
+
+    // ── 品牌配置 ──
+    adminGetBrand: adminProcedure.query(async () => {
+      const { getBrandConfig } = await import("../_core/brand");
+      return await getBrandConfig();
+    }),
+
+    adminSetBrand: adminProcedure
+      .input(z.object({
+        name: z.string().min(1).max(30).optional(),
+        nameEn: z.string().min(1).max(50).optional(),
+        platform: z.string().min(1).max(30).optional(),
+        platformEn: z.string().min(1).max(50).optional(),
+        slogan: z.string().max(100).optional(),
+        accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+        logo: z.string().max(200).optional(),
+        favicon: z.string().max(200).optional(),
+        systemPrompt: z.string().max(500).optional(),
+        agentIdentity: z.string().max(500).optional(),
+        githubUrl: z.string().max(200).optional(),
+        pageTitle: z.string().max(100).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { BRAND_DB_KEYS } = await import("@shared/brand");
+        for (const [field, dbKey] of Object.entries(BRAND_DB_KEYS)) {
+          const val = (input as any)[field];
+          if (val !== undefined && val !== null) {
+            await upsertSystemConfig(
+              { key: dbKey, value: String(val), description: `品牌配置: ${field}` },
+              ctx.user!.id
+            );
+          }
+        }
+        // 刷新缓存
+        const { invalidateBrandCache } = await import("../_core/brand");
+        invalidateBrandCache();
+        return { ok: true };
+      }),
+
+    getSettings: protectedProcedure
+      .input(z.object({ adoptId: z.string().min(1).max(64) }))
+      .query(async ({ input }) => {
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new Error("灵虾实例不存在");
+        const settings = await getClawProfileSettings(Number(claw.id));
+        // 读取模型覆盖（存在 claw-model-overrides.json）
+        let modelOverride = "";
+        try {
+          const { readFileSync } = await import("fs");
+          const overrides = JSON.parse(readFileSync(`${APP_ROOT}/data/claw-model-overrides.json`, "utf8") || "{}");
+          modelOverride = overrides[input.adoptId] || "";
+        } catch {}
+        const base = settings || {
+          adoptionId: Number(claw.id),
+          displayName: "灵虾",
+          personaPrompt: "",
+          stylePreset: "steady_research",
+          memoryEnabled: "yes",
+          memorySummary: "",
+          contextTurns: 20,
+          crossSessionContext: "yes",
+        };
+        return { ...base, model: modelOverride };
+      }),
+
+    updateSettings: protectedProcedure
+      .input(
+        z.object({
+          adoptId: z.string().min(1).max(64),
+          displayName: z.string().max(100).optional(),
+          personaPrompt: z.string().max(5000).optional(),
+          stylePreset: z.enum(["steady_research", "aggressive_trading", "education_advisor", "custom"]).optional(),
+          memoryEnabled: z.enum(["yes", "no"]).optional(),
+          memorySummary: z.string().max(5000).optional(),
+          contextTurns: z.number().int().min(5).max(100).optional(),
+          crossSessionContext: z.enum(["yes", "no"]).optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new Error("灵虾实例不存在");
+        if (Number(claw.userId) !== Number(ctx.user!.id)) {
+          throw new Error("无权修改该灵虾设置");
+        }
+
+        const { adoptId, ...patch } = input;
+        const updated = await upsertClawProfileSettings(Number(claw.id), {
+          ...patch,
+          updatedBy: ctx.user!.id,
+        });
+
+        return { success: true, settings: updated };
+      }),
+
+    adopt: protectedProcedure
+      .input(
+        z
+          .object({
+            permissionProfile: z.enum(["starter", "plus", "internal"]).optional(),
+            ttlDays: z.number().int().min(1).max(30).optional(),
+          })
+          .optional()
+      )
+      .mutation(async ({ ctx, input }) => {
+        const userId = ctx.user!.id;
+
+        // 可见性复用 Demo 权限模型：internal 仅 all 用户可领养
+        const clawVisibility = (await getSystemConfigValue("claw_visibility", "internal")).trim() || "internal";
+        const userAccessLevel = ((ctx.user as any)?.accessLevel || "public_only") as "public_only" | "all";
+        if (clawVisibility === "internal" && userAccessLevel !== "all") {
+          throw new Error("当前灵虾为内部访问，仅内部权限用户可领养");
+        }
+
+        // 幂等：已有活跃/创建中实例则直接返回
+        const existing = await getCurrentClawByUserId(userId);
+        if (existing) {
+          const normalizedExisting = {
+            ...existing,
+            entryUrl: String((existing as any).entryUrl || "")
+              .replace("http://", "https://")
+              .replace(".demo.linggantest.top", ".demo.linggan.top"),
+          };
+          return {
+            success: true,
+            reused: true,
+            adoption: normalizedExisting,
+          };
+        }
+
+        const defaultProfile = (await getSystemConfigValue("claw_default_profile", "plus")).trim() || "plus";
+        const profile = input?.permissionProfile || defaultProfile;
+        const defaultTtl = await getSystemConfigNumber("claw_default_ttl_days", 15);
+        const ttlDays = input?.ttlDays ?? defaultTtl;
+        // 测试主页统一直达生产 demo 域名，避免落到 linggantest 域
+        const baseDomain = process.env.DEMO_ROUTE_DOMAIN || "demo.linggan.top";
+        const entryScheme = (await getSystemConfigValue("claw_demo_entry_scheme", "https")).trim() || "https";
+
+        const adoptId = `lgc-${nanoid(10).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10)}`;
+        const agentId = `trial_${adoptId}`;
+        const entryUrl = `${entryScheme}://${adoptId}.${baseDomain}`;
+        const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
+
+        const adoptionId = await createClawAdoption({
+          userId,
+          adoptId,
+          agentId,
+          status: "creating",
+          permissionProfile: profile,
+          ttlDays,
+          entryUrl,
+          expiresAt,
+        });
+
+        await appendClawAdoptionEvent({
+          adoptionId,
+          eventType: "create_requested",
+          operatorType: "user",
+          operatorId: userId,
+          detail: JSON.stringify({ profile, ttlDays, source: "web" }),
+        });
+
+        try {
+          // 编排创建实例（mock/local-script）
+          const provision = provisionLingganClawInstance({
+            adoptId,
+            agentId,
+            userId,
+            permissionProfile: profile,
+            ttlDays,
+          });
+
+          await updateClawAdoptionStatus(adoptionId, "active");
+
+          await appendClawAdoptionEvent({
+            adoptionId,
+            eventType: "create_succeeded",
+            operatorType: "system",
+            operatorId: null,
+            detail: JSON.stringify(provision),
+          });
+
+          const latest = await getCurrentClawByUserId(userId);
+          return {
+            success: true,
+            reused: false,
+            adoption: latest,
+          };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          await updateClawAdoptionStatus(adoptionId, "failed", { lastError: msg });
+          await appendClawAdoptionEvent({
+            adoptionId,
+            eventType: "create_failed",
+            operatorType: "system",
+            operatorId: null,
+            detail: msg,
+          });
+          throw new Error(`LingganClaw 领养失败：${msg}`);
+        }
+      }),
+
+    chat: protectedProcedure
+      .input(
+        z.object({
+          adoptId: z.string().min(1).max(64),
+          message: z.string().min(1).max(4000),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const startedAt = Date.now();
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new Error("灵虾实例不存在");
+
+        // ── 每日对话额度检查 ──
+        const profile = String(claw.permissionProfile || "starter");
+        if (profile === "starter") {
+          const dailyLimit = Number(process.env.CLAW_STARTER_DAILY_LIMIT || 50);
+          const count = clawDailyUsage.increment(input.adoptId);
+          if (count > dailyLimit) {
+            throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `今日对话已达上限（${dailyLimit}轮），升级 Plus 可解锁更多` });
+          }
+        }
+
+        // ── touch 活跃时间（best-effort）──
+        touchClawActivity(input.adoptId);
+
+        const chatMode = (process.env.CLAW_CHAT_MODE || "mock").trim();
+
+        if (chatMode === "local-openclaw" || chatMode === "remote-openclaw") {
+          const openclawHome = process.env.CLAW_OPENCLAW_HOME || process.env.OPENCLAW_HOME || "";
+          const remoteOpenclawHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root/.openclaw";
+          const timeoutSec = Number(process.env.CLAW_CHAT_TIMEOUT_SECONDS || 90);
+          // 安全转义：清理 shell 特殊字符，防止命令注入
+          const escapedMsg = input.message
+            .replace(/\\/g, "\\\\")
+            .replace(/"/g, '\\"')
+            .replace(/`/g, "\\`")
+            .replace(/\$/g, "\\$")
+            .replace(/\r/g, "")
+            .slice(0, 4000)
+
+          const remoteHost = process.env.CLAW_REMOTE_HOST || "";
+          const remoteUser = process.env.CLAW_REMOTE_USER || "root";
+          const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
+          const useRemote = chatMode === "remote-openclaw" || !!remoteHost;
+
+          const runAgentOnce = () => {
+            if (useRemote) {
+              if (!remoteHost || !remotePassword) {
+                throw new Error("remote-openclaw mode requires CLAW_REMOTE_HOST and CLAW_REMOTE_PASSWORD");
+              }
+              const remoteCmd = [
+                `OPENCLAW_HOME=\"${remoteOpenclawHome}\"`,
+                "openclaw agent",
+                `--agent \"${claw.agentId}\"`,
+                `--message \"${escapedMsg}\"`,
+                "--thinking off",
+                "--json",
+                `--timeout ${timeoutSec}`,
+              ].join(" ");
+
+              const cmd = `sshpass -p '${remotePassword.replace(/'/g, "'\\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${remoteUser}@${remoteHost} \"${remoteCmd}\"`;
+              return execSync(cmd, {
+                cwd: process.cwd(),
+                env: process.env,
+                stdio: ["ignore", "pipe", "pipe"],
+                encoding: "utf8",
+              }).trim();
+            }
+
+            const cmd = [
+              openclawHome ? `OPENCLAW_HOME=\"${openclawHome}\"` : "",
+              "openclaw agent",
+              `--agent \"${claw.agentId}\"`,
+              `--message \"${escapedMsg}\"`,
+              "--json",
+              `--timeout ${timeoutSec}`,
+            ]
+              .filter(Boolean)
+              .join(" ");
+
+            return execSync(cmd, {
+              cwd: process.cwd(),
+              env: process.env,
+              stdio: ["ignore", "pipe", "pipe"],
+              encoding: "utf8",
+            }).trim();
+          };
+
+          try {
+            let out = "";
+            try {
+              out = runAgentOnce();
+            } catch (firstErr: any) {
+              const firstMsg = firstErr?.stderr?.toString?.() || firstErr?.message || String(firstErr);
+              if (String(firstMsg).includes("Unknown agent id")) {
+                // 懒创建：老记录可能是 mock 阶段生成，首次聊天时补建 agent
+                if (useRemote) {
+                  const addCmd = [
+                    `OPENCLAW_HOME=\"${remoteOpenclawHome}\"`,
+                    "openclaw agents add",
+                    `\"${claw.agentId}\"`,
+                    `--workspace \"${OPENCLAW_HOME}/workspace-lingganclaw/${claw.agentId}\"`,
+                    "--non-interactive",
+                  ].join(" ");
+                  const sshCmd = `sshpass -p '${remotePassword.replace(/'/g, "'\\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${remoteUser}@${remoteHost} \"${addCmd}\"`;
+                  execSync(sshCmd, {
+                    cwd: process.cwd(),
+                    env: process.env,
+                    stdio: ["ignore", "pipe", "pipe"],
+                    encoding: "utf8",
+                  });
+                } else {
+                  provisionLingganClawInstance({
+                    adoptId: input.adoptId,
+                    agentId: claw.agentId,
+                    userId: Number(claw.userId),
+                    permissionProfile: (claw.permissionProfile as any) || "starter",
+                    ttlDays: Number(claw.ttlDays || 7),
+                  });
+                }
+                out = runAgentOnce();
+              } else {
+                throw firstErr;
+              }
+            }
+
+            let parsed: any = null;
+            try {
+              parsed = out ? JSON.parse(out) : null;
+            } catch {
+              parsed = { raw: out };
+            }
+
+            const reply =
+              parsed?.result?.payloads?.[0]?.text ||
+              parsed?.result?.payload?.text ||
+              parsed?.response?.text ||
+              parsed?.response ||
+              parsed?.reply ||
+              parsed?.text ||
+              parsed?.raw ||
+              "（已调用 OpenClaw，但未解析到回复文本）";
+
+            writeClawExecAudit({
+              adoptId: input.adoptId,
+              agentId: String((claw as any).agentId || ""),
+              userId: Number((claw as any).userId || 0),
+              permissionProfile: String((claw as any).permissionProfile || "starter"),
+              message: input.message,
+              ok: true,
+              durationMs: Date.now() - startedAt,
+              meta: parsed?.meta || null,
+            });
+
+            return {
+              ok: true,
+              adoptId: input.adoptId,
+              reply: String(reply),
+              ts: Date.now(),
+              mode: chatMode,
+            };
+          } catch (error: any) {
+            const msg = error?.stderr?.toString?.() || error?.message || String(error);
+            writeClawExecAudit({
+              adoptId: input.adoptId,
+              agentId: String((claw as any).agentId || ""),
+              userId: Number((claw as any).userId || 0),
+              permissionProfile: String((claw as any).permissionProfile || "starter"),
+              message: input.message,
+              ok: false,
+              durationMs: Date.now() - startedAt,
+              error: msg,
+            });
+            throw new Error(`灵虾对话引擎调用失败：${msg}`);
+          }
+        }
+
+        // 默认 mock
+        const reply = `🦞 灵虾已收到：${input.message}\n\n（对话引擎接入中，下一步将切到真实 OpenClaw 会话）`;
+        return {
+          ok: true,
+          adoptId: input.adoptId,
+          reply,
+          ts: Date.now(),
+          mode: "mock",
+        };
+      }),
+
+    // ── 技能管理 ──────────────────────────────────────────────
+    // ── 技能管理（三层架构）────────────────────────────────────
+    // Layer1: openclaw 系统内置  /usr/lib/node_modules/openclaw/skills/
+    // Layer2: 灵感公共金融技能  /root/.openclaw/skills-shared/
+    // Layer3: 子虾私有技能      /root/.openclaw/workspace-lingganclaw/{agentId}/skills/
+    listSkills: publicProcedure
+      .input(z.object({ adoptId: z.string().min(1).max(64) }))
+      .query(async ({ input }) => {
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new Error("灵虾实例不存在");
+
+        const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
+        const remoteUser = process.env.CLAW_REMOTE_USER || "root";
+        const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
+        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+        const userSkillsDir = `${remoteHome}/.openclaw/workspace-${claw.agentId}/skills`;
+        const sharedSkillsDir = `${remoteHome}/.openclaw/skills-shared`;
+        const systemSkillsDir = `/usr/lib/node_modules/openclaw/skills`;
+        const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
+
+        const runRemote = (cmd: string) => {
+          if (useRemote) {
+            return execSync(`sshpass -p '${remotePassword.replace(/'/g, "'\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 ${remoteUser}@${remoteHost} "${cmd}"`, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] }).trim();
+          }
+          return execSync(cmd, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] }).trim();
+        };
+
+        const SHARED_META: Record<string, { label: string; desc: string; emoji: string }> = {
+          "stock-query":      { label: "股票行情", desc: "查询A股/港股/美股实时行情", emoji: "📈" },
+          "finance-news":     { label: "金融资讯", desc: "A股市场动态与宏观政策", emoji: "📰" },
+          "research-report":  { label: "研报分析", desc: "解读研究报告与财务数据", emoji: "🔬" },
+          "quant-lite":       { label: "量化分析", desc: "技术指标计算与趋势判断", emoji: "📊" },
+        };
+
+        const SYSTEM_META: Record<string, { label: string; desc: string; emoji: string }> = {
+          "skill-creator": { label: "技能创作", desc: "帮你设计新 OpenClaw 技能", emoji: "🛠" },
+          "weather": { label: "天气查询", desc: "查询任意城市实时天气", emoji: "🌤" },
+        };
+
+        const lsLines = (cmd: string) => {
+          try {
+            const out = runRemote(cmd);
+            return out ? out.split("\n").map(s => s.trim()).filter(Boolean) : [];
+          } catch {
+            return [];
+          }
+        };
+
+        // discovery: system/shared/private 三层统一发现
+        const systemIds = lsLines(`ls ${systemSkillsDir} 2>/dev/null || echo ""`);
+        const sharedIds = lsLines(`ls ${sharedSkillsDir} 2>/dev/null || echo ""`);
+        const privateIdsRaw = lsLines(`cd ${userSkillsDir} 2>/dev/null && find . -maxdepth 1 -not -type l -mindepth 1 -printf '%f\n' | sort || echo ""`);
+        const activeSkills = lsLines(`ls ${userSkillsDir} 2>/dev/null || echo ""`);
+
+        const privateIds = privateIdsRaw.filter(id => !sharedIds.includes(id) && !systemIds.includes(id));
+
+        // only show skills defined in SYSTEM_META (deps satisfied on this host)
+        const system = systemIds.filter(id => id in SYSTEM_META).map((id) => {
+          const active = activeSkills.includes(id);
+          return {
+            id,
+            label: SYSTEM_META[id]?.label || id,
+            desc: SYSTEM_META[id]?.desc || "系统技能",
+            emoji: SYSTEM_META[id]?.emoji || "🧩",
+            source: "system" as const,
+            scope: "system" as const,
+            sourcePath: `${systemSkillsDir}/${id}`,
+            visible: true,
+            runnable: active,
+            reason: active ? "" : "not_mounted",
+            active,
+          };
+        });
+
+        const shared = sharedIds.map((id) => {
+          const active = activeSkills.includes(id);
+          return {
+            id,
+            label: SHARED_META[id]?.label || id,
+            desc: SHARED_META[id]?.desc || "公共金融技能",
+            emoji: SHARED_META[id]?.emoji || "💹",
+            source: "shared" as const,
+            scope: "shared" as const,
+            sourcePath: `${sharedSkillsDir}/${id}`,
+            visible: true,
+            runnable: active,
+            reason: active ? "" : "not_mounted",
+            active,
+          };
+        });
+
+        const privateSkills = privateIds.map((id) => ({
+          id,
+          label: id,
+          desc: "自定义技能",
+          emoji: "⚡",
+          source: "private" as const,
+          scope: "private" as const,
+          sourcePath: `${userSkillsDir}/${id}`,
+          ownerAgentId: String(claw.agentId || ""),
+          visible: true,
+          runnable: true,
+          reason: "",
+          active: true,
+        }));
+
+        return {
+          system,
+          shared,
+          private: privateSkills,
+          summary: {
+            discovered: system.length + shared.length + privateSkills.length,
+            runnable: system.filter(s => s.runnable).length + shared.filter(s => s.runnable).length + privateSkills.filter(s => s.runnable).length,
+          },
+        };
+      }),
+
+    toggleSkill: protectedProcedure
+      .input(z.object({
+        adoptId: z.string().min(1).max(64),
+        skillId: z.string().min(1).max(64),
+        enable: z.boolean(),
+        source: z.enum(["system", "shared"]),  // 只有 system/shared 需要 toggle；private 永远激活
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new Error("灵虾实例不存在");
+        if (String(claw.userId) !== String(ctx.user!.id)) throw new Error("无权操作");
+
+        const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
+        const remoteUser = process.env.CLAW_REMOTE_USER || "root";
+        const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
+        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+        const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
+
+        // 与个人技能链路对齐：运行时优先 trial_{adoptId}
+        const trialAgentId = `trial_${input.adoptId}`;
+        const trialAgentDir = `${remoteHome}/.openclaw/agents/${trialAgentId}`;
+        const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : String(claw.agentId || "");
+
+        const userSkillLink = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/skills/${input.skillId}`;
+        // 源目录：system 来自 openclaw 内置，shared 来自公共库
+        const srcDir = input.source === "system"
+          ? `/usr/lib/node_modules/openclaw/skills/${input.skillId}`
+          : `${remoteHome}/.openclaw/skills-shared/${input.skillId}`;
+
+        const runCmd = (cmd: string) => {
+          if (useRemote) {
+            execSync(`sshpass -p '${remotePassword.replace(/'/g, "'\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 ${remoteUser}@${remoteHost} "${cmd}"`, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
+          } else {
+            execSync(cmd, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
+          }
+        };
+
+        const userSkillsBase = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}/skills`;
+        if (input.enable) {
+          // 使用软链接指向共享源目录，改技能时子虾自动获得最新版本，无需重新 toggle
+          runCmd(`mkdir -p "${userSkillsBase}" && rm -rf "${userSkillLink}" 2>/dev/null || true && ln -sfn "${srcDir}" "${userSkillLink}"`);
+        } else {
+          // 删除软链接（不影响源目录）
+          runCmd(`rm -f "${userSkillLink}" 2>/dev/null || true`);
+        }
+
+        // 与个人技能安装链路对齐：技能变更后 bump epoch，触发聊天使用新技能快照
+        bumpClawSessionEpochBestEffort(String(input.adoptId));
+
+        return { ok: true, skillId: input.skillId, enabled: input.enable };
+      }),
+
+    // 上传/创建私有技能
+    upsertPrivateSkill: protectedProcedure
+      .input(z.object({
+        adoptId: z.string().min(1).max(64),
+        skillId: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/, "技能ID只能包含小写字母、数字和连字符"),
+        skillMd: z.string().min(10).max(50000),  // SKILL.md 内容
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new Error("灵虾实例不存在");
+        if (String(claw.userId) !== String(ctx.user!.id)) throw new Error("无权操作");
+
+        const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
+        const remoteUser = process.env.CLAW_REMOTE_USER || "root";
+        const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
+        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+        const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
+
+        const skillDir = `${remoteHome}/.openclaw/workspace-${claw.agentId}/skills/${input.skillId}`;
+        const escaped = input.skillMd.replace(/\\/g, "\\\\").replace(/'/g, "'\\''").replace(/`/g, "\\`");
+
+        if (useRemote) {
+          const cmd = `mkdir -p "${skillDir}" && printf '%s' '${escaped}' > "${skillDir}/SKILL.md"`;
+          execSync(`sshpass -p '${remotePassword.replace(/'/g, "'\\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 ${remoteUser}@${remoteHost} "${cmd}"`, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
+        } else {
+          const fs = await import("fs");
+          fs.mkdirSync(skillDir, { recursive: true });
+          fs.writeFileSync(`${skillDir}/SKILL.md`, input.skillMd, "utf8");
+        }
+        return { ok: true, skillId: input.skillId };
+      }),
+
+    // 删除私有技能
+    deletePrivateSkill: protectedProcedure
+      .input(z.object({
+        adoptId: z.string().min(1).max(64),
+        skillId: z.string().min(1).max(64),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new Error("灵虾实例不存在");
+        if (String(claw.userId) !== String(ctx.user!.id)) throw new Error("无权操作");
+
+        const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
+        const remoteUser = process.env.CLAW_REMOTE_USER || "root";
+        const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
+        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+        const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
+
+        const skillDir = `${remoteHome}/.openclaw/workspace-${claw.agentId}/skills/${input.skillId}`;
+        if (useRemote) {
+          execSync(`sshpass -p '${remotePassword.replace(/'/g, "'\\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 ${remoteUser}@${remoteHost} "rm -rf '${skillDir}' 2>/dev/null || true"`, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
+        } else {
+          const fs = await import("fs");
+          fs.rmSync(skillDir, { recursive: true, force: true });
+        }
+        return { ok: true };
+      }),
+
+    // ── 记忆 读/写 ────────────────────────────────────────────
+    getMemory: protectedProcedure
+      .input(z.object({ adoptId: z.string().min(1).max(64) }))
+      .query(async ({ input }) => {
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new Error("灵虾实例不存在");
+
+        const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
+        const remoteUser = process.env.CLAW_REMOTE_USER || "root";
+        const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
+        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+        const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
+        const memoryPath = `${remoteHome}/.openclaw/workspace-lingganclaw/${claw.agentId}/MEMORY.md`;
+
+        try {
+          let content: string;
+          if (useRemote) {
+            const cmd = `sshpass -p '${remotePassword.replace(/'/g, "'\\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 ${remoteUser}@${remoteHost} "cat '${memoryPath}' 2>/dev/null || echo ''"`;
+            content = execSync(cmd, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
+          } else {
+            content = execSync(`cat '${memoryPath}' 2>/dev/null || echo ""`, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
+          }
+          return { content: content.trim() };
+        } catch {
+          return { content: "" };
+        }
+      }),
+
+    updateMemory: protectedProcedure
+      .input(z.object({
+        adoptId: z.string().min(1).max(64),
+        content: z.string().max(20000),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const claw = await getClawByAdoptId(input.adoptId);
+        if (!claw) throw new Error("灵虾实例不存在");
+        if (String(claw.userId) !== String(ctx.user!.id)) throw new Error("无权操作");
+
+        const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
+        const remoteUser = process.env.CLAW_REMOTE_USER || "root";
+        const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
+        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+        const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
+        const memoryPath = `${remoteHome}/.openclaw/workspace-lingganclaw/${claw.agentId}/MEMORY.md`;
+        const escaped = input.content.replace(/'/g, "'\\''");
+
+        if (useRemote) {
+          const cmd = `sshpass -p '${remotePassword.replace(/'/g, "'\\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 ${remoteUser}@${remoteHost} "mkdir -p '$(dirname '${memoryPath}')' && cat > '${memoryPath}' << 'MEMEOF'\n${input.content}\nMEMEOF"`;
+          execSync(cmd, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
+        } else {
+          const fs = await import("fs");
+          fs.writeFileSync(memoryPath, input.content, "utf8");
+        }
+        return { ok: true };
+      }),
+
+    // ── 会话历史（localStorage 为主，DB 备用）─────────────────
+    // 前端用 localStorage，此接口供未来 DB 持久化预留
+    getMessages: protectedProcedure
+      .input(z.object({ adoptId: z.string().min(1).max(64), limit: z.number().min(1).max(200).default(50) }))
+      .query(async ({ input, ctx }) => {
+        await assertClawOwnerOrThrow(ctx, input.adoptId);
+        // 暂时返回空，前端用 localStorage
+        return { messages: [] as Array<{ role: string; text: string; ts: number }> };
+      }),
+});

@@ -1,0 +1,153 @@
+import { useState, useEffect } from "react";
+import { BarChart3, Users, MessageSquare, TrendingUp, Loader2, RefreshCw } from "lucide-react";
+
+interface AdoptionStat {
+  adoptId: string;
+  total: number;
+  userId: number;
+  userName: string;
+  lastActivity: string;
+  recent7d: number;
+  dailyBreakdown: Array<{ date: string; count: number }>;
+}
+
+interface UsageData {
+  adoptions: AdoptionStat[];
+  daily: Array<{ date: string; count: number }>;
+  summary: { totalClaws: number; totalChats: number; activeToday: number };
+}
+
+export function UsageStatsTab() {
+  const [data, setData] = useState<UsageData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const fetchStats = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/claw/admin/usage-stats", { credentials: "include" });
+      if (res.ok) setData(await res.json());
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchStats(); }, []);
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-12">
+      <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+    </div>
+  );
+
+  if (!data) return <div className="text-sm text-gray-500 text-center py-8">加载失败</div>;
+
+  const maxDaily = Math.max(...data.daily.map(d => d.count), 1);
+
+  return (
+    <div className="space-y-6">
+      {/* 概览卡片 */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+            <Users className="w-3.5 h-3.5" /> 子虾总数
+          </div>
+          <div className="text-2xl font-bold text-gray-900">{data.summary.totalClaws}</div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+            <MessageSquare className="w-3.5 h-3.5" /> 总对话数
+          </div>
+          <div className="text-2xl font-bold text-gray-900">{data.summary.totalChats}</div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+            <TrendingUp className="w-3.5 h-3.5" /> 今日活跃
+          </div>
+          <div className="text-2xl font-bold text-gray-900">{data.summary.activeToday}</div>
+        </div>
+      </div>
+
+      {/* 每日趋势 */}
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+            <BarChart3 className="w-4 h-4" /> 每日对话趋势（最近14天）
+          </h3>
+          <button onClick={fetchStats} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
+            <RefreshCw className="w-3 h-3" /> 刷新
+          </button>
+        </div>
+        <div className="flex items-end gap-1 h-24">
+          {data.daily.map((d, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1">
+              <div
+                className="w-full rounded-t bg-blue-500 transition-all hover:bg-blue-600"
+                style={{ height: `${(d.count / maxDaily) * 100}%`, minHeight: d.count > 0 ? 4 : 0 }}
+                title={`${d.date}: ${d.count} 次`}
+              />
+              <span className="text-[9px] text-gray-400 -rotate-45 origin-top-left whitespace-nowrap">
+                {d.date.slice(5)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 子虾排行 */}
+      <div className="rounded-xl border border-gray-200 bg-white">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <h3 className="text-sm font-semibold text-gray-900">子虾使用排行</h3>
+        </div>
+        <div className="divide-y divide-gray-50">
+          {data.adoptions.map((a, i) => (
+            <div key={a.adoptId}>
+              <div
+                className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer"
+                onClick={() => setExpanded(expanded === a.adoptId ? null : a.adoptId)}
+              >
+                <span className="text-xs font-bold text-gray-300 w-5 text-right">{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-mono text-gray-800">{a.adoptId}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{a.userName}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 text-xs shrink-0">
+                  <div className="text-right">
+                    <div className="font-semibold text-gray-900">{a.total}</div>
+                    <div className="text-gray-400">总对话</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-semibold text-blue-600">{a.recent7d}</div>
+                    <div className="text-gray-400">近7天</div>
+                  </div>
+                  <div className="text-right w-20">
+                    <div className="text-gray-500 text-[10px]">
+                      {a.lastActivity ? new Date(a.lastActivity).toLocaleDateString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "-"}
+                    </div>
+                    <div className="text-gray-400">最近活跃</div>
+                  </div>
+                </div>
+              </div>
+              {/* 展开：每日明细 */}
+              {expanded === a.adoptId && a.dailyBreakdown.length > 0 && (
+                <div className="px-4 pb-3 pl-12">
+                  <div className="flex flex-wrap gap-1.5">
+                    {a.dailyBreakdown.map(d => (
+                      <span key={d.date} className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-600 font-mono">
+                        {d.date.slice(5)}: {d.count}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {data.adoptions.length === 0 && (
+            <div className="text-sm text-gray-400 text-center py-6">暂无数据</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

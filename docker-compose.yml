@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # ── MySQL 数据库 ──
+  db:
+    image: mysql:8.0
+    container_name: linggan-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: linggan
+      MYSQL_USER: ${MYSQL_USER:-linggan}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置 MYSQL_PASSWORD}
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    # 不暴露 3306 到宿主机，容器间通过 linggan-net 内网通信
+    # 如需本地调试，取消注释下面两行：
+    # ports:
+    #   - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - linggan-net
+
+  # ── LingganClaw 平台 ──
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: linggan-app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-5180}:5180"
+    env_file:
+      - .env
+    environment:
+      - PORT=5180
+      - NODE_ENV=production
+      - DATABASE_URL=mysql://${MYSQL_USER:-linggan}:${MYSQL_PASSWORD}@db:3306/linggan
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - linggan-net
+
+volumes:
+  mysql_data:
+
+networks:
+  linggan-net:
+    driver: bridge

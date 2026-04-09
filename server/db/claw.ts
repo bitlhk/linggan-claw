@@ -1,0 +1,284 @@
+import { desc, eq, inArray, and, sql } from "drizzle-orm";
+import { users, clawAdoptions, clawAdoptionEvents, clawProfileSettings, InsertClawAdoption, InsertClawAdoptionEvent, InsertClawProfileSetting, ClawAdoption } from "../../drizzle/schema";
+import { getDb } from "./connection";
+
+// ============ 灵感龙虾方案（领养实例） ============
+
+export type ClawAdoptionStatus = "creating" | "active" | "expiring" | "recycled" | "failed";
+export type ClawPermissionProfile = "starter" | "plus" | "internal";
+export type ClawEventType =
+  | "create_requested"
+  | "create_succeeded"
+  | "create_failed"
+  | "profile_updated"
+  | "ttl_extended"
+  | "recycle_requested"
+  | "recycle_succeeded"
+  | "recycle_failed";
+
+/**
+ * 获取用户当前活跃（或创建中）的虾
+ */
+export async function getCurrentClawByUserId(userId: number): Promise<ClawAdoption | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  try {
+    const rows = await db
+      .select()
+      .from(clawAdoptions)
+      .where(and(eq(clawAdoptions.userId, userId), inArray(clawAdoptions.status, ["creating", "active", "expiring"])))
+      .orderBy(desc(clawAdoptions.id))
+      .limit(1);
+
+    return rows[0] || null;
+  } catch (error) {
+    console.error("[Database] Failed to get current claw by userId:", error);
+    return null;
+  }
+}
+
+/**
+ * 按 adoptId 获取领养记录
+ */
+export async function getClawByAdoptId(adoptId: string): Promise<ClawAdoption | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  try {
+    const rows = await db.select().from(clawAdoptions).where(eq(clawAdoptions.adoptId, adoptId)).limit(1);
+    return rows[0] || null;
+  } catch (error) {
+    console.error("[Database] Failed to get claw by adoptId:", error);
+    return null;
+  }
+}
+
+/**
+ * 创建领养记录
+ */
+export async function createClawAdoption(
+  payload: Omit<InsertClawAdoption, "id" | "createdAt" | "updatedAt" | "lastError"> & { lastError?: string | null }
+): Promise<number> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  try {
+    const result = await db.insert(clawAdoptions).values({
+      ...payload,
+      lastError: payload.lastError ?? null,
+    });
+    return Number(result[0].insertId);
+  } catch (error) {
+    console.error("[Database] Failed to create claw adoption:", error);
+    throw error;
+  }
+}
+
+/**
+ * 更新领养状态
+ */
+export async function updateClawAdoptionStatus(
+  id: number,
+  status: ClawAdoptionStatus,
+  options?: {
+    expiresAt?: Date;
+    entryUrl?: string;
+    permissionProfile?: ClawPermissionProfile;
+    ttlDays?: number;
+    lastError?: string | null;
+  }
+): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  const patch: Partial<InsertClawAdoption> = {
+    status,
+  };
+
+  if (options?.expiresAt) patch.expiresAt = options.expiresAt;
+  if (options?.entryUrl) patch.entryUrl = options.entryUrl;
+  if (options?.permissionProfile) patch.permissionProfile = options.permissionProfile;
+  if (typeof options?.ttlDays === "number") patch.ttlDays = options.ttlDays;
+  if (options && "lastError" in options) patch.lastError = options.lastError ?? null;
+
+  try {
+    await db.update(clawAdoptions).set(patch).where(eq(clawAdoptions.id, id));
+  } catch (error) {
+    console.error("[Database] Failed to update claw adoption status:", error);
+    throw error;
+  }
+}
+
+/** 更新 lastActivityAt（best-effort，不抛错） */
+export async function touchClawActivity(adoptId: string): Promise<void> {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    await db.update(clawAdoptions).set({ lastActivityAt: new Date() }).where(eq(clawAdoptions.adoptId, adoptId));
+  } catch {
+    // best-effort, ignore
+  }
+}
+
+export async function listClawAdoptionsAdmin(params?: {
+  keyword?: string;
+  status?: ClawAdoptionStatus | "all";
+  limit?: number;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const limit = Math.min(Math.max(params?.limit ?? 200, 20), 1000);
+
+  try {
+    const joined = await db
+      .select({
+        id: clawAdoptions.id,
+        userId: clawAdoptions.userId,
+        adoptId: clawAdoptions.adoptId,
+        agentId: clawAdoptions.agentId,
+        status: clawAdoptions.status,
+        permissionProfile: clawAdoptions.permissionProfile,
+        ttlDays: clawAdoptions.ttlDays,
+        entryUrl: clawAdoptions.entryUrl,
+        expiresAt: clawAdoptions.expiresAt,
+        lastError: clawAdoptions.lastError,
+        createdAt: clawAdoptions.createdAt,
+        updatedAt: clawAdoptions.updatedAt,
+        userName: users.name,
+        userEmail: users.email,
+      })
+      .from(clawAdoptions)
+      .leftJoin(users, eq(clawAdoptions.userId, users.id))
+      .orderBy(desc(clawAdoptions.id))
+      .limit(limit);
+
+    let rows = joined;
+
+    if (params?.status && params.status !== "all") {
+      rows = rows.filter((r) => r.status === params.status);
+    }
+
+    if (params?.keyword?.trim()) {
+      const q = params.keyword.trim().toLowerCase();
+      rows = rows.filter((r) =>
+        String(r.adoptId || "").toLowerCase().includes(q) ||
+        String(r.agentId || "").toLowerCase().includes(q) ||
+        String(r.userName || "").toLowerCase().includes(q) ||
+        String(r.userEmail || "").toLowerCase().includes(q) ||
+        String(r.userId || "").toLowerCase().includes(q)
+      );
+    }
+
+    return rows;
+  } catch (error) {
+    console.error("[Database] Failed to list claw adoptions:", error);
+    return [];
+  }
+}
+
+export async function updateClawAdoptionAdmin(
+  id: number,
+  patch: {
+    permissionProfile?: ClawPermissionProfile;
+    ttlDays?: number;
+    status?: ClawAdoptionStatus;
+    expiresAt?: Date;
+  }
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const nextPatch: Partial<InsertClawAdoption> = {};
+  if (patch.permissionProfile) nextPatch.permissionProfile = patch.permissionProfile;
+  if (typeof patch.ttlDays === "number") {
+    nextPatch.ttlDays = patch.ttlDays;
+    nextPatch.expiresAt = new Date(Date.now() + patch.ttlDays * 24 * 60 * 60 * 1000);
+  }
+  if (patch.expiresAt) nextPatch.expiresAt = patch.expiresAt;
+  if (patch.status) nextPatch.status = patch.status;
+
+  await db.update(clawAdoptions).set(nextPatch).where(eq(clawAdoptions.id, id));
+}
+
+export async function batchUpdateClawAdoptionAdmin(
+  ids: number[],
+  patch: {
+    permissionProfile?: ClawPermissionProfile;
+    ttlDays?: number;
+    status?: ClawAdoptionStatus;
+  }
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  if (!ids.length) return;
+
+  const nextPatch: Partial<InsertClawAdoption> = {};
+  if (patch.permissionProfile) nextPatch.permissionProfile = patch.permissionProfile;
+  if (typeof patch.ttlDays === "number") {
+    nextPatch.ttlDays = patch.ttlDays;
+    nextPatch.expiresAt = new Date(Date.now() + patch.ttlDays * 24 * 60 * 60 * 1000);
+  }
+  if (patch.status) nextPatch.status = patch.status;
+
+  await db.update(clawAdoptions).set(nextPatch).where(inArray(clawAdoptions.id, ids));
+}
+
+
+/**
+ * 记录领养生命周期事件
+ */
+export async function appendClawAdoptionEvent(
+  payload: Omit<InsertClawAdoptionEvent, "id" | "createdAt">
+): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  try {
+    await db.insert(clawAdoptionEvents).values(payload);
+  } catch (error) {
+    console.error("[Database] Failed to append claw adoption event:", error);
+    throw error;
+  }
+}
+
+export async function getClawProfileSettings(adoptionId: number) {
+  const db = await getDb();
+  if (!db) return null;
+
+  try {
+    const rows = await db
+      .select()
+      .from(clawProfileSettings)
+      .where(eq(clawProfileSettings.adoptionId, adoptionId))
+      .limit(1);
+    return rows[0] || null;
+  } catch (error) {
+    console.error("[Database] Failed to get claw profile settings:", error);
+    return null;
+  }
+}
+
+export async function upsertClawProfileSettings(
+  adoptionId: number,
+  payload: Partial<Omit<InsertClawProfileSetting, "id" | "adoptionId" | "createdAt" | "updatedAt">>
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const existing = await getClawProfileSettings(adoptionId);
+  if (existing) {
+    await db.update(clawProfileSettings).set(payload).where(eq(clawProfileSettings.adoptionId, adoptionId));
+    return await getClawProfileSettings(adoptionId);
+  }
+
+  await db.insert(clawProfileSettings).values({ adoptionId, ...payload });
+  return await getClawProfileSettings(adoptionId);
+}

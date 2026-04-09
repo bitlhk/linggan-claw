@@ -1,0 +1,810 @@
+/**
+ * ClawAdmin — 灵虾管理控制台（独立页面）
+ * 风格：白色主题，与灵感官网/ClawHome 一致
+ * Tab: 实例管理 / 系统设置
+ */
+
+import { useState, useEffect } from "react";
+import { BrandIcon } from "@/components/BrandIcon";
+import { useLocation } from "wouter";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3 } from "lucide-react";
+import { UsageStatsTab } from "@/components/pages/UsageStatsTab";
+import { BizAgentsPanel } from "@/components/BizAgentsPanel";
+import { toast } from "sonner";
+import { useBrand, invalidateBrandClientCache } from "@/lib/useBrand";
+import { BRAND_PRESETS } from "@shared/brand";
+
+const STATUS_OPTIONS = [
+  { value: "all", label: "全部" },
+  { value: "creating", label: "创建中" },
+  { value: "active", label: "活跃" },
+  { value: "expiring", label: "即将过期" },
+  { value: "recycled", label: "已回收" },
+  { value: "failed", label: "失败" },
+] as const;
+
+const PERMISSION_OPTIONS = [
+  { value: "starter", label: "Starter" },
+  { value: "plus", label: "Plus" },
+  { value: "internal", label: "Internal" },
+] as const;
+
+const STATUS_COLORS: Record<string, string> = {
+  total: "#6366f1",
+  active: "#22c55e",
+  creating: "#3b82f6",
+  expiring: "#f59e0b",
+  recycled: "#9ca3af",
+  failed: "#ef4444",
+};
+
+function BrandSettingsPanel() {
+  const brand = useBrand();
+  const [form, setForm] = useState({
+    name: brand.name,
+    nameEn: brand.nameEn,
+    platform: brand.platform,
+    platformEn: brand.platformEn,
+    slogan: brand.slogan,
+    accentColor: brand.accentColor,
+    logo: brand.logo,
+    favicon: brand.favicon,
+    systemPrompt: brand.systemPrompt,
+    agentIdentity: brand.agentIdentity,
+    githubUrl: brand.githubUrl,
+    pageTitle: brand.pageTitle,
+  });
+  const [saving, setSaving] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState(() => {
+    const match = BRAND_PRESETS.find(p => p.config.nameEn === brand.nameEn);
+    return match?.id || "custom";
+  });
+
+  const applyPreset = (presetId: string) => {
+    setSelectedPreset(presetId);
+    if (presetId === "custom") return;
+    const preset = BRAND_PRESETS.find(p => p.id === presetId);
+    if (!preset) return;
+    setForm({ ...preset.config });
+  };
+
+  // Sync from brand when loaded
+  useEffect(() => {
+    setForm({
+      name: brand.name,
+      nameEn: brand.nameEn,
+      platform: brand.platform,
+      platformEn: brand.platformEn,
+      slogan: brand.slogan,
+      accentColor: brand.accentColor,
+      logo: brand.logo,
+      favicon: brand.favicon,
+      systemPrompt: brand.systemPrompt,
+      agentIdentity: brand.agentIdentity,
+      githubUrl: brand.githubUrl,
+      pageTitle: brand.pageTitle,
+    });
+  }, [brand]);
+
+  const setBrandMutation = trpc.claw.adminSetBrand.useMutation({
+    onSuccess: () => {
+      invalidateBrandClientCache();
+      toast.success("品牌设置已保存，刷新页面后生效");
+      setSaving(false);
+    },
+    onError: (e: any) => {
+      toast.error(e?.message || "保存失败");
+      setSaving(false);
+    },
+  });
+
+  const saveBrand = () => {
+    setSaving(true);
+    setBrandMutation.mutate(form);
+  };
+
+  const field = (key: keyof typeof form, label: string, opts?: { type?: string; rows?: number; placeholder?: string }) => (
+    <div className="space-y-1" key={key}>
+      <Label className="text-sm text-gray-700">{label}</Label>
+      {opts?.rows ? (
+        <textarea
+          className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+          rows={opts.rows}
+          value={form[key]}
+          onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+          placeholder={opts?.placeholder}
+        />
+      ) : (
+        <Input
+          type={opts?.type || "text"}
+          value={form[key]}
+          onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+          placeholder={opts?.placeholder}
+        />
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* 模板选择器 */}
+      <Card className="p-6 border-border/50 bg-white/80">
+        <h3 className="text-sm font-semibold text-gray-900 mb-3">品牌模板</h3>
+        <p className="text-xs text-muted-foreground mb-4">选择预设模板一键填充，也可以选"自定义"后手动编辑</p>
+        <div className="grid grid-cols-5 gap-2">
+          {BRAND_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => applyPreset(p.id)}
+              className="text-left rounded-lg border p-3 transition-all hover:shadow-sm"
+              style={{
+                borderColor: selectedPreset === p.id ? p.config.accentColor : "rgba(0,0,0,0.08)",
+                background: selectedPreset === p.id ? `${p.config.accentColor}08` : "white",
+                boxShadow: selectedPreset === p.id ? `0 0 0 2px ${p.config.accentColor}30` : "none",
+              }}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <div
+                  className="w-4 h-4 rounded-full shrink-0"
+                  style={{ background: p.config.accentColor }}
+                />
+                <span className="text-sm font-medium text-gray-900 truncate">{p.label}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground truncate">{p.description}</p>
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="p-6 space-y-5 border-border/50 bg-white/80">
+        <h3 className="text-sm font-semibold text-gray-900">基本信息</h3>
+        <div className="grid grid-cols-2 gap-4">
+          {field("name", "产品名称（中文）", { placeholder: "灵虾" })}
+          {field("nameEn", "产品名称（英文）", { placeholder: "LingganClaw" })}
+          {field("platform", "平台名称（中文）", { placeholder: "灵感" })}
+          {field("platformEn", "平台名称（英文）", { placeholder: "Linggan" })}
+        </div>
+        {field("slogan", "标语")}
+        {field("pageTitle", "页面标题")}
+      </Card>
+
+      <Card className="p-6 space-y-5 border-border/50 bg-white/80">
+        <h3 className="text-sm font-semibold text-gray-900">视觉</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <Label className="text-sm text-gray-700">主题色</Label>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={form.accentColor}
+                onChange={(e) => setForm((f) => ({ ...f, accentColor: e.target.value }))}
+                className="w-10 h-8 rounded border cursor-pointer"
+              />
+              <Input
+                value={form.accentColor}
+                onChange={(e) => setForm((f) => ({ ...f, accentColor: e.target.value }))}
+                className="w-28 font-mono text-sm"
+              />
+            </div>
+          </div>
+          {field("logo", "Logo 路径", { placeholder: "/images/lingxia.svg" })}
+        </div>
+        {field("favicon", "Favicon 路径", { placeholder: "/favicon.png" })}
+      </Card>
+
+      <Card className="p-6 space-y-5 border-border/50 bg-white/80">
+        <h3 className="text-sm font-semibold text-gray-900">AI 身份</h3>
+        {field("systemPrompt", "System Prompt（英文，安全提示首句）", { rows: 2 })}
+        {field("agentIdentity", "Agent 身份自我介绍（中文，写入 SOUL.md）", { rows: 2 })}
+      </Card>
+
+      <Card className="p-6 space-y-3 border-border/50 bg-white/80">
+        <h3 className="text-sm font-semibold text-gray-900">其他</h3>
+        {field("githubUrl", "开源仓库 URL")}
+      </Card>
+
+      <div className="flex justify-end">
+        <Button onClick={saveBrand} disabled={saving}>
+          {saving ? "保存中..." : "保存品牌设置"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export default function ClawAdmin() {
+  const [, setLocation] = useLocation();
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState("instances");
+  const [keyword, setKeyword] = useState("");
+  const [viewingSkillId, setViewingSkillId] = useState<number | null>(null);
+  const [aiReviewing, setAiReviewing] = useState(false);
+  const [aiReviewResult, setAiReviewResult] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+
+  // ── 实例管理 ──
+  const { data: listData, isLoading: listLoading, refetch: refetchList } = trpc.claw.adminList.useQuery(
+    { keyword: keyword || undefined, status: statusFilter as any },
+    { retry: false }
+  );
+
+  const updateMutation = trpc.claw.adminUpdate.useMutation({
+    retry: false,
+    onSuccess: () => { refetchList(); toast.success("已更新"); },
+    onError: (e: any) => toast.error(e?.message || "更新失败"),
+  });
+
+  const batchUpdateMutation = trpc.claw.adminBatchUpdate.useMutation({
+    retry: false,
+    onSuccess: () => { refetchList(); setSelectedIds([]); toast.success("批量更新完成"); },
+    onError: (e: any) => toast.error(e?.message || "批量更新失败"),
+  });
+
+  // ── 系统配置 ──
+  const { data: configData, refetch: refetchConfig } = trpc.claw.adminGetConfig.useQuery(undefined, {
+    enabled: activeTab === "settings",
+    retry: false,
+  });
+
+  const { data: sharedSkills, isLoading: skillsLoading, refetch: refetchSkills } = trpc.claw.adminListSharedSkills.useQuery(undefined, {
+    enabled: activeTab === "skills",
+    retry: false,
+  });
+
+  const { data: marketSkills, isLoading: marketLoading, refetch: refetchMarket } = trpc.claw.adminListMarketSkills.useQuery(undefined, {
+    enabled: activeTab === "skills",
+    retry: false,
+  });
+  const publishSkillMutation = trpc.claw.adminPublishSkill.useMutation({
+    onSuccess: () => { refetchMarket(); toast.success("发布成功"); },
+    onError: (e: any) => toast.error(e?.message || "发布失败"),
+  });
+  const reviewSkillMutation = trpc.claw.adminReviewSkill.useMutation({
+    onSuccess: () => { refetchMarket(); toast.success("已更新"); },
+    onError: (e: any) => toast.error(e?.message || "操作失败"),
+  });
+  const deleteMarketSkillMutation = trpc.claw.adminDeleteMarketSkill.useMutation({
+    onSuccess: () => { refetchMarket(); toast.success("已删除"); },
+    onError: (e: any) => toast.error(e?.message || "删除失败"),
+  });
+
+  const { data: viewSkillSource, refetch: refetchSkillSource } = trpc.claw.adminViewSkillSource.useQuery(
+    { id: viewingSkillId! },
+    { enabled: !!viewingSkillId, retry: false }
+  );
+
+  const handleAiReview = async (skillId: number) => {
+    setAiReviewing(true);
+    setAiReviewResult(null);
+    try {
+      const res = await fetch("/api/claw/admin/ai-review-skill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ skillMarketId: skillId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "AI 审核请求失败");
+      }
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let result = "";
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const d = JSON.parse(line.slice(6));
+              if (d.chunk) { result += d.chunk; setAiReviewResult(result); }
+              if (d.done) break;
+            } catch {}
+          }
+        }
+      }
+      if (!result) setAiReviewResult("未获取到审核结果");
+    } catch (e: any) {
+      setAiReviewResult("审核失败: " + (e.message || ""));
+    } finally {
+      setAiReviewing(false);
+    }
+  };
+
+  const handleSkillUpload = async (file: File) => {
+    try {
+      const res = await fetch("/api/claw/skill-market/upload", {
+        method: "POST",
+        body: await file.arrayBuffer(),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error || "上传失败"); return; }
+      // 自动发布到市场（待审核）
+      publishSkillMutation.mutate({
+        skillId: data.uploadId || data.name,
+        name: data.name,
+        description: data.description,
+        author: "管理员上传",
+        status: "pending",
+      });
+      toast.success(`已上传: ${data.name}`);
+    } catch (e: any) {
+      toast.error("上传失败: " + (e.message || ""));
+    }
+  };
+
+  const setConfigMutation = trpc.claw.adminSetConfig.useMutation({
+    retry: false,
+    onSuccess: () => { refetchConfig(); toast.success("配置已保存"); },
+    onError: (e: any) => toast.error(e?.message || "保存失败"),
+  });
+
+  // ── 权限检查 ──
+  if (!user || (user as any)?.role !== "admin") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <p className="text-muted-foreground">无权访问管理页面</p>
+      </div>
+    );
+  }
+
+  const summary = listData?.summary;
+  const rows = listData?.rows || [];
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+  const toggleSelectAll = () => {
+    if (selectedIds.length === rows.length) setSelectedIds([]);
+    else setSelectedIds(rows.map((r: any) => r.id));
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50/80">
+      {/* Header */}
+      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-border/50">
+        <div className="container flex items-center justify-between h-14 px-6">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={() => setLocation("/")} className="text-muted-foreground">
+              <ArrowLeft className="w-4 h-4 mr-1" />
+              首页
+            </Button>
+            <div className="w-px h-5 bg-border" />
+            <div className="flex items-center gap-2">
+              <BrandIcon size={24} />
+              <h1 className="text-base font-semibold text-gray-900">灵虾管理</h1>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Body */}
+      <main className="p-6 max-w-6xl mx-auto w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="mb-6 bg-transparent border-b border-gray-200 rounded-none p-0 h-auto w-full justify-start gap-0">
+            <TabsTrigger value="instances" className="clawadmin-tab gap-1.5 data-[state=active]:clawadmin-tab-active">
+              <Users className="w-4 h-4" />
+              实例管理
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="clawadmin-tab gap-1.5">
+              <Settings className="w-4 h-4" />
+              系统设置
+            </TabsTrigger>
+            <TabsTrigger value="brand" className="clawadmin-tab gap-1.5">
+              <Sparkles size={14} /> 品牌设置
+            </TabsTrigger>
+            <TabsTrigger value="skills" className="clawadmin-tab gap-1.5">
+              <Sparkles className="w-4 h-4" />
+              技能市场
+            </TabsTrigger>
+            <TabsTrigger value="usage" className="clawadmin-tab gap-1.5">
+              <BarChart3 size={14} />
+              使用统计
+            </TabsTrigger>
+            <TabsTrigger value="collab" className="clawadmin-tab gap-1.5">
+              <Zap className="w-4 h-4" />
+              智能体协作
+            </TabsTrigger>
+          </TabsList>
+
+          {/* ── 实例管理 ── */}
+          <TabsContent value="instances" className="space-y-4">
+            {/* 概览 */}
+            {summary && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                {(["total", "active", "creating", "expiring", "recycled", "failed"] as const).map((key) => (
+                  <Card key={key} className="p-3 text-center border-border/50 bg-white/80">
+                    <p className="text-2xl font-bold" style={{ color: STATUS_COLORS[key] }}>{summary[key]}</p>
+                    <p className="text-xs mt-1 text-muted-foreground">
+                      {key === "total" ? "总计" : STATUS_OPTIONS.find((s) => s.value === key)?.label || key}
+                    </p>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            {/* 搜索 & 过滤 */}
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1 max-w-xs">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="搜索 adoptId / 用户名…"
+                  value={keyword}
+                  onChange={(e) => setKeyword(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="ghost" size="icon" onClick={() => refetchList()} className="text-muted-foreground">
+                <RefreshCw className="w-4 h-4" />
+              </Button>
+            </div>
+
+            {/* 批量操作 */}
+            {selectedIds.length > 0 && (
+              <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20">
+                <span className="text-sm font-medium text-gray-700">已选 {selectedIds.length} 项</span>
+                <Select onValueChange={(v) => batchUpdateMutation.mutate({ ids: selectedIds, status: v as any })}>
+                  <SelectTrigger className="w-28 h-8 text-xs">
+                    <SelectValue placeholder="改状态" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPTIONS.filter((s) => s.value !== "all").map((s) => (
+                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select onValueChange={(v) => batchUpdateMutation.mutate({ ids: selectedIds, permissionProfile: v as any })}>
+                  <SelectTrigger className="w-28 h-8 text-xs">
+                    <SelectValue placeholder="改权限" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PERMISSION_OPTIONS.map((p) => (
+                      <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])} className="text-muted-foreground">
+                  取消
+                </Button>
+              </div>
+            )}
+
+            {/* 列表 */}
+            {listLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <Card className="border-border/50 bg-white/80 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50/80 border-b border-border/50">
+                      <th className="p-3 text-left w-10">
+                        <input type="checkbox" checked={selectedIds.length === rows.length && rows.length > 0} onChange={toggleSelectAll} />
+                      </th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">Adopt ID</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">用户</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">状态</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">权限</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">TTL</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row: any) => (
+                      <tr key={row.id} className="border-t border-border/30 hover:bg-gray-50/50 transition-colors">
+                        <td className="p-3">
+                          <input type="checkbox" checked={selectedIds.includes(row.id)} onChange={() => toggleSelect(row.id)} />
+                        </td>
+                        <td className="p-3 font-mono text-xs text-gray-900">{row.adoptId}</td>
+                        <td className="p-3 text-xs text-muted-foreground">{row.userName || row.userEmail || `#${row.userId}`}</td>
+                        <td className="p-3">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: STATUS_COLORS[row.status] || "#9ca3af" }} />
+                            <span style={{ color: STATUS_COLORS[row.status] || "#6b7280" }}>{row.status}</span>
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <Select
+                            value={row.permissionProfile || "starter"}
+                            onValueChange={(v) => updateMutation.mutate({ id: row.id, permissionProfile: v as any })}
+                          >
+                            <SelectTrigger className="h-7 w-24 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PERMISSION_OPTIONS.map((p) => (
+                                <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="p-3 text-xs text-muted-foreground">{row.ttlDays || "-"}天</td>
+                        <td className="p-3">
+                          <div className="flex items-center gap-1">
+                            {row.status !== "active" && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs text-green-600 hover:text-green-700 hover:bg-green-50"
+                                onClick={() => updateMutation.mutate({ id: row.id, status: "active" })}
+                              >
+                                激活
+                              </Button>
+                            )}
+                            {row.status === "active" && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
+                                onClick={() => updateMutation.mutate({ id: row.id, status: "recycled" })}
+                              >
+                                回收
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {rows.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-muted-foreground">暂无数据</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* ── 系统设置 ── */}
+          <TabsContent value="settings" className="space-y-6">
+            <Card className="p-6 space-y-5 border-border/50 bg-white/80">
+              <h3 className="text-sm font-semibold text-gray-900">灵虾配置</h3>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-sm text-gray-700">可见性</Label>
+                    <p className="text-xs mt-0.5 text-muted-foreground">public = 所有注册用户可领养，internal = 仅白名单用户</p>
+                  </div>
+                  <Select
+                    value={configData?.visibility || "internal"}
+                    onValueChange={(v) => setConfigMutation.mutate({ visibility: v as any })}
+                  >
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="public">Public</SelectItem>
+                      <SelectItem value="internal">Internal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="h-px bg-border/50" />
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-sm text-gray-700">默认有效期</Label>
+                    <p className="text-xs mt-0.5 text-muted-foreground">新领养的灵虾默认 TTL（天）</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      className="w-20 text-center"
+                      defaultValue={configData?.defaultTtlDays || 15}
+                      min={1}
+                      max={365}
+                      onBlur={(e) => {
+                        const v = parseInt(e.target.value);
+                        if (v >= 1 && v <= 365) setConfigMutation.mutate({ defaultTtlDays: v });
+                      }}
+                    />
+                    <span className="text-xs text-muted-foreground">天</span>
+                  </div>
+                </div>
+
+                <div className="h-px bg-border/50" />
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-sm text-gray-700">默认套餐</Label>
+                    <p className="text-xs mt-0.5 text-muted-foreground">新领养的灵虾默认权限套餐</p>
+                  </div>
+                  <Select
+                    value={configData?.defaultProfile || "plus"}
+                    onValueChange={(v) => setConfigMutation.mutate({ defaultProfile: v as any })}
+                  >
+                    <SelectTrigger className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="starter">Starter</SelectItem>
+                      <SelectItem value="plus">Plus</SelectItem>
+                      <SelectItem value="internal">Internal</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </Card>
+          </TabsContent>
+
+          {/* ── 品牌设置 ── */}
+          <TabsContent value="brand" className="space-y-6">
+            <BrandSettingsPanel />
+          </TabsContent>
+
+          {/* ── 技能市场 ── */}
+          <TabsContent value="skills" className="space-y-4">
+            {/* 上传区 */}
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">上传技能包</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">上传 .zip 技能包，解压后自动解析 SKILL.md，可直接上架或待审核</p>
+                </div>
+              </div>
+              <div
+                className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors hover:border-primary/40"
+                onClick={() => document.getElementById("skill-upload-input")?.click()}
+                onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = "var(--primary)"; }}
+                onDragLeave={(e) => { e.currentTarget.style.borderColor = ""; }}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  e.currentTarget.style.borderColor = "";
+                  const file = e.dataTransfer.files[0];
+                  if (!file) return;
+                  await handleSkillUpload(file);
+                }}
+              >
+                <p className="text-sm text-muted-foreground">拖拽 .zip 文件到此处，或点击选择</p>
+                <input id="skill-upload-input" type="file" accept=".zip" className="hidden" onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) await handleSkillUpload(file);
+                  e.target.value = "";
+                }} />
+              </div>
+            </Card>
+
+            {/* 市场技能列表 */}
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">技能市场</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">审核、上下架、管理市场中的技能</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => refetchMarket()}>
+                  <RefreshCw className="w-3.5 h-3.5 mr-1.5" />刷新
+                </Button>
+              </div>
+              {marketLoading ? (
+                <div className="flex items-center gap-2 py-6 justify-center"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>
+              ) : (
+                <div className="space-y-2">
+                  {(marketSkills || []).map((item: any) => {
+                    const catLabels: any = { finance: "金融", dev: "开发", data: "数据", writing: "写作", general: "通用" };
+                    const stLabels: any = { pending: "待审核", approved: "已上架", rejected: "已拒绝", offline: "已下架" };
+                    const stColors: any = { pending: "bg-yellow-50 text-yellow-700 border-yellow-200", approved: "bg-green-50 text-green-700 border-green-200", rejected: "bg-red-50 text-red-700 border-red-200", offline: "bg-gray-50 text-gray-500 border-gray-200" };
+                    return (
+                      <div key={item.id} className="border rounded-lg p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-gray-900">{item.name}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-mono">{item.skillId}</span>
+                              <span className={"text-[10px] px-1.5 py-0.5 rounded border font-medium " + (stColors[item.status] || "")}>{stLabels[item.status] || item.status}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600">{catLabels[item.category] || item.category}</span>
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">{item.description || "—"}</div>
+                            <div className="text-[10px] text-muted-foreground mt-1">
+                              v{item.version} · {item.author} · {item.license} · 安装 {item.downloadCount} 次
+                              {item.reviewNote && <span className="ml-2 text-yellow-600">审核备注: {item.reviewNote}</span>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => {
+                              setViewingSkillId(item.id);
+                              setAiReviewResult(null);
+                            }}>查看源码</Button>
+                            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={aiReviewing} onClick={() => {
+                              setViewingSkillId(item.id);
+                              handleAiReview(item.id);
+                            }}>{aiReviewing ? "AI审核中…" : "AI 审核"}</Button>
+                            {item.status === "pending" && (
+                              <>
+                                <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => reviewSkillMutation.mutate({ id: item.id, status: "approved" })}>通过</Button>
+                                <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => {
+                                  const note = prompt("拒绝原因：");
+                                  if (note !== null) reviewSkillMutation.mutate({ id: item.id, status: "rejected", reviewNote: note || "不符合要求" });
+                                }}>拒绝</Button>
+                              </>
+                            )}
+                            {item.status === "approved" && (
+                              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => reviewSkillMutation.mutate({ id: item.id, status: "offline" })}>下架</Button>
+                            )}
+                            {(item.status === "offline" || item.status === "rejected") && (
+                              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => reviewSkillMutation.mutate({ id: item.id, status: "approved" })}>重新上架</Button>
+                            )}
+                            <Button size="sm" variant="ghost" className="h-7 text-xs text-red-500" onClick={() => { if (confirm("确定删除？")) deleteMarketSkillMutation.mutate({ id: item.id }); }}>删除</Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(!marketSkills || marketSkills.length === 0) && (
+                    <div className="text-xs text-center py-6 text-muted-foreground">暂无市场技能，从上方上传添加</div>
+                  )}
+                </div>
+              )}
+            </Card>
+
+            {/* 源码查看弹窗 */}
+            {viewingSkillId && (
+              <Card className="p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-900">源码查看</h3>
+                  <Button size="sm" variant="ghost" onClick={() => setViewingSkillId(null)}>关闭</Button>
+                </div>
+                {viewSkillSource ? (
+                  <div>
+                    <div className="text-xs font-medium text-gray-700 mb-1">SKILL.md</div>
+                    <pre className="text-xs bg-gray-50 border rounded-lg p-3 overflow-auto max-h-64 whitespace-pre-wrap">{viewSkillSource.skillMd || "(无)"}</pre>
+                    {viewSkillSource.scripts?.length > 0 && (
+                      <div className="mt-3">
+                        <div className="text-xs font-medium text-gray-700 mb-1">脚本文件</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {viewSkillSource.scripts.map((s: string) => (
+                            <span key={s} className="text-[10px] px-2 py-1 rounded bg-blue-50 text-blue-700 font-mono">{s}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div className="text-[10px] text-muted-foreground mt-2">路径: {viewSkillSource.dir}</div>
+                    {aiReviewResult && (
+                      <div className="mt-3">
+                        <div className="text-xs font-medium text-gray-700 mb-1">AI 审核意见</div>
+                        <div className="text-xs bg-blue-50 border border-blue-200 rounded-lg p-3 whitespace-pre-wrap max-h-48 overflow-auto">{aiReviewResult}</div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="py-4 text-center"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground inline-block" /></div>
+                )}
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* ── 智能体协作 ── */}
+          <TabsContent value="collab" className="space-y-4">
+            <Card className="p-6">
+              <BizAgentsPanel />
+            </Card>
+          </TabsContent>
+          <TabsContent value="usage" className="space-y-4">            <UsageStatsTab />          </TabsContent>
+        </Tabs>
+      </main>
+    </div>
+  );
+}
