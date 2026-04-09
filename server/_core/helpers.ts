@@ -189,7 +189,8 @@ export const callClawGatewayRpc = (method: string, params: Record<string, any> =
 
 // ── 文件下载 Token ──
 export function generateFileToken(adoptId: string, runtimeAgentId: string, relPath: string, ttlSeconds: number): string {
-  const secret = process.env.JWT_SECRET || "linggan-file-token-secret";
+  const secret = process.env.FILE_TOKEN_SECRET || process.env.JWT_SECRET || "";
+  if (!secret) throw new Error("FILE_TOKEN_SECRET or JWT_SECRET must be set");
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
   const payload = Buffer.from(JSON.stringify({ adoptId, runtimeAgentId, path: relPath, exp })).toString("base64url");
   const sig = createHmac("sha256", secret).update(payload).digest("base64url");
@@ -277,7 +278,8 @@ export function verifyFileToken(rawToken: string): { ok: true; adoptId: string; 
   const sig = rawToken.slice(dotIdx + 1);
 
   const { createHmac } = require("crypto");
-  const secret = process.env.JWT_SECRET || "linggan-file-token-secret";
+  const secret = process.env.FILE_TOKEN_SECRET || process.env.JWT_SECRET || "";
+  if (!secret) return { ok: false, error: "server secret not configured", status: 500 };
   const expectedSig = createHmac("sha256", secret).update(payload).digest("base64url");
   if (sig !== expectedSig) return { ok: false, error: "invalid token signature", status: 401 };
 

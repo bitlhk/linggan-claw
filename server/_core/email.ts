@@ -171,16 +171,10 @@ export async function sendPasswordResetEmail(
   resetToken: string,
   requestOrigin?: string
 ): Promise<boolean> {
-  // 优先级：请求来源 > 系统配置 > 环境变量 > 默认值
-  let frontendUrl: string;
-  
-  if (requestOrigin) {
-    // 从请求头获取（最准确）
-    frontendUrl = requestOrigin;
-  } else {
-    // 从系统配置或环境变量读取
-    frontendUrl = await getSystemConfigValue("frontend_url", process.env.FRONTEND_URL || "http://localhost:5174");
-  }
+  // 安全：密码重置链接只从服务端配置取，不信任请求头（防钓鱼）
+  const configUrl = (await getSystemConfigValue("frontend_url", "")).trim();
+  const frontendUrl = configUrl || (process.env.FRONTEND_URL || "").trim() || "http://localhost:5174";
+  // requestOrigin 参数保留向后兼容但不再使用
   
   const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
   const subject = "【灵感】密码重置";
