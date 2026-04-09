@@ -3,6 +3,7 @@ import { sanitizeFileName, streamFileDownload } from "./helpers";
 import { mkdirSync, existsSync, readdirSync, statSync } from "fs";
 import { clawChatLimiter } from "./security";
 import { resolveRequesterUserId, readOpenclawJson, OPENCLAW_HOME } from "./helpers";
+import path from "path";
 
 export function registerBusinessRoutes(app: express.Express) {
 
@@ -59,6 +60,46 @@ export function registerBusinessRoutes(app: express.Express) {
     "---",
     "",
   ].join("\n");
+
+  // ── Stock Analysis WebUI: 静态文件本地 serve + API 代理 ──────────────
+  const stockStaticDir = path.resolve(process.cwd(), "stock-webui");
+
+  // API 请求代理到 stock analysis 服务（8188）
+  app.use("/api/claw/stock-webui/api", async (req: any, res: any) => {
+    const http = await import("http");
+    const targetPath = "/api" + req.url;
+    const proxyReq = http.request({
+      hostname: "127.0.0.1",
+      port: 8188,
+      path: targetPath,
+      method: req.method,
+      headers: { ...req.headers, host: "127.0.0.1:8188" },
+    }, (proxyRes: any) => {
+      const headers = { ...proxyRes.headers };
+      delete headers["transfer-encoding"];
+      res.writeHead(proxyRes.statusCode, headers);
+      proxyRes.pipe(res, { end: true });
+    });
+    proxyReq.on("error", (err: any) => {
+      console.error("[STOCK-API] proxy error:", err.message);
+      if (!res.headersSent) res.status(502).json({ error: "Stock API unavailable" });
+    });
+    req.pipe(proxyReq, { end: true });
+  });
+
+  // 静态文件直接从本地 serve（CSS/JS/图片，秒加载）
+  app.use("/api/claw/stock-webui", express.static(stockStaticDir, { maxAge: "7d" }));
+
+  // SPA fallback: 非文件请求返回 index.html
+  app.use("/api/claw/stock-webui", (_req: any, res: any) => {
+    const indexPath = path.join(stockStaticDir, "index.html");
+    if (existsSync(indexPath)) {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).json({ error: "Stock WebUI not installed" });
+    }
+  });
 
   // ── 业务 Agent 列表（协作广场用，从 DB 动态加载）──────────────────────
   app.get("/api/claw/business-agents", async (req, res) => {

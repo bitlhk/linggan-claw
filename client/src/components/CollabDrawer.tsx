@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { CodeAgentView } from "./code-agent/CodeAgentView";
-import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna } from "lucide-react";
+import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3 } from "lucide-react";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ function agentIcon(id: string, size = 16) {
   if (id === "task-code") return <Code2 size={size} style={style} />;
   if (id === "task-finance") return <TrendingUp size={size} style={style} />;
   if (id === "task-hermes") return <Dna size={size} style={{ color: "#be1e2d" }} />;
+  if (id === "task-stock") return <BarChart3 size={size} style={{ color: "#ef4444" }} />;
   return <Bot size={size} style={style} />;
 }
 
@@ -153,6 +154,7 @@ function agentDesc(id: string) {
   if (id === "task-code") return "在沙箱中执行代码，安全隔离";
   if (id === "task-finance") return "DCF/LBO 建模、竞争分析、行业研究报告（远端金融投顾）";
   if (id === "task-hermes") return "团队每次对话都在编织集体智慧";
+  if (id === "task-stock") return "AI 智能选股，11+ 交易策略，技术面+消息面+筹码分析";
   return "业务智能体";
 }
 function fmtSize(bytes: number) {
@@ -416,6 +418,46 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
   }, [msgs, MSGS_KEY]);
 
   const [files, setFiles] = useState<TaskFile[]>([]);
+  const [recording, setRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const toggleRecording = useCallback(async () => {
+    if (recording) {
+      // Stop
+      mediaRecorderRef.current?.stop();
+      mediaRecorderRef.current?.stream.getTracks().forEach(t => t.stop());
+      setRecording(false);
+      return;
+    }
+    // Start
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus" : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (blob.size < 100) return;
+        try {
+          const fd = new FormData();
+          fd.append("audio", blob, "voice.webm");
+          const res = await fetch(apiBase + "/api/claw/voice/transcribe", { method: "POST", body: fd, credentials: "include" });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.text) setInput(prev => prev + data.text);
+          }
+        } catch {}
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+    } catch (err: any) {
+      alert("无法启动录音：" + (err.message || "请检查麦克风权限"));
+    }
+  }, [recording, apiBase]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -511,7 +553,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
         <span className="flex items-center justify-center" style={{ width: 18, height: 18 }}>{agentIcon(agent.id, 18)}</span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold truncate" style={{ color: "var(--oc-text-primary)" }}>{agent.name}</div>
-          <div className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{agent.id === "task-hermes" ? "共享空间 · 集体记忆" : "per-session · 独立沙箱"}</div>
+          <div className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{agent.id === "task-hermes" ? "共享空间 · 集体记忆" : agent.id === "task-stock" ? "A股/港股/美股 · 11策略" : "per-session · 独立沙箱"}</div>
         </div>
         {countdown !== null && <span className="text-[10px] px-1.5 py-0.5 rounded animate-pulse" style={{ background: "rgba(239,68,68,.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,.3)" }}>{Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")} 后超时</span>}
         {sessionKey && !countdown && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.25)" }}>进行中</span>}
@@ -540,6 +582,29 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
                 <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#22c55e", opacity: 0.8 }} />
                 共享空间 · 对话将沉淀为团队记忆
               </p>
+            </>
+          ) : agent.id === "task-stock" ? (
+            <>
+              <div className="flex items-center justify-center text-3xl">📈</div>
+              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵鉴 · 股票分析</p>
+              <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>AI 驱动的多策略选股分析，支持 A 股、港股、美股</p>
+              <div className="mt-4 mx-auto max-w-[260px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(34,197,94,0.04)", border: "1px solid rgba(34,197,94,0.12)" }}>
+                <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
+                {[
+                  { q: "用缠论分析茅台 600519", icon: "🔮" },
+                  { q: "分析比亚迪的多头趋势", icon: "📊" },
+                  { q: "波浪理论看宁德时代 300750", icon: "🌊" },
+                  { q: "帮我看看腾讯 hk00700 的均线", icon: "📉" },
+                ].map(({ q, icon }) => (
+                  <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-center gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}><span>{icon}</span>{q}</p>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+                {["多头趋势", "均线金叉", "缩量回踩", "放量突破", "缠论", "波浪理论", "龙头策略", "情绪周期"].map(s => (
+                  <span key={s} className="px-2 py-0.5 rounded-full text-[10px]" style={{ background: "rgba(34,197,94,0.08)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.15)" }}>{s}</span>
+                ))}
+              </div>
+              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>支持多轮对话 · DeepSeek 驱动</p>
             </>
           ) : ENGINE_ICON[agent.id] ? (
             <>
@@ -609,6 +674,14 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
         })}
         <div ref={bottomRef} />
       </div>
+      {agent.id === "task-stock" && !streaming && msgs.length > 0 && (
+        <div className="px-4 py-2 border-t shrink-0 flex items-center justify-center" style={{ borderColor: "var(--oc-border)" }}>
+          <a href="/api/claw/stock-webui/" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80" style={{ color: "#22c55e", background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)", textDecoration: "none" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            打开完整面板（回测 · 持仓 · 历史）
+          </a>
+        </div>
+      )}
       {files.length > 0 && (
         <div className="px-4 py-2.5 border-t shrink-0" style={{ borderColor: "var(--oc-border)" }}>
           <div className="flex items-center justify-between mb-1.5">
@@ -634,6 +707,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
       <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: "var(--oc-border)" }}>
         <div className="flex items-end gap-2 rounded-xl px-3 py-2" style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", opacity: sessionExpired ? 0.5 : 1 }}>
           <button onClick={renewSession} title="新会话" className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-80 transition-colors" style={{ background: "var(--oc-border)", border: "none" }}><Plus size={14} style={{ color: "var(--oc-text-secondary)" }} /></button><textarea value={input} disabled={sessionExpired} onChange={(e) => { setInput(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder={sessionExpired ? "会话已超时" : `向 ${agent.name} 发起任务...`} rows={1} className="flex-1 bg-transparent text-sm resize-none focus:outline-none" style={{ color: "var(--oc-text-primary)", lineHeight: "22px", height: 22, maxHeight: 100, overflowY: "hidden" }} />
+          <button onClick={toggleRecording} disabled={sessionExpired} className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-colors" style={{ background: recording ? "#ef4444" : "var(--oc-border)", border: "none" }} title={recording ? "停止录音" : "语音输入"}>{recording ? <MicOff size={13} color="white" /> : <Mic size={13} style={{ color: "var(--oc-text-secondary)" }} />}</button>
           <button onClick={sendMessage} disabled={streaming || !input.trim() || sessionExpired} className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center disabled:opacity-25 active:scale-90" style={{ background: "var(--oc-accent)", border: "none" }}><Send size={12} color="white" /></button>
         </div>
         <p className="text-[10px] mt-1 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>Enter 发送 · 30分钟无操作自动终止</p>
