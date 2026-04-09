@@ -1,10 +1,11 @@
 import "dotenv/config";
 // 全局异常捕获：防止 uncaught exception 导致服务崩溃，并打印完整 stack 方便排查
 process.on("uncaughtException", (err: Error) => {
-  console.error("[UNCAUGHT EXCEPTION] Service will continue running.");
+  console.error("[UNCAUGHT EXCEPTION] Shutting down gracefully...");
   console.error("Error:", err?.message);
   console.error("Stack:", err?.stack);
-  // 不退出进程，让 systemd 不需要重启
+  // 给 PM2/systemd 5 秒优雅退出，然后重启干净的进程
+  setTimeout(() => process.exit(1), 5000);
 });
 process.on("unhandledRejection", (reason: unknown) => {
   console.error("[UNHANDLED REJECTION]", reason);

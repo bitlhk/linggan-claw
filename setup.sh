@@ -29,8 +29,10 @@ echo ""
 read -rp "  应用端口 [5180]: " PORT
 PORT=${PORT:-5180}
 
-read -rp "  MySQL 密码 [linggan123]: " MYSQL_PWD
-MYSQL_PWD=${MYSQL_PWD:-linggan123}
+DEFAULT_PWD=$(gen_secret | tr -dc "a-zA-Z0-9" | head -c 16)
+read -rp "  MySQL 密码 [自动生成]: " MYSQL_PWD
+MYSQL_PWD=${MYSQL_PWD:-$DEFAULT_PWD}
+echo "  → 使用密码: ${MYSQL_PWD:0:4}****"
 
 read -rp "  你的域名（留空则用 localhost）: " DOMAIN
 DOMAIN=${DOMAIN:-}

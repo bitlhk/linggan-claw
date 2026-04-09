@@ -18,20 +18,20 @@ export function setupSecurityHeaders(app: Express) {
         directives: {
           defaultSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // 开发环境需要，生产环境应限制
+          scriptSrc: ["'self'", "'unsafe-inline'"], // unsafe-eval 已移除；如需动态脚本可用 nonce 替代
           imgSrc: ["'self'", "data:", "https:"],
           connectSrc: ["'self'"],
           fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
           objectSrc: ["'none'"],
           mediaSrc: ["'self'"],
           frameSrc: ["'self'", ...(process.env.CSP_FRAME_ALLOW ? process.env.CSP_FRAME_ALLOW.split(",").map(s => s.trim()) : [])],
-          upgradeInsecureRequests: null, // 开发环境不使用 HTTPS 升级
+          upgradeInsecureRequests: process.env.NODE_ENV === "production" ? [] : null, // 生产环境自动升级 HTTP→HTTPS
         },
       },
       crossOriginEmbedderPolicy: false, // 允许 iframe 嵌入
       crossOriginOpenerPolicy: false, // 开发环境允许跨域 opener
       crossOriginResourcePolicy: { policy: "cross-origin" },
-      hsts: false, // 开发环境不使用 HSTS
+      hsts: { maxAge: 31536000, includeSubDomains: true }, // 强制 HTTPS 1 年
     })
   );
 }
@@ -43,11 +43,23 @@ import { getClientIp } from "./ip-utils";
  * 注意：已禁用通用速率限制，改为只限制 4xx 错误请求（在 error-tracking.ts 中实现）
  * 只保留登录/注册和敏感操作的速率限制
  */
-export const generalLimiter = (req: Request, res: Response, next: NextFunction) => {
-  // 直接通过，不做限制
-  // 4xx 错误限制由 block4xxAbuse 中间件处理
-  next();
-};
+export const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  message: { error: "请求过于频繁，请稍后再试" },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req: Request) => {
+    // 静态资源和健康检查不限流
+    if (req.path.startsWith("/assets/") || req.path === "/health") return true;
+    const trusted = (process.env.CLAW_CHAT_RATELIMIT_TRUSTED_IPS || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (trusted.length > 0) {
+      const ip = getClientIp(req);
+      if (trusted.includes(ip)) return true;
+    }
+    return false;
+  },
+});
 
 /**
  * 登录/注册速率限制
@@ -106,10 +118,13 @@ export const authLimiter = process.env.NODE_ENV === "development"
  * 已禁用：根据用户要求，不再限制操作频率
  * 直接通过，不做限制
  */
-export const strictLimiter = (req: Request, res: Response, next: NextFunction) => {
-  // 已禁用限流，直接通过
-  next();
-};
+export const strictLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: "敏感操作过于频繁，请稍后再试" },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 /**
  * 输入验证中间件（使用 express-validator）
