@@ -12,6 +12,8 @@ export function registerBusinessRoutes(app: express.Express) {
   // ── TIL 辅助：远端 file-service 代理 + tenantShort 计算 ────────────
   const TENANT_SECRET_LOCAL = process.env.TENANT_SECRET || "linggan-tenant-2026-default-change-me";
   const REMOTE_FILE_SERVICE_PORT = 19798;
+  // file-service 自己的 auth token，跟 bizAgent.apiToken（agent backend token）不同
+  const FILE_SERVICE_TOKEN = "public-skill-demo-2026";
   function computeTenantShort(uid: number, aid: string): string {
     return createHmac("sha256", TENANT_SECRET_LOCAL).update(`uid:${uid}|agent:${aid}`).digest("hex").slice(0, 16);
   }
@@ -22,14 +24,14 @@ export function registerBusinessRoutes(app: express.Express) {
       return `${u.protocol}//${u.hostname}:${REMOTE_FILE_SERVICE_PORT}`;
     } catch { return null; }
   }
-  async function fetchRemoteFiles(bizAgent: any, tenantShort: string): Promise<any[]> {
+  async function fetchRemoteFiles(bizAgent: any, tenantShort: string, source: string = "task-ppt"): Promise<any[]> {
     const fsUrl = getRemoteFileServiceUrl(bizAgent);
     if (!fsUrl) return [];
     const httpMod = await import("http");
     return await new Promise<any[]>((resolve, reject) => {
       const r = httpMod.get(
-        `${fsUrl}/files?tenant=${tenantShort}`,
-        { headers: { "Authorization": `Bearer ${bizAgent.apiToken || "public-skill-demo-2026"}` } },
+        `${fsUrl}/files?tenant=${tenantShort}&source=${source}`,
+        { headers: { "Authorization": `Bearer ${FILE_SERVICE_TOKEN}` } },
         (resp) => {
           let buf = "";
           resp.on("data", (c) => buf += c);
@@ -625,19 +627,40 @@ export function registerBusinessRoutes(app: express.Express) {
       const remoteMessages: Array<{role: string; content: string}> = [];
       if (agentId === "task-slides") {
         remoteMessages.push({ role: "system", content: [
-          "你是 HTML 演示文稿专家，通过多轮对话帮用户创建精美的单文件 HTML 幻灯片。",
+          "你是 HTML 幻灯片生成专家。能力来自 frontend-slides 技能（claude code 全局技能），通过 Skill 工具调用。",
           "",
-          "【关键约束】你正在通过 API 代理与用户通信，不支持交互式工具。",
-          "- 绝对不要使用 AskUserQuestion 工具，它会导致会话阻塞。",
-          "- 如果需要用户确认或选择，直接把问题作为普通文本输出，用户会在下一条消息中回复。",
-          "- 支持多轮对话：先了解需求，再逐步完善。",
+          "【语言 CRITICAL】永远用简体中文回复用户。即使技能文档/参考文件是英文，所有面向用户的回复必须是中文，绝对不要夹杂英文整句。",
           "",
-          "【工作流程】",
-          "1. 第一轮：如果用户需求模糊，用文本询问关键信息（主题、页数、风格偏好）",
-          "2. 收到确认后：直接生成完整的单文件 HTML 幻灯片（含 CSS 动画、键盘左右翻页）",
-          "3. 后续轮次：根据用户反馈修改优化",
+          "【关键约束】通过 API 代理通信，不支持 AskUserQuestion 工具（前端没对应 UI，会卡住）。",
+          "- 任何需要用户决策的环节，改用普通 markdown 文本列出问题和选项，用户在下一条消息回复。",
+          "- 不要试图调用 AskUserQuestion，跳过它，用文本询问代替。",
           "",
-          "始终用中文回复。生成的 HTML 放在 markdown 代码块中（```html）。",
+          "【工作流程】严格按 frontend-slides 技能的 Phase 1 → Phase 2 → Phase 3 走，但所有 AskUserQuestion 步骤改成纯文本提问：",
+          "",
+          "Phase 1 — 内容发现（第一轮回复，必做）",
+          "用一段中文 + markdown 列表问用户这 4 个问题（一次性问完，不要每次只问一个）：",
+          "1. 用途：这份幻灯片用在哪里？（路演 / 教学 / 会议演讲 / 内部汇报）",
+          "2. 长度：大致多少页？（短 5-10 / 中 10-20 / 长 20+）",
+          "3. 内容：内容素材准备好了吗？（已准备好 / 有大纲 / 只有主题）",
+          "4. 风格：希望的整体氛围？（专业自信 / 激情活力 / 沉稳专注 / 感性动人）",
+          "",
+          "如果用户首条消息已明确给出主题和风格描述，可以简化提问（只问没说清的部分），不要把 4 个问题都强行问一遍。",
+          "",
+          "Phase 2 — 风格确认（第二轮）",
+          "根据用户答案，用文本简要描述 2-3 种打算尝试的风格方向（典型字体 / 配色 / 动效），让用户选一种或说「我都试试」。",
+          "",
+          "Phase 3 — 生成（第三轮或用户明确说「开始生成」）",
+          "调用 Skill 工具执行 frontend-slides 生成完整 HTML 文件。生成完后用中文回执：文件名、页数、风格名。",
+          "",
+          "【强制规则】",
+          "- viewport-fitting 是 NON-NEGOTIABLE：每页 100vh + overflow:hidden + clamp() 字号",
+          "- 单文件 HTML，零依赖，所有 CSS/JS inline",
+          "- 字体用 Fontshare 或 Google Fonts，禁止 Inter / Roboto / Arial 等通用字体",
+          "- 配色避免烂大街的紫色渐变",
+          "",
+          "例外：如果用户说「快」「直接生成」「不用问」或一开始就给了完整内容+明确风格，可以跳过 Phase 1/2 直接进 Phase 3。",
+          "",
+          "始终用中文回复。生成的 HTML 通过 frontend-slides 技能写到文件，不要把整段 HTML 贴在聊天消息里。",
         ].join("\n") });
       } else if (agentId === "task-code") {
         // 复用本地模式的代码助手 system prompt + 远程模式约束
@@ -903,7 +926,8 @@ export function registerBusinessRoutes(app: express.Express) {
       // TIL: 远端业务 Agent → 通过 remote file service 代理
       try {
         const tenantShort = computeTenantShort(userId, agentId);
-        const remoteFiles = await fetchRemoteFiles(bizAgent, tenantShort);
+        const fsSource = (agentId === "task-code" || agentId === "task-slides") ? "task-code" : "task-ppt";
+        const remoteFiles = await fetchRemoteFiles(bizAgent, tenantShort, fsSource);
         const items = remoteFiles
           .map((f: any) => ({
             name: f.name,
@@ -959,12 +983,13 @@ export function registerBusinessRoutes(app: express.Express) {
       const safeFile = sanitizeFileName(fileName);
       if (!fsUrl || !safeFile) return res.status(400).json({ error: "非法" });
       const tenantShort = computeTenantShort(userId, agentId);
+      const fsSource = (agentId === "task-code" || agentId === "task-slides") ? "task-code" : "task-ppt";
       try {
         const httpMod = await import("http");
-        const fileUrl = `${fsUrl}/download/${tenantShort}/${encodeURIComponent(fileName)}`;
+        const fileUrl = `${fsUrl}/download/${tenantShort}/${encodeURIComponent(fileName)}?source=${fsSource}`;
         httpMod.get(
           fileUrl,
-          { headers: { "Authorization": `Bearer ${bizAgent.apiToken || "public-skill-demo-2026"}` } },
+          { headers: { "Authorization": `Bearer ${FILE_SERVICE_TOKEN}` } },
           (proxyRes) => {
             if (proxyRes.statusCode !== 200) {
               res.status(proxyRes.statusCode || 404).json({ error: "远端文件不存在" });
@@ -1022,11 +1047,12 @@ export function registerBusinessRoutes(app: express.Express) {
       const fsUrl = getRemoteFileServiceUrl(bizAgent);
       if (!fsUrl) return res.status(500).json({ error: "remote file service unavailable" });
       const tenantShort = computeTenantShort(userId, agentId);
+      const fsSource = (agentId === "task-code" || agentId === "task-slides") ? "task-code" : "task-ppt";
       try {
         const httpMod = await import("http");
         const fsPath = clearAll
-          ? `/delete/${tenantShort}`
-          : `/delete/${tenantShort}/${encodeURIComponent(fileName)}`;
+          ? `/delete/${tenantShort}?source=${fsSource}`
+          : `/delete/${tenantShort}/${encodeURIComponent(fileName)}?source=${fsSource}`;
         const fsFullUrl = new URL(fsPath, fsUrl);
         const result: any = await new Promise((resolve, reject) => {
           const r = httpMod.request({
@@ -1034,7 +1060,7 @@ export function registerBusinessRoutes(app: express.Express) {
             port: fsFullUrl.port,
             path: fsFullUrl.pathname,
             method: "DELETE",
-            headers: { "Authorization": `Bearer ${bizAgent.apiToken || "public-skill-demo-2026"}` },
+            headers: { "Authorization": `Bearer ${FILE_SERVICE_TOKEN}` },
           }, (resp) => {
             let buf = "";
             resp.on("data", (c) => buf += c);
@@ -1095,17 +1121,18 @@ export function registerBusinessRoutes(app: express.Express) {
       return res.status(403).json({ error: "不允许" });
     }
 
-    // TIL: task-ppt 走 file-service + tenantShort 隔离（其他 agent 走老的 /files/ 代理）
-    if (agentId === "task-ppt") {
+    // TIL: task-ppt / task-code / task-slides 走 file-service + tenantShort 隔离
+    if (agentId === "task-ppt" || agentId === "task-code" || agentId === "task-slides") {
       const fsUrl = getRemoteFileServiceUrl(bizAgent);
       if (fsUrl) {
         const tenantShort = computeTenantShort(userId, agentId);
-        const fileUrl = `${fsUrl}/download/${tenantShort}/${encodeURIComponent(fileName)}`;
+        const fsSource = (agentId === "task-code" || agentId === "task-slides") ? "task-code" : "task-ppt";
+        const fileUrl = `${fsUrl}/download/${tenantShort}/${encodeURIComponent(fileName)}?source=${fsSource}`;
         try {
           const httpMod = await import("http");
           httpMod.get(
             fileUrl,
-            { headers: { "Authorization": `Bearer ${bizAgent.apiToken || "public-skill-demo-2026"}` } },
+            { headers: { "Authorization": `Bearer ${FILE_SERVICE_TOKEN}` } },
             (proxyRes) => {
               if (proxyRes.statusCode !== 200) {
                 res.status(proxyRes.statusCode || 404).json({ error: "远端文件不存在" });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useAgentState, sendBusinessMessage, stopBusinessMessage, clearAgentState } from "@/lib/businessChatStore";
 import { CodeAgentView } from "./code-agent/CodeAgentView";
-import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3, Compass, Maximize2, FolderOpen, Trash2 } from "lucide-react";
+import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Square, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3, Compass, Maximize2, FolderOpen, Trash2 } from "lucide-react";
 import { SlidePreviewModal } from "@/components/pages/SlidePreviewModal";
 import { createPortal } from "react-dom";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
@@ -407,20 +408,9 @@ function CollabExecPanel({ req, adoptId, onBack, onDone }: { req: any; adoptId: 
 
 // ── 业务 Agent 任务面板 ───────────────────────────────────────────────────
 function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void }) {
-  const SK_KEY = `collab_sk_${agent.id}`;
-  const MSGS_KEY = `collab_msgs_${agent.id}`;
-  const [msgs, setMsgs] = useState<TaskMessage[]>(() => {
-    try {
-      const saved = sessionStorage.getItem(MSGS_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
+  // module-level store: state survives unmount, fetch keeps writing in background
+  const { msgs, sessionKey, streaming } = useAgentState(agent.id);
   const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const [sessionKey, setSessionKey] = useState<string | null>(() => { try { return sessionStorage.getItem(SK_KEY); } catch { return null; } });
-  useEffect(() => {
-    try { sessionStorage.setItem(MSGS_KEY, JSON.stringify(msgs)); } catch {}
-  }, [msgs, MSGS_KEY]);
 
   const [files, setFiles] = useState<TaskFile[]>([]);
   const [recording, setRecording] = useState(false);
@@ -480,12 +470,12 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
       let remaining = 5 * 60; setCountdown(remaining);
       countdownRef.current = setInterval(() => {
         remaining--; setCountdown(remaining);
-        if (remaining <= 0) { clearTimers(); setSessionExpired(true); setCountdown(null); setSessionKey(null); try { sessionStorage.removeItem(SK_KEY); sessionStorage.removeItem(MSGS_KEY); } catch {} }
+        if (remaining <= 0) { clearTimers(); setSessionExpired(true); setCountdown(null); clearAgentState(agent.id); }
       }, 1000);
     }, SESSION_TIMEOUT_MS - 5 * 60 * 1000);
-  }, [clearTimers, SK_KEY]);
+  }, [clearTimers, agent.id]);
 
-  const renewSession = useCallback(() => { setSessionExpired(false); setCountdown(null); setSessionKey(null); try { sessionStorage.removeItem(SK_KEY); sessionStorage.removeItem(MSGS_KEY); } catch {}; setMsgs([]); startTimeout(); }, [startTimeout, SK_KEY, MSGS_KEY]);
+  const renewSession = useCallback(() => { setSessionExpired(false); setCountdown(null); clearAgentState(agent.id); startTimeout(); }, [startTimeout, agent.id]);
   useEffect(() => { startTimeout(); return clearTimers; }, [agent.id]);
 
   const fetchFiles = useCallback(async () => {
@@ -504,51 +494,14 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
 
   useEffect(() => { fetchFiles(); const t = setInterval(fetchFiles, 30000); return () => clearInterval(t); }, [fetchFiles]);
 
-  const sendMessage = async () => {
+  const sendMessage = () => {
     if (!input.trim() || streaming || sessionExpired) return;
     const text = input.trim(); setInput("");
-    setMsgs(p => [...p, { role: "user", text }]);
-    setMsgs(p => [...p, { role: "assistant", text: "" }]);
-    setStreaming(true); startTimeout();
-    try {
-      const resp = await fetch(`${apiBase}/api/claw/business-chat-stream`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ agentId: agent.id, message: text, sessionKey }) });
-      if (!resp.ok || !resp.body) throw new Error(`请求失败 (${resp.status})`);
-      const sk = resp.headers.get("X-Session-Key");
-      if (sk && !sessionKey) { setSessionKey(sk); try { sessionStorage.setItem(SK_KEY, sk); } catch {} }
-      const reader = resp.body.getReader(); const decoder = new TextDecoder(); let buf = ""; let currentEvent = "";
-      while (true) {
-        const { done, value } = await reader.read(); if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n"); buf = lines.pop() ?? "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) { currentEvent = line.slice(7).trim(); continue; }
-          if (line.startsWith(": ")) continue; // keepalive comment
-          if (!line.startsWith("data: ")) { currentEvent = ""; continue; }
-          const raw = line.slice(6).trim(); if (raw === "[DONE]") break;
-          try {
-            const chunk = JSON.parse(raw);
-            if (chunk.error) { setMsgs(p => { const n = [...p]; n[n.length - 1] = { role: "assistant", text: `（${chunk.error}）` }; return n; }); break; }
-            // Hermes tool started
-            if (chunk.__hermes_tool === "started") {
-              setMsgs(p => { const n = [...p]; const last = n[n.length - 1]; if (last?.role === "assistant") { const tcs = last.toolCalls || []; n[n.length - 1] = { ...last, toolCalls: [...tcs, { id: chunk.id, name: chunk.name, preview: chunk.preview || "", status: "running", ts: Date.now() }] }; } return n; });
-              continue;
-            }
-            // Hermes tool completed
-            if (chunk.__hermes_tool === "completed") {
-              setMsgs(p => { const n = [...p]; const last = n[n.length - 1]; if (last?.role === "assistant" && last.toolCalls?.length) { const tcs = [...last.toolCalls]; const idx = tcs.findLastIndex((t: HermesToolCall) => t.status === "running"); if (idx >= 0) tcs[idx] = { ...tcs[idx], status: chunk.is_error ? "error" : "done", durationMs: chunk.durationMs }; n[n.length - 1] = { ...last, toolCalls: tcs }; } return n; });
-              continue;
-            }
-            // Hermes reasoning
-            if (chunk.__reasoning) { setMsgs(p => { const n = [...p]; const last = n[n.length - 1]; if (last?.role === "assistant") n[n.length - 1] = { ...last, reasoning: (last.reasoning || "") + chunk.__reasoning }; return n; }); continue; }
-            // Text delta
-            const delta = chunk?.choices?.[0]?.delta?.content;
-            if (delta) setMsgs(p => { const n = [...p]; n[n.length - 1] = { role: "assistant", text: n[n.length - 1].text + delta, status: undefined }; return n; });
-            if (chunk.__status) setMsgs(p => { const n = [...p]; n[n.length - 1] = { ...n[n.length - 1], status: chunk.__status }; return n; });
-          } catch {}
-        }
-      }
-    } catch (e: any) { setMsgs(p => { const n = [...p]; if (n.length && n[n.length - 1].role === "assistant" && !n[n.length - 1].text) n[n.length - 1] = { role: "assistant", text: e.message || "出错了" }; return n; }); }
-    finally { setStreaming(false); let c = 0; const poll = () => { fetchFiles(); c++; if (c < 3) setTimeout(poll, 5000); }; setTimeout(poll, 2000); }
+    startTimeout();
+    // Detached: keeps streaming into module store even if TaskPanel unmounts.
+    void sendBusinessMessage(agent.id, text, apiBase, () => {
+      let c = 0; const poll = () => { fetchFiles(); c++; if (c < 3) setTimeout(poll, 5000); }; setTimeout(poll, 2000);
+    });
   };
 
   return (
@@ -632,6 +585,41 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
               <p className="text-xs mt-1" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(agent.id)}</p>
               <p className="text-[10px] mt-2" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>支持多轮对话 · 30分钟无操作自动终止</p>
             </>
+          ) : agent.id === "task-code" ? (
+            <>
+              <div className="flex items-center justify-center"><Code2 size={40} style={{ color: "#c7000b" }} /></div>
+              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵匠 · 代码助手</p>
+              <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>沙箱执行 · 多语言 · 文件产出可下载</p>
+              <div className="mt-4 mx-auto max-w-[260px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(199,0,11,0.04)", border: "1px solid rgba(199,0,11,0.15)" }}>
+                <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
+                {[
+                  { q: "写一个 Python 脚本批量重命名文件", icon: "🐍" },
+                  { q: "用 Node.js 写个 HTTP 文件服务器", icon: "🌐" },
+                  { q: "帮我写一个二叉树的前中后序遍历", icon: "🌳" },
+                  { q: "Python 解析 Excel 并导出 JSON", icon: "📊" },
+                ].map(({ q, icon }) => (
+                  <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-center gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}><span>{icon}</span>{q}</p>
+                ))}
+              </div>
+              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>多语言代码沙箱 · Claude 驱动</p>
+            </>
+          ) : agent.id === "task-slides" ? (
+            <>
+              <div className="flex items-center justify-center"><Presentation size={40} style={{ color: "#c7000b" }} /></div>
+              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵匠 · 幻灯片（HTML）</p>
+              <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>动画丰富的网页幻灯片 · 一句话生成</p>
+              <div className="mt-4 mx-auto max-w-[260px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(199,0,11,0.04)", border: "1px solid rgba(199,0,11,0.15)" }}>
+                <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
+                {[
+                  { q: "做一个介绍灵虾的 HTML 幻灯片，带动画", icon: "✨" },
+                  { q: "5 页 Q4 业务回顾的网页演示", icon: "📈" },
+                  { q: "做一个产品发布会的 HTML slides", icon: "🚀" },
+                ].map(({ q, icon }) => (
+                  <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-center gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}><span>{icon}</span>{q}</p>
+                ))}
+              </div>
+              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>HTML 幻灯片生成 · Claude 驱动</p>
+            </>
           ) : agent.id === "task-trace" ? (
             <>
               <div className="flex items-center justify-center">
@@ -667,7 +655,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
         {msgs.map((m, i) => {
           const isLast = i === msgs.length - 1; const isPlaceholder = isLast && m.role === "assistant" && !m.text && streaming;
           if (m.role === "user") return <div key={i} className="flex justify-end"><div className="max-w-[80%] rounded-2xl rounded-tr-sm px-3 py-2 text-sm lingxia-bubble-user lingxia-user-msg-text">{m.text}</div></div>;
-          if (isPlaceholder) return <div key={i} className="flex items-center gap-2"><span className="flex items-center justify-center" style={{ width: 16, height: 16 }}>{agentIcon(agent.id, 16)}</span><Loader2 size={14} className="animate-spin" style={{ color: "var(--oc-text-secondary)" }} />{m.status && <span className="text-xs" style={{ color: "var(--oc-text-secondary)", opacity: 0.8 }}>{m.status}</span>}</div>;
+          if (isPlaceholder) return <div key={i} className="flex items-start gap-2 lingxia-msg-fade"><span className="shrink-0 mt-1 flex items-center">{agentIcon(agent.id, 16)}</span><div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-2 lingxia-bubble-ai" style={{ color: "#697086" }}><span className="animate-pulse">●</span><span className="animate-pulse" style={{ animationDelay: "0.2s" }}>●</span><span className="animate-pulse" style={{ animationDelay: "0.4s" }}>●</span>{m.status && <span className="text-xs ml-1" style={{ opacity: 0.8 }}>{m.status}</span>}</div></div>;
           {
             // Parse __files marker from remote agent output
             const filesMatch = m.text.match(/<!-- __files:(\[.*?\]) -->/);
@@ -692,7 +680,8 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
                 </div>;
               })}</div>}
               {cleanText && <ChatMarkdown content={cleanText} />}
-              {isLast && streaming && <div className="flex items-center gap-1.5 mt-2 py-1" style={{ color: "var(--oc-text-secondary)" }}><Loader2 size={12} className="animate-spin" /><span className="text-xs" style={{ opacity: 0.8 }}>{m.status || "思考中..."}</span></div>}
+              {isLast && streaming && cleanText && <span className="animate-pulse ml-0.5" style={{ color: "#697086" }}>▌</span>}
+              {isLast && streaming && m.status && !cleanText && <div className="flex items-center gap-1.5 mt-1 text-xs" style={{ color: "var(--oc-text-secondary)", opacity: 0.7 }}><span className="animate-pulse">●</span><span>{m.status}</span></div>}
               {remoteFiles.length > 0 && (() => {
                 // 把同一个 base name 的 preview.html 和 pptx 合并成一张卡片
                 const previews = remoteFiles.filter((f: any) => String(f.name).toLowerCase().endsWith("-preview.html"));
@@ -861,7 +850,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
         <div className="flex items-end gap-2 rounded-xl px-3 py-2" style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", opacity: sessionExpired ? 0.5 : 1 }}>
           <button onClick={renewSession} title="新会话" className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center hover:opacity-80 transition-colors" style={{ background: "var(--oc-border)", border: "none" }}><Plus size={14} style={{ color: "var(--oc-text-secondary)" }} /></button><textarea value={input} disabled={sessionExpired} onChange={(e) => { setInput(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 100) + "px"; }} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder={sessionExpired ? "会话已超时" : `向 ${agent.name} 发起任务...`} rows={1} className="flex-1 bg-transparent text-sm resize-none focus:outline-none" style={{ color: "var(--oc-text-primary)", lineHeight: "22px", height: 22, maxHeight: 100, overflowY: "hidden" }} />
           <button onClick={toggleRecording} disabled={sessionExpired} className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-colors" style={{ background: recording ? "#ef4444" : "var(--oc-border)", border: "none" }} title={recording ? "停止录音" : "语音输入"}>{recording ? <MicOff size={13} color="white" /> : <Mic size={13} style={{ color: "var(--oc-text-secondary)" }} />}</button>
-          <button onClick={sendMessage} disabled={streaming || !input.trim() || sessionExpired} className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center disabled:opacity-25 active:scale-90" style={{ background: "var(--oc-accent)", border: "none" }}><Send size={12} color="white" /></button>
+          {streaming ? (<button onClick={() => stopBusinessMessage(agent.id)} title="停止生成" className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center active:scale-90 transition-colors" style={{ background: "#ef4444", border: "none" }}><Square size={11} color="white" fill="white" /></button>) : (<button onClick={sendMessage} disabled={!input.trim() || sessionExpired} className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center disabled:opacity-25 active:scale-90" style={{ background: "var(--oc-accent)", border: "none" }}><Send size={12} color="white" /></button>)}
         </div>
         <p className="text-[10px] mt-1 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>Enter 发送 · 30分钟无操作自动终止</p>
       </div>
@@ -1003,7 +992,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
 
         <div className="flex-1 overflow-hidden min-h-0">
           {activeAgent ? (
-            activeAgent.id === "task-code" ? <CodeAgentView agent={activeAgent} apiBase={apiBase} onBack={() => setActiveAgent(null)} /> : <TaskPanel agent={activeAgent} onBack={() => setActiveAgent(null)} />
+            <TaskPanel key={activeAgent.id} agent={activeAgent} onBack={() => setActiveAgent(null)} />
           ) : activeCollab && adoptId ? (
             <CollabExecPanel req={activeCollab} adoptId={adoptId} onBack={() => setActiveCollab(null)} onDone={() => { setActiveCollab(null); incomingQ.refetch(); }} />
           ) : (
