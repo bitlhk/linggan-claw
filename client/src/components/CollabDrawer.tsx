@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { CodeAgentView } from "./code-agent/CodeAgentView";
-import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3, Compass} from "lucide-react";
+import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3, Compass, Maximize2, FolderOpen, Trash2 } from "lucide-react";
+import { SlidePreviewModal } from "@/components/pages/SlidePreviewModal";
+import { createPortal } from "react-dom";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -145,6 +147,7 @@ function AgentHeroAnimation({ agentId }: { agentId: string }) {
       <div className="hero-pf-icon hero-pf-right">
         <img src={engineSrc} alt="engine" />
       </div>
+
     </div>
   );
 }
@@ -459,6 +462,8 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
     }
   }, [recording]);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [fileHistoryOpen, setFileHistoryOpen] = useState(false);
+  const [previewModalData, setPreviewModalData] = useState<{ previewUrl: string; downloadUrl: string; fileName: string } | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -557,8 +562,22 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
         </div>
         {countdown !== null && <span className="text-[10px] px-1.5 py-0.5 rounded animate-pulse" style={{ background: "rgba(239,68,68,.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,.3)" }}>{Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")} 后超时</span>}
         {sessionKey && !countdown && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.25)" }}>进行中</span>}
+        <button
+          onClick={() => { setFileHistoryOpen(prev => { if (!prev) fetchFiles(); return !prev; }); }}
+          title={fileHistoryOpen ? "关闭文件面板" : `历史文件 (${files.length})`}
+          className="ml-1 p-1.5 rounded-md flex items-center gap-1 text-[10px] transition-colors"
+          style={{
+            color: fileHistoryOpen ? "#c7000b" : "var(--oc-text-secondary)",
+            border: `1px solid ${fileHistoryOpen ? "rgba(199,0,11,0.5)" : "var(--oc-border)"}`,
+            background: fileHistoryOpen ? "rgba(199,0,11,0.08)" : "transparent",
+          }}
+        >
+          <FolderOpen size={12} />
+          {files.length > 0 && <span className="font-mono" style={{ color: "#c7000b" }}>{files.length}</span>}
+        </button>
       </div>
       {sessionExpired && <div className="mx-4 mt-3 rounded-lg px-3 py-2.5 text-xs" style={{ background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.25)", color: "#ef4444" }}><div className="font-semibold">⏰ 会话已超时</div><button onClick={renewSession} className="mt-1.5 px-2.5 py-1 rounded text-[11px] font-medium" style={{ background: "rgba(239,68,68,.2)", border: "1px solid rgba(239,68,68,.35)", color: "#ef4444", cursor: "pointer" }}>开启新会话</button></div>}
+      <div className="flex-1 min-h-0 flex" style={{ overflow: "hidden" }}>
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
         {agent.id === "task-hermes" && msgs.length > 0 && (
           <div className="flex items-center justify-center gap-1.5 py-1 text-[10px]" style={{ color: "var(--oc-text-secondary)", opacity: 0.5 }}>
@@ -674,29 +693,161 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
               })}</div>}
               {cleanText && <ChatMarkdown content={cleanText} />}
               {isLast && streaming && <div className="flex items-center gap-1.5 mt-2 py-1" style={{ color: "var(--oc-text-secondary)" }}><Loader2 size={12} className="animate-spin" /><span className="text-xs" style={{ opacity: 0.8 }}>{m.status || "思考中..."}</span></div>}
-              {remoteFiles.length > 0 && <div className="mt-3 space-y-2">
-                {remoteFiles.map((rf: any, fi: number) => {
-                  const previewUrl = "/api/claw/remote-file?agentId=" + encodeURIComponent(agent.id) + "&file=" + encodeURIComponent(rf.url.split("/").pop() || rf.name) + "&preview=1";
-                  const dlUrl = "/api/claw/remote-file?agentId=" + encodeURIComponent(agent.id) + "&file=" + encodeURIComponent(rf.url.split("/").pop() || rf.name);
-                  const isHtml = rf.ext === ".html";
-                  return <div key={fi} className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(124,58,237,0.3)", background: "rgba(124,58,237,0.06)" }}>
-                    {isHtml && <div style={{ position: "relative", width: "100%", paddingBottom: "56.25%", background: "var(--oc-bg)" }}>
-                      <iframe src={previewUrl} style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none", borderRadius: "12px 12px 0 0" }} sandbox="allow-scripts allow-same-origin" />
-                    </div>}
-                    <div className="flex items-center justify-between px-3 py-2">
-                      <div className="min-w-0"><p className="text-xs font-medium truncate" style={{ color: "var(--oc-text-primary)" }}>{rf.name}</p><p className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{rf.size > 1024 ? (rf.size / 1024).toFixed(1) + " KB" : rf.size + " B"}</p></div>
-                      <div className="flex items-center gap-1.5 ml-2 shrink-0">
-                        {isHtml && <a href={previewUrl} target="_blank" rel="noreferrer" className="px-2 py-1 rounded-md text-[10px] font-medium" style={{ color: "#a78bfa", border: "1px solid rgba(124,58,237,.35)", background: "rgba(124,58,237,.12)", textDecoration: "none" }}>全屏预览</a>}
-                        <a href={dlUrl} download={rf.name} className="px-2 py-1 rounded-md text-[10px] font-medium" style={{ color: "#22c55e", border: "1px solid rgba(34,197,94,.3)", background: "rgba(34,197,94,.08)", textDecoration: "none" }}>下载</a>
-                      </div>
-                    </div>
-                  </div>;
-                })}
-              </div>}
+              {remoteFiles.length > 0 && (() => {
+                // 把同一个 base name 的 preview.html 和 pptx 合并成一张卡片
+                const previews = remoteFiles.filter((f: any) => String(f.name).toLowerCase().endsWith("-preview.html"));
+                const groups = previews.map((p: any) => {
+                  const baseName = p.name.replace(/-preview\.html$/i, "");
+                  const pptx = remoteFiles.find((f: any) =>
+                    f.name === baseName + ".pptx" || f.name === baseName || f.name.replace(/\.pptx$/i, "") === baseName
+                  );
+                  return { preview: p, pptx };
+                });
+                const orphans = remoteFiles.filter((f: any) =>
+                  !String(f.name).toLowerCase().endsWith("-preview.html") &&
+                  !previews.some((p: any) => p.name.replace(/-preview\.html$/i, "") === String(f.name).replace(/\.pptx$/i, ""))
+                );
+                return (
+                  <div className="mt-3 space-y-2">
+                    {groups.map((g: any, fi: number) => {
+                      const rf = g.preview;
+                      const pptxFile = g.pptx || rf;
+                      const previewUrl = "/api/claw/remote-file?agentId=" + encodeURIComponent(agent.id) + "&file=" + encodeURIComponent(rf.url?.split("/").pop() || rf.name) + "&preview=1";
+                      const dlName = pptxFile.url?.split("/").pop() || pptxFile.name;
+                      const dlUrl = "/api/claw/business-files/download?agentId=" + encodeURIComponent(agent.id) + "&file=" + encodeURIComponent(dlName);
+                      const displayName = String(pptxFile.name).replace(/\.pptx$/i, "");
+                      const openFullscreen = () => setPreviewModalData({ previewUrl, downloadUrl: dlUrl, fileName: pptxFile.name });
+                      return (
+                        <div key={fi} className="rounded-xl overflow-hidden relative group" style={{ border: "1px solid rgba(199,0,11,0.3)", background: "rgba(199,0,11,0.04)" }}>
+                          <div style={{ position: "relative", width: "100%", paddingBottom: "56.25%", background: "#f8f8f8" }}>
+                            <iframe
+                              src={previewUrl}
+                              style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
+                              sandbox="allow-scripts allow-same-origin"
+                              title={displayName}
+                            />
+                            {/* 浮动标题条 - 左上 */}
+                            <div className="absolute top-2 left-2 px-2 py-1 rounded-md flex items-center gap-1.5 text-[11px] font-medium" style={{ background: "rgba(0,0,0,0.6)", color: "#fff", backdropFilter: "blur(8px)", maxWidth: "60%", zIndex: 50 }}>
+                              <Presentation className="w-3 h-3 shrink-0" style={{ color: "#ff6b6b" }} />
+                              <span className="truncate">{displayName}</span>
+                            </div>
+                            {/* 浮动按钮组 - 右上 */}
+                            <div className="absolute top-2 right-2 flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity" style={{ zIndex: 50 }}>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openFullscreen(); }}
+                                title="全屏预览"
+                                className="w-7 h-7 rounded-md flex items-center justify-center transition-all hover:scale-110"
+                                style={{ background: "rgba(0,0,0,0.65)", color: "#fff", border: "1px solid rgba(255,255,255,0.15)", backdropFilter: "blur(8px)" }}
+                              >
+                                <Maximize2 className="w-3 h-3" />
+                              </button>
+                              <a
+                                href={dlUrl}
+                                download={pptxFile.name}
+                                onClick={(e) => e.stopPropagation()}
+                                title="下载 PPTX"
+                                className="w-7 h-7 rounded-md flex items-center justify-center transition-all hover:scale-110"
+                                style={{ background: "rgba(199,0,11,0.9)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)", textDecoration: "none" }}
+                              >
+                                <Download className="w-3 h-3" />
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {orphans.map((rf: any, oi: number) => {
+                      const dlUrl = "/api/claw/business-files/download?agentId=" + encodeURIComponent(agent.id) + "&file=" + encodeURIComponent(rf.url?.split("/").pop() || rf.name);
+                      return (
+                        <div key={"orph-" + oi} className="rounded-xl px-3 py-2 flex items-center gap-2" style={{ border: "1px solid rgba(199,0,11,0.3)", background: "rgba(199,0,11,0.04)" }}>
+                          <Presentation className="w-4 h-4 shrink-0" style={{ color: "#c7000b" }} />
+                          <span className="text-xs truncate flex-1" style={{ color: "var(--oc-text-primary)" }}>{rf.name}</span>
+                          <a href={dlUrl} download={rf.name} className="px-2 py-1 rounded-md text-[10px] font-medium flex items-center gap-1" style={{ color: "#fff", background: "#c7000b", textDecoration: "none" }}><Download className="w-3 h-3" />下载</a>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div></div>;
           }
         })}
         <div ref={bottomRef} />
+      </div>
+      {/* 右侧 inline 文件面板（CodeAgentView 风格，非 overlay） */}
+      {fileHistoryOpen && (
+        <div className="w-60 shrink-0 flex flex-col" style={{ borderLeft: "1px solid var(--oc-border)", background: "var(--oc-card)" }}>
+          <div className="flex items-center justify-between px-3 py-2 shrink-0" style={{ borderBottom: "1px solid var(--oc-border)" }}>
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--oc-text-secondary)" }}>
+              <FolderOpen size={12} style={{ color: "#c7000b" }} />
+              <span>文件</span>
+              <span className="font-mono text-[10px] normal-case tracking-normal" style={{ color: "#c7000b" }}>({files.length})</span>
+            </div>
+            <div className="flex items-center gap-0.5">
+              <button onClick={() => fetchFiles()} disabled={filesLoading} className="p-1 rounded" title="刷新" style={{ color: "var(--oc-text-secondary)", border: "none", background: "none", cursor: "pointer" }}>
+                {filesLoading ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
+              </button>
+              <button onClick={() => setFileHistoryOpen(false)} className="p-1 rounded" title="关闭" style={{ color: "var(--oc-text-secondary)", border: "none", background: "none", cursor: "pointer" }}>
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto py-1">
+            {files.length === 0 && !filesLoading && (
+              <div className="text-center py-8 text-[11px]" style={{ color: "var(--oc-text-secondary)", opacity: 0.55 }}>
+                暂无文件
+              </div>
+            )}
+            {files.map((f: any) => {
+              const isPptx = /\.pptx$/i.test(f.name);
+              const isPreview = /-preview\.html$/i.test(f.name);
+              return (
+                <div key={f.name} className="px-2.5 py-1.5 flex items-center gap-1.5 group hover:bg-black/5 transition-colors">
+                  {isPptx ? <Presentation className="w-3 h-3 shrink-0" style={{ color: "#c7000b" }} /> :
+                   isPreview ? <BarChart3 className="w-3 h-3 shrink-0" style={{ color: "#c7000b" }} /> :
+                   <Presentation className="w-3 h-3 shrink-0" style={{ color: "var(--oc-text-secondary)" }} />}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] truncate" style={{ color: "var(--oc-text-primary)" }} title={f.name}>
+                      {f.name.replace(/\.(pptx|html)$/i, "").replace(/-preview$/, "")}
+                    </div>
+                    {f.size > 0 && <div className="text-[9px]" style={{ color: "var(--oc-text-secondary)", opacity: 0.7 }}>{fmtSize(f.size)}</div>}
+                  </div>
+                  <div className="flex items-center gap-0 opacity-40 group-hover:opacity-100 transition-opacity shrink-0">
+                    <a
+                      href={`/api/claw/business-files/download?agentId=${encodeURIComponent(agent.id)}&file=${encodeURIComponent(f.name)}`}
+                      download={f.name}
+                      className="p-1 rounded"
+                      title="下载"
+                      style={{ color: "#c7000b", textDecoration: "none" }}
+                    >
+                      <Download size={10} />
+                    </a>
+                    <button
+                      onClick={() => deleteFile(f.name)}
+                      className="p-1 rounded"
+                      title="删除"
+                      style={{ color: "#ef4444", background: "none", border: "none", cursor: "pointer" }}
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {files.length > 0 && (
+            <div className="shrink-0 px-2 py-2" style={{ borderTop: "1px solid var(--oc-border)" }}>
+              <button
+                onClick={clearFiles}
+                className="w-full py-1 rounded text-[10px] transition-colors"
+                style={{ color: "#ef4444", border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.04)", cursor: "pointer" }}
+              >
+                清空全部
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       </div>
       {agent.id === "task-stock" && !streaming && msgs.length > 0 && (
         <div className="px-4 py-2 border-t shrink-0 flex items-center justify-center" style={{ borderColor: "var(--oc-border)" }}>
@@ -704,28 +855,6 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
             打开完整面板（回测 · 持仓 · 历史）
           </a>
-        </div>
-      )}
-      {files.length > 0 && (
-        <div className="px-4 py-2.5 border-t shrink-0" style={{ borderColor: "var(--oc-border)" }}>
-          <div className="flex items-center justify-between mb-1.5">
-            <p className="text-[10px] font-semibold" style={{ color: "var(--oc-text-secondary)" }}>📎 生成的文件</p>
-            <div className="flex items-center gap-2">
-              <button onClick={fetchFiles} disabled={filesLoading} className="text-[10px]" style={{ color: "var(--oc-text-secondary)", background: "none", border: "none", cursor: "pointer" }}>{filesLoading ? "刷新中" : "↻ 刷新"}</button>
-              <button onClick={clearFiles} className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: "#ef4444", background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.2)", cursor: "pointer" }}>清空</button>
-            </div>
-          </div>
-          <div className="space-y-1 max-h-28 overflow-y-auto">
-            {files.map((f) => (
-              <div key={f.name} className="flex items-center justify-between rounded-lg px-2.5 py-1.5" style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)" }}>
-                <div className="min-w-0 flex-1"><p className="text-xs truncate" style={{ color: "var(--oc-text-primary)" }}>{f.name}</p><p className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{fmtSize(f.size)}</p></div>
-                <div className="ml-2 flex items-center gap-1 shrink-0">
-                  <a href={`/api/claw/business-files/download?agentId=${agent.id}&file=${encodeURIComponent(f.name)}`} download={f.name} className="p-1.5 rounded-md flex items-center gap-1 text-[10px]" style={{ color: "#22c55e", border: "1px solid rgba(34,197,94,.25)", background: "rgba(34,197,94,.08)" }}><Download size={11} />下载</a>
-                  <button onClick={() => deleteFile(f.name)} className="p-1.5 rounded-md text-[10px]" style={{ color: "#ef4444", border: "1px solid rgba(239,68,68,.25)", background: "rgba(239,68,68,.08)", cursor: "pointer" }}>✕</button>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
       )}
       <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: "var(--oc-border)" }}>
@@ -736,6 +865,17 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
         </div>
         <p className="text-[10px] mt-1 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>Enter 发送 · 30分钟无操作自动终止</p>
       </div>
+      {/* ── Manus 级全屏预览模态框（Portal 到 document.body 避免 stacking context trap）── */}
+      {previewModalData && typeof document !== "undefined" && createPortal(
+        <SlidePreviewModal
+          open={!!previewModalData}
+          onClose={() => setPreviewModalData(null)}
+          previewUrl={previewModalData.previewUrl}
+          downloadUrl={previewModalData.downloadUrl}
+          fileName={previewModalData.fileName}
+        />,
+        document.body
+      )}
     </div>
   );
 }

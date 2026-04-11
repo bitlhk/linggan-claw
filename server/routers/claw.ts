@@ -26,6 +26,9 @@ import {
   deleteSkillMarketItem,
   incrementSkillDownload,
   touchClawActivity,
+  listBusinessAgentAudit,
+  reverseTenantToken,
+  getTenantAuditStats,
 } from "../db";
 import {
   APP_ROOT,
@@ -1044,4 +1047,36 @@ export const clawRouter = router({
         // 暂时返回空，前端用 localStorage
         return { messages: [] as Array<{ role: string; text: string; ts: number }> };
       }),
+
+    // ── Day 4: TIL 审计面板 API (管理员) ─────────────────────────────
+    adminTenantAuditList: adminProcedure
+      .input(z.object({
+        userId: z.number().int().positive().optional(),
+        agentId: z.string().max(64).optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        limit: z.number().int().min(1).max(1000).optional().default(100),
+      }).optional())
+      .query(async ({ input }) => {
+        const rows = await listBusinessAgentAudit({
+          userId: input?.userId,
+          agentId: input?.agentId,
+          fromIso: input?.from,
+          toIso: input?.to,
+          limit: input?.limit,
+        });
+        return { rows, count: rows.length };
+      }),
+
+    adminTenantAuditReverse: adminProcedure
+      .input(z.object({ tenantToken: z.string().min(1).max(64) }))
+      .query(async ({ input }) => {
+        return await reverseTenantToken(input.tenantToken);
+      }),
+
+    adminTenantAuditStats: adminProcedure
+      .query(async () => {
+        return await getTenantAuditStats();
+      }),
+
 });

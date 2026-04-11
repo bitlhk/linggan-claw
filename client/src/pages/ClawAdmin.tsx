@@ -15,8 +15,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3 } from "lucide-react";
+import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck } from "lucide-react";
 import { UsageStatsTab } from "@/components/pages/UsageStatsTab";
+import { TenantAuditTab } from "@/components/pages/TenantAuditTab";
 import { BizAgentsPanel } from "@/components/BizAgentsPanel";
 import { toast } from "sonner";
 import { useBrand, invalidateBrandClientCache } from "@/lib/useBrand";
@@ -416,6 +417,10 @@ export default function ClawAdmin() {
               <Zap className="w-4 h-4" />
               智能体协作
             </TabsTrigger>
+            <TabsTrigger value="tenant-audit" className="clawadmin-tab gap-1.5">
+              <ShieldCheck className="w-4 h-4" />
+              隔离审计
+            </TabsTrigger>
           </TabsList>
 
           {/* ── 实例管理 ── */}
@@ -803,6 +808,7 @@ export default function ClawAdmin() {
             </Card>
           </TabsContent>
           <TabsContent value="usage" className="space-y-4">            <UsageStatsTab />          </TabsContent>
+          <TabsContent value="tenant-audit" className="space-y-4">            <TenantAuditTab />          </TabsContent>
         </Tabs>
       </main>
     </div>
