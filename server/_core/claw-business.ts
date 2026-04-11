@@ -107,18 +107,27 @@ export function registerBusinessRoutes(app: express.Express) {
   const stockStaticDir = path.resolve(process.cwd(), "stock-webui");
 
   // API 请求代理到 stock analysis 服务（8188）
+  // 注入 X-Owner-Id header → 后端按用户隔离 portfolio_* 表
   app.use("/api/claw/stock-webui/api", async (req: any, res: any) => {
     const http = await import("http");
     const targetPath = "/api" + req.url;
+    const userId = await resolveRequesterUserId(req, res);
+    if (!userId) {
+      res.status(401).json({ error: "UNAUTHORIZED", message: "Login required to access stock-webui API" });
+      return;
+    }
+    const ownerId = `lingxia_user_${userId}`;
     const proxyReq = http.request({
       hostname: "127.0.0.1",
       port: 8188,
       path: targetPath,
       method: req.method,
-      headers: { ...req.headers, host: "127.0.0.1:8188" },
+      headers: { ...req.headers, host: "127.0.0.1:8188", "x-owner-id": ownerId },
     }, (proxyRes: any) => {
       const headers = { ...proxyRes.headers };
       delete headers["transfer-encoding"];
+      // 防止跨用户切换时浏览器/SPA cache 命中陈旧数据
+      headers["cache-control"] = "no-store, no-cache, must-revalidate";
       res.writeHead(proxyRes.statusCode, headers);
       proxyRes.pipe(res, { end: true });
     });
@@ -202,6 +211,516 @@ export function registerBusinessRoutes(app: express.Express) {
 
     // ── 远端 Agent 动态路由（从 DB 读取 api_url / api_token）──────────────
     const bizAgentCfg = bizAgentList.find((a: any) => a.id === agentId);
+
+    // ── 个人理财助手专用分支：走 Hermes + 中行+招行 白皮书 grounding + akshare 数据 ──
+    if (bizAgentCfg?.kind === "remote" && agentId === "task-my-wealth") {
+      // TIL：构建租户上下文（虽然是个人 dogfood，结构还是保留好后续多用户）
+      const tenantCtx: TenantContext = await beginTenantSession(
+        userId, agentId, "chat_send",
+        { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
+      );
+      const wealthSessionKey = `task-my-wealth_user${userId}_${tenantCtx.sessionKey}`;
+      console.log("[MY-WEALTH] starting run", { agentId, session: wealthSessionKey, tenant: tenantCtx.tenantShort });
+      const wealthUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8642");
+      const wealthToken = bizAgentCfg.apiToken || "";
+
+      // 注入 system prompt（中行 + 招行 双白皮书 grounding）
+      const MY_WEALTH_SYSTEM_PROMPT = [
+        "你是「灵犀 · 个人理财助手」，专属于灵虾创始人本人的中文 AI 理财顾问。",
+        "",
+        "【两个权威白皮书】每次决策必须至少引用一个：",
+        "- 中国银行《2025 个人金融全球资产配置白皮书》—— 全球大类资产年度排名",
+        "- 招商银行《中国私人财富报告》—— 人-家-企-社 客群分析框架",
+        "",
+        "【中行 2025 大类资产配置位序】",
+        "港股 > A股 > 人民币黄金 > 美元黄金 > 新兴市场股市 > 美国股市 > 金属铜铝 > 日股 > 欧股 > 美债 > 中债 > 商品（原油）",
+        "",
+        "【工作模式】",
+        "QUERY: 查询持仓 / 行情 / 基金 / 宏观 → holdings_read + stock_quote/fund_lookup/macro_indicator",
+        "REBALANCE: 再平衡建议 → holdings_read + portfolio_analyze + whitepaper_advice",
+        "DEEPDIVE: 深度研究单一资产 → stock_quote + fund_lookup + macro_indicator",
+        "TAX: 税费估算 → tax_estimate",
+        "",
+        "【7 个工具】均位于 /home/ubuntu/.hermes/skills/personal/wealth/tools/，必须用 terminal 工具调用：",
+        "echo \'{...}\' | python /home/ubuntu/.hermes/skills/personal/wealth/tools/<tool>.py",
+        "",
+        "工具列表：",
+        "- holdings_read       读取本地 holdings.json（input: {}）",
+        "- stock_quote         查股票行情（input: {symbol, market: a/hk/us}）",
+        "- fund_lookup         查公募基金净值（input: {code}）",
+        "- macro_indicator     查宏观数据（input: {indicator: cpi/ppi/m2/lpr/cny_usd}）",
+        "- portfolio_analyze   分析持仓配置（input: {}）",
+        "- whitepaper_advice   双白皮书建议（input: {client_profile: 稳健/稳健增益/积极进取/进取}）",
+        "- tax_estimate        税费估算（input: {asset_type, action, amount, hold_days}）",
+        "",
+        "【行为约束 - 红线，绝不越界】",
+        "1. 永远用中文回复",
+        "2. 每次决策引用至少 1 个白皮书框架",
+        "3. **永远在末尾加免责声明**：'本建议仅供参考，投资有风险，决策由您本人承担'",
+        "4. **禁止做的 4 件事**：",
+        "   - 不推荐具体证券（说'增配大消费板块'，不说'买茅台'）",
+        "   - 不杠杆建议",
+        "   - 不保证收益",
+        "   - 不内幕信息暗示",
+        "5. 不知道的就说不知道",
+        "6. 隐私保护：用百分比和'约 X 万元'代替具体金额",
+        "",
+        "【输出格式】中文 markdown：📊 决策类型 / 🔍 案件分析 / 🛠️ 工具调用过程 / 💡 决策建议 / 📚 白皮书依据 / ⚠️ 免责声明",
+      ].join("\n");
+
+      // Step 1: POST /v1/runs
+      const runBody = JSON.stringify({
+        input: msgStr,
+        instructions: MY_WEALTH_SYSTEM_PROMPT,
+        session_id: wealthSessionKey,
+      });
+
+      const runReq = http.request({
+        hostname: wealthUrl.hostname,
+        port: parseInt(String(wealthUrl.port || "8642"), 10),
+        path: "/v1/runs",
+        method: "POST",
+        timeout: 10000,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(runBody),
+          ...(wealthToken ? { "Authorization": `Bearer ${wealthToken}` } : {}),
+          "X-Hermes-User-Id": `lingxia_user_${userId}`,
+        },
+      }, (runRes: any) => {
+        let data = "";
+        runRes.on("data", (c: Buffer) => { data += c.toString(); });
+        runRes.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            const runId = parsed.run_id;
+            if (!runId) {
+              res.write(`data: ${JSON.stringify({ error: "task-my-wealth run failed: " + data })}\n\n`);
+              res.end();
+              return;
+            }
+            console.log("[MY-WEALTH] run started:", runId);
+
+            // 工具名翻译表
+            const WEALTH_TOOL_ICONS: Record<string, string> = {
+              holdings_read: "📂",
+              stock_quote: "📈",
+              fund_lookup: "💼",
+              macro_indicator: "🌐",
+              portfolio_analyze: "📊",
+              whitepaper_advice: "📘",
+              tax_estimate: "💰",
+            };
+            const WEALTH_TOOL_LABELS: Record<string, string> = {
+              holdings_read: "读取持仓",
+              stock_quote: "查股票行情",
+              fund_lookup: "查基金净值",
+              macro_indicator: "查宏观指标",
+              portfolio_analyze: "分析配置结构",
+              whitepaper_advice: "查白皮书建议",
+              tax_estimate: "估算税费",
+            };
+            const translateTool = (toolName: string, preview: string): [string, string] => {
+              if (toolName === "terminal" && typeof preview === "string") {
+                const m = preview.match(/personal\/wealth\/tools\/(\w+)\.py/);
+                if (m && WEALTH_TOOL_ICONS[m[1]]) {
+                  const friendly = m[1];
+                  return [friendly, `${WEALTH_TOOL_ICONS[friendly]} ${WEALTH_TOOL_LABELS[friendly] || friendly}`];
+                }
+              }
+              return [toolName || "tool", preview || ""];
+            };
+
+            // Step 2: GET /v1/runs/{run_id}/events
+            const eventsReq = http.request({
+              hostname: wealthUrl.hostname,
+              port: parseInt(String(wealthUrl.port || "8642"), 10),
+              path: `/v1/runs/${runId}/events`,
+              method: "GET",
+              timeout: 0,
+              headers: {
+                "Accept": "text/event-stream",
+                ...(wealthToken ? { "Authorization": `Bearer ${wealthToken}` } : {}),
+              },
+            }, (eventsRes: any) => {
+              let buf = "";
+              const wealthHeartbeat = setInterval(() => {
+                if (!res.writableEnded) { res.write(`: keepalive\n\n`); if (typeof (res as any).flush === 'function') (res as any).flush(); }
+                else clearInterval(wealthHeartbeat);
+              }, 5000);
+
+              eventsRes.on("data", (chunk: Buffer) => {
+                buf += chunk.toString();
+                const lines = buf.split("\n");
+                buf = lines.pop() ?? "";
+
+                for (const line of lines) {
+                  if (line.startsWith(": ")) continue;
+                  if (!line.startsWith("data: ")) continue;
+                  const raw = line.slice(6).trim();
+                  if (!raw) continue;
+
+                  try {
+                    const evt = JSON.parse(raw);
+                    const evtType = evt.event || "";
+
+                    if (evtType === "message.delta") {
+                      const deltaText = evt.delta || "";
+                      res.write(`data: ${JSON.stringify({
+                        choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
+                      })}\n\n`);
+                    } else if (evtType === "tool.started") {
+                      // 🛡️ L2 安全护栏：terminal 沙箱区检查
+                      if (evt.tool === "terminal") {
+                        const previewStr = String(evt.preview || "");
+                        const isWhitelisted = previewStr.includes("/personal/wealth/");
+                        if (!isWhitelisted) {
+                          console.warn("[MY-WEALTH SECURITY] 拦截非授权 terminal 调用:", previewStr.slice(0, 200));
+                          res.write(`data: ${JSON.stringify({ __status: "⚠️ 安全策略：检测到未授权工具调用，会话已中止" })}\n\n`);
+                          res.write(`data: ${JSON.stringify({ error: "安全策略拦截：本次会话尝试调用非授权命令，已自动终止。" })}\n\n`);
+                          res.write(`data: [DONE]\n\n`);
+                          auditTenantAccess(tenantCtx, "security_alert", {
+                            reason: "terminal_whitelist_violation",
+                            attempted_command: previewStr.slice(0, 500),
+                            agent_id: agentId,
+                          }).catch(() => {});
+                          try { eventsRes.destroy(); } catch {}
+                          if (!res.writableEnded) res.end();
+                          clearInterval(wealthHeartbeat);
+                          return;
+                        }
+                      }
+                      const [friendlyName, friendlyPreview] = translateTool(evt.tool || "", evt.preview || "");
+                      res.write(`data: ${JSON.stringify({ __status: `${friendlyName}: ${friendlyPreview || "执行中..."}` })}\n\n`);
+                      res.write(`data: ${JSON.stringify({
+                        __hermes_tool: "started",
+                        id: `wealth_${Date.now()}`,
+                        name: friendlyName,
+                        preview: friendlyPreview,
+                      })}\n\n`);
+                    } else if (evtType === "tool.completed") {
+                      const [friendlyName] = translateTool(evt.tool || "", evt.preview || "");
+                      res.write(`data: ${JSON.stringify({
+                        __hermes_tool: "completed",
+                        name: friendlyName,
+                        is_error: Boolean(evt.error),
+                        durationMs: Math.round((evt.duration || 0) * 1000),
+                      })}\n\n`);
+                    } else if (evtType === "reasoning.available") {
+                      res.write(`data: ${JSON.stringify({ __reasoning: evt.text || "" })}\n\n`);
+                    } else if (evtType === "run.completed") {
+                      if (evt.usage) {
+                        res.write(`data: ${JSON.stringify({ __perf: { usage: evt.usage } })}\n\n`);
+                      }
+                      res.write(`data: [DONE]\n\n`);
+                    } else if (evtType === "run.failed") {
+                      res.write(`data: ${JSON.stringify({ error: evt.error || "task-my-wealth run failed" })}\n\n`);
+                      res.write(`data: [DONE]\n\n`);
+                    }
+                  } catch {}
+                }
+                if (typeof (res as any).flush === 'function') (res as any).flush();
+              });
+
+              eventsRes.on("end", () => {
+                console.log("[MY-WEALTH] events stream ended");
+                clearInterval(wealthHeartbeat);
+                auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
+                if (!res.writableEnded) {
+                  res.write(`data: [DONE]\n\n`);
+                  res.end();
+                }
+              });
+            });
+
+            eventsReq.on("error", (err: any) => {
+              console.error("[MY-WEALTH] events req error:", err.message);
+              if (!res.writableEnded) {
+                res.write(`data: ${JSON.stringify({ error: "events stream error: " + err.message })}\n\n`);
+                res.end();
+              }
+            });
+            eventsReq.end();
+          } catch (e: any) {
+            console.error("[MY-WEALTH] parse runId error:", e.message);
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ error: "my-wealth: " + e.message })}\n\n`);
+              res.end();
+            }
+          }
+        });
+      });
+      runReq.on("error", (err: any) => {
+        console.error("[MY-WEALTH] run req error:", err.message);
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ error: "my-wealth create run failed: " + err.message })}\n\n`);
+          res.end();
+        }
+      });
+      runReq.write(runBody);
+      runReq.end();
+      return;
+    }
+
+    // ── EV 理赔决策助手专用分支：走 Hermes /v1/runs + 系统提示 + SSE 工具名翻译 ──
+    if (bizAgentCfg?.kind === "remote" && agentId === "task-claim-ev") {
+      // TIL：构建租户上下文（同 task-hermes 模式，但 sessionKey 命名空间不同）
+      const tenantCtx: TenantContext = await beginTenantSession(
+        userId, agentId, "chat_send",
+        { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
+      );
+      // session_id 三元组隔离：task-claim-ev_<userId>_<TIL sessionKey>
+      // 同一用户的多个 case 会拿到不同 session（因为 TIL sessionKey 含时间戳），互不串扰
+      const claimSessionKey = `task-claim-ev_user${userId}_${tenantCtx.sessionKey}`;
+      console.log("[CLAIM-EV] starting run", { agentId, session: claimSessionKey, tenant: tenantCtx.tenantShort });
+      const claimUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8642");
+      const claimToken = bizAgentCfg.apiToken || "";
+
+      // 注入 EV 决策 system prompt（白皮书 grounded）via Hermes instructions field
+      const EV_CLAIM_SYSTEM_PROMPT = [
+        "你是「灵犀 · EV 理赔决策助手」，专精于新能源汽车动力电池理赔的中文 AI agent。",
+        "你的知识权威来自人保再保险股份有限公司 2025 年 6 月发布的《新能源汽车动力电池保险创新白皮书》——行业首个聚焦动力电池保险的系统性白皮书。",
+        "",
+        "【白皮书核心框架】",
+        "六大篇章：产业 · 风险 · 保险 · 商业 · 创新 · 未来",
+        "三大保障缺口：① 三电保障 ② 电池梯次利用 ③ 海外服务",
+        "两大核心风险：热失控 / 容量衰减",
+        "直保 + 再保 融合模式：原保险与再保险风险分担",
+        "",
+        "【四大创新方案】每次决策必须至少引用其中一个：",
+        "① 「电池循环经济」保险配套模式 — 适用于全损残值变现、梯次利用",
+        "② 动力电池终身编码保险保障 — 适用于电池追溯、热失控源头追责",
+        "③ 基于驾驶行为的电池延保机制 — 适用于个性化定价、续保",
+        "④ 自保公司风险共担体系 — 适用于车队/网约车批量风控",
+        "",
+        "保险定位：从「风险承担者」→「生态共建者」（伴随式保障理念）",
+        "",
+        "【工作模式】",
+        "模式 A：ASSESS（事故后能不能修） — 触发：用户描述具体事故 → 调 vehicle_lookup → collision_analysis → oem_repair_protocol",
+        "模式 B：SALVAGE（全损残值） — 触发：车辆全损 → 调 battery_residual → echelon_channels",
+        "",
+        "【工具调用规范】",
+        "5 个工具均位于 /home/ubuntu/.hermes/skills/insurance/ev-claim/tools/，必须用 terminal 工具调用，stdin 传 JSON，stdout 接 JSON。",
+        "调用语法：echo \'{...}\' | python /home/ubuntu/.hermes/skills/insurance/ev-claim/tools/<tool>.py",
+        "5 个工具：vehicle_lookup / collision_analysis / oem_repair_protocol / battery_residual / echelon_channels",
+        "每个工具的输出 JSON 都有 whitepaper_ref 字段——你必须把它的内容自然嵌入最终回复。",
+        "",
+        "【行为约束】",
+        "1. 永远用中文回复",
+        "2. 每次决策必须引用至少一个白皮书框架",
+        "3. 不要编造数据——所有数字必须来自工具输出",
+        "4. 非 EV 理赔问题（油车定损、人寿险等）→ 礼貌建议用 task-hermes",
+        "5. 工具按需调用——ASSESS 调 1-3 个，SALVAGE 调 2 个，不要超调",
+        "6. 工具调用前先简短说明意图（'我现在调用 vehicle_lookup 查询...'），让用户看到推理路径",
+        "",
+        "【输出格式】中文 markdown，结构：决策类型 / 案件分析 / 决策建议 / 白皮书依据 / 免责声明",
+      ].join("\n");
+
+      // Step 1: POST /v1/runs → 获取 run_id
+      const runBody = JSON.stringify({
+        input: msgStr,
+        instructions: EV_CLAIM_SYSTEM_PROMPT,
+        session_id: claimSessionKey,
+      });
+
+      const runReq = http.request({
+        hostname: claimUrl.hostname,
+        port: parseInt(String(claimUrl.port || "8642"), 10),
+        path: "/v1/runs",
+        method: "POST",
+        timeout: 10000,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(runBody),
+          ...(claimToken ? { "Authorization": `Bearer ${claimToken}` } : {}),
+          "X-Hermes-User-Id": `lingxia_user_${userId}`,
+        },
+      }, (runRes: any) => {
+        let data = "";
+        runRes.on("data", (c: Buffer) => { data += c.toString(); });
+        runRes.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            const runId = parsed.run_id;
+            if (!runId) {
+              res.write(`data: ${JSON.stringify({ error: "task-claim-ev run failed: " + data })}\n\n`);
+              res.end();
+              return;
+            }
+            console.log("[CLAIM-EV] run started:", runId);
+
+            // SSE 工具名翻译表：terminal 调 ev-claim/tools/X.py → X + 业务图标
+            const EV_TOOL_ICONS: Record<string, string> = {
+              vehicle_lookup: "🚗",
+              collision_analysis: "💥",
+              oem_repair_protocol: "🔧",
+              battery_residual: "💎",
+              echelon_channels: "♻️",
+            };
+            const EV_TOOL_LABELS: Record<string, string> = {
+              vehicle_lookup: "查询车型电池规格",
+              collision_analysis: "分析碰撞风险",
+              oem_repair_protocol: "查 OEM 维修协议",
+              battery_residual: "估算电池残值",
+              echelon_channels: "拉梯次利用渠道",
+            };
+            // 工具名翻译函数：返回 [友好名, 友好预览]
+            // 输入：原始 tool 名 + preview 字符串
+            const translateTool = (toolName: string, preview: string): [string, string] => {
+              if (toolName === "terminal" && typeof preview === "string") {
+                const m = preview.match(/ev-claim\/tools\/(\w+)\.py/);
+                if (m && EV_TOOL_ICONS[m[1]]) {
+                  const friendly = m[1];
+                  return [friendly, `${EV_TOOL_ICONS[friendly]} ${EV_TOOL_LABELS[friendly] || friendly}`];
+                }
+              }
+              return [toolName || "tool", preview || ""];
+            };
+
+            // Step 2: GET /v1/runs/{run_id}/events → SSE 事件流
+            const eventsReq = http.request({
+              hostname: claimUrl.hostname,
+              port: parseInt(String(claimUrl.port || "8642"), 10),
+              path: `/v1/runs/${runId}/events`,
+              method: "GET",
+              timeout: 0,
+              headers: {
+                "Accept": "text/event-stream",
+                ...(claimToken ? { "Authorization": `Bearer ${claimToken}` } : {}),
+              },
+            }, (eventsRes: any) => {
+              let buf = "";
+              const claimHeartbeat = setInterval(() => {
+                if (!res.writableEnded) { res.write(`: keepalive\n\n`); if (typeof (res as any).flush === 'function') (res as any).flush(); }
+                else clearInterval(claimHeartbeat);
+              }, 5000);
+
+              eventsRes.on("data", (chunk: Buffer) => {
+                buf += chunk.toString();
+                const lines = buf.split("\n");
+                buf = lines.pop() ?? "";
+
+                for (const line of lines) {
+                  if (line.startsWith(": ")) continue;
+                  if (!line.startsWith("data: ")) continue;
+                  const raw = line.slice(6).trim();
+                  if (!raw) continue;
+
+                  try {
+                    const evt = JSON.parse(raw);
+                    const evtType = evt.event || "";
+
+                    if (evtType === "message.delta") {
+                      const deltaText = evt.delta || "";
+                      res.write(`data: ${JSON.stringify({
+                        choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
+                      })}\n\n`);
+                    } else if (evtType === "tool.started") {
+                      // 🛡️ L2 安全护栏：terminal 工具沙箱区检查
+                      // 防御 prompt injection 让 agent 跑非授权命令（rm -rf / curl 攻击者 / cat 敏感文件等）
+                      // 规则：terminal 命令必须包含 '/ev-claim/' 沙箱路径——攻击者无法构造既含
+                      // 此路径又能干坏事的命令（cat /etc/passwd 不可能含 /ev-claim/）。
+                      // 这条规则同时允许 agent 的辅助操作（如 ls 工具目录、python heredoc 等）。
+                      if (evt.tool === "terminal") {
+                        const previewStr = String(evt.preview || "");
+                        const isWhitelisted = previewStr.includes("/ev-claim/");
+                        if (!isWhitelisted) {
+                          // 🚨 检测到非授权工具调用
+                          console.warn("[CLAIM-EV SECURITY] 拦截非授权 terminal 调用:", previewStr.slice(0, 200));
+                          // 1. 推送一条用户可见的安全告警（伪装成 status + error，前端会立即停止）
+                          res.write(`data: ${JSON.stringify({
+                            __status: "⚠️ 安全策略：检测到未授权工具调用，会话已中止",
+                          })}\n\n`);
+                          res.write(`data: ${JSON.stringify({
+                            error: "安全策略拦截：本次会话尝试调用非授权命令，已自动终止。该事件已记录到审计日志。",
+                          })}\n\n`);
+                          res.write(`data: [DONE]\n\n`);
+                          // 2. 写审计日志（带 security_alert 标签）
+                          auditTenantAccess(tenantCtx, "security_alert", {
+                            reason: "terminal_whitelist_violation",
+                            attempted_command: previewStr.slice(0, 500),
+                            agent_id: agentId,
+                          }).catch(() => {});
+                          // 3. 关闭与 Hermes 的上游连接（请求源头掐断）
+                          try { eventsRes.destroy(); } catch {}
+                          // 4. 关闭与浏览器的下游 SSE
+                          if (!res.writableEnded) res.end();
+                          clearInterval(claimHeartbeat);
+                          return;
+                        }
+                      }
+                      // 白名单通过，正常翻译转发
+                      const [friendlyName, friendlyPreview] = translateTool(evt.tool || "", evt.preview || "");
+                      res.write(`data: ${JSON.stringify({ __status: `${friendlyName}: ${friendlyPreview || "执行中..."}` })}\n\n`);
+                      res.write(`data: ${JSON.stringify({
+                        __hermes_tool: "started",
+                        id: `claim_${Date.now()}`,
+                        name: friendlyName,
+                        preview: friendlyPreview,
+                      })}\n\n`);
+                    } else if (evtType === "tool.completed") {
+                      const [friendlyName] = translateTool(evt.tool || "", evt.preview || "");
+                      res.write(`data: ${JSON.stringify({
+                        __hermes_tool: "completed",
+                        name: friendlyName,
+                        is_error: Boolean(evt.error),
+                        durationMs: Math.round((evt.duration || 0) * 1000),
+                      })}\n\n`);
+                    } else if (evtType === "reasoning.available") {
+                      res.write(`data: ${JSON.stringify({ __reasoning: evt.text || "" })}\n\n`);
+                    } else if (evtType === "run.completed") {
+                      if (evt.usage) {
+                        res.write(`data: ${JSON.stringify({ __perf: { usage: evt.usage } })}\n\n`);
+                      }
+                      res.write(`data: [DONE]\n\n`);
+                    } else if (evtType === "run.failed") {
+                      res.write(`data: ${JSON.stringify({ error: evt.error || "task-claim-ev run failed" })}\n\n`);
+                      res.write(`data: [DONE]\n\n`);
+                    }
+                  } catch {}
+                }
+                if (typeof (res as any).flush === 'function') (res as any).flush();
+              });
+
+              eventsRes.on("end", () => {
+                console.log("[CLAIM-EV] events stream ended");
+                clearInterval(claimHeartbeat);
+                auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
+                if (!res.writableEnded) {
+                  res.write(`data: [DONE]\n\n`);
+                  res.end();
+                }
+              });
+            });
+
+            eventsReq.on("error", (err: any) => {
+              console.error("[CLAIM-EV] events req error:", err.message);
+              if (!res.writableEnded) {
+                res.write(`data: ${JSON.stringify({ error: "events stream error: " + err.message })}\n\n`);
+                res.end();
+              }
+            });
+            eventsReq.end();
+          } catch (e: any) {
+            console.error("[CLAIM-EV] parse runId error:", e.message);
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ error: "claim-ev: " + e.message })}\n\n`);
+              res.end();
+            }
+          }
+        });
+      });
+      runReq.on("error", (err: any) => {
+        console.error("[CLAIM-EV] run req error:", err.message);
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ error: "claim-ev create run failed: " + err.message })}\n\n`);
+          res.end();
+        }
+      });
+      runReq.write(runBody);
+      runReq.end();
+      return;
+    }
 
     // ── Hermes Agent 专用分支：走 /v1/runs + events SSE ──────────────
     if (bizAgentCfg?.kind === "remote" && agentId === "task-hermes") {

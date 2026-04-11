@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useAgentState, sendBusinessMessage, stopBusinessMessage, clearAgentState } from "@/lib/businessChatStore";
 import { CodeAgentView } from "./code-agent/CodeAgentView";
-import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Square, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3, Compass, Maximize2, FolderOpen, Trash2 } from "lucide-react";
+import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Square, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3, Battery, Compass, Maximize2, FolderOpen, Trash2 } from "lucide-react";
 import { SlidePreviewModal } from "@/components/pages/SlidePreviewModal";
 import { createPortal } from "react-dom";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
@@ -36,6 +36,8 @@ function agentIcon(id: string, size = 16) {
   if (id === "task-hermes") return <Dna size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-trace") return <Bot size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-stock") return <BarChart3 size={size} style={{ color: "#ef4444" }} />;
+  if (id === "task-claim-ev") return <Battery size={size} style={{ color: "#be1e2d" }} />;
+  if (id === "task-my-wealth") return <TrendingUp size={size} style={{ color: "#be1e2d" }} />;
   return <Bot size={size} style={style} />;
 }
 
@@ -161,6 +163,8 @@ function agentDesc(id: string) {
   if (id === "task-hermes") return "团队每次对话都在编织集体智慧";
   if (id === "task-trace") return "交付复杂任务，自动拆解规划、逐步推进";
   if (id === "task-stock") return "AI 智能选股，11+ 交易策略，技术面+消息面+筹码分析";
+  if (id === "task-claim-ev") return "新能源车专属理赔决策助手 · 基于人保再保《动力电池保险创新白皮书》框架";
+  if (id === "task-my-wealth") return "您的专属 AI 理财顾问 · 中行《全球资产配置白皮书》+ 招行《私人财富报告》双框架";
   return "业务智能体";
 }
 function fmtSize(bytes: number) {
@@ -511,7 +515,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
         <span className="flex items-center justify-center" style={{ width: 18, height: 18 }}>{agentIcon(agent.id, 18)}</span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold truncate" style={{ color: "var(--oc-text-primary)" }}>{agent.name}</div>
-          <div className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{agent.id === "task-hermes" ? "灵枢 · 共享空间" : agent.id === "task-stock" ? "灵犀 · 11策略" : agent.id === "task-trace" ? "灵枢 · 深度求索" : "per-session · 独立沙箱"}</div>
+          <div className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{agent.id === "task-hermes" ? "灵枢 · 共享空间" : agent.id === "task-stock" ? "灵犀 · 11策略" : agent.id === "task-trace" ? "灵枢 · 深度求索" : agent.id === "task-claim-ev" ? "灵犀 · EV 理赔决策" : agent.id === "task-my-wealth" ? "灵犀 · 个人理财" : "per-session · 独立沙箱"}</div>
         </div>
         {countdown !== null && <span className="text-[10px] px-1.5 py-0.5 rounded animate-pulse" style={{ background: "rgba(239,68,68,.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,.3)" }}>{Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")} 后超时</span>}
         {sessionKey && !countdown && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.25)" }}>进行中</span>}
@@ -619,6 +623,72 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
                 ))}
               </div>
               <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>HTML 幻灯片生成 · Claude 驱动</p>
+            </>
+          ) : agent.id === "task-my-wealth" ? (
+            <>
+              <div className="flex items-center justify-center">
+                <div style={{ position: "relative", width: 88, height: 88 }}>
+                  <div style={{
+                    width: 88, height: 88, borderRadius: "50%",
+                    background: "radial-gradient(circle at 35% 35%, rgba(190,30,45,0.18), rgba(190,30,45,0.05) 60%, transparent 80%)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <TrendingUp size={48} style={{ color: "#be1e2d" }} />
+                  </div>
+                  <span className="my-wealth-pulse" style={{ position: "absolute", inset: -4, borderRadius: "50%", border: "2px solid rgba(190,30,45,0.35)", pointerEvents: "none" }} />
+                  <style>{`
+                    .my-wealth-pulse { animation: my-wealth-ring 2.5s ease-out infinite; }
+                    @keyframes my-wealth-ring { 0% { transform: scale(0.85); opacity: 1; } 100% { transform: scale(1.35); opacity: 0; } }
+                  `}</style>
+                </div>
+              </div>
+              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵犀 · 个人理财助手</p>
+              <p className="text-xs mt-1.5 max-w-[280px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>您的专属 AI 理财顾问 · 中行 + 招行 双白皮书 grounding</p>
+              <div className="mt-4 mx-auto max-w-[280px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(190,30,45,0.04)", border: "1px solid rgba(190,30,45,0.15)" }}>
+                <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
+                {[
+                  { q: "看看我现在的持仓配置怎么样，按中行白皮书该怎么调？", icon: "📊" },
+                  { q: "查一下贵州茅台现在的价格和最近一个月走势", icon: "📈" },
+                  { q: "易方达蓝筹精选混合最近表现如何？", icon: "💼" },
+                  { q: "现在最新 CPI 是多少？M2 同比呢？", icon: "🌐" },
+                  { q: "如果我现在卖出 5 万元贵州茅台，要交多少税？", icon: "💰" },
+                ].map(({ q, icon }) => (
+                  <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-start gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}><span className="shrink-0">{icon}</span><span>{q}</span></p>
+                ))}
+              </div>
+              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>akshare 开源数据 · Hermes 多 persona · 7 工具协作</p>
+            </>
+          ) : agent.id === "task-claim-ev" ? (
+            <>
+              <div className="flex items-center justify-center">
+                <div style={{ position: "relative", width: 88, height: 88 }}>
+                  <div style={{
+                    width: 88, height: 88, borderRadius: "50%",
+                    background: "radial-gradient(circle at 35% 35%, rgba(34,197,94,0.18), rgba(34,197,94,0.05) 60%, transparent 80%)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 56,
+                  }}>🔋</div>
+                  <span className="claim-ev-pulse" style={{ position: "absolute", inset: -4, borderRadius: "50%", border: "2px solid rgba(34,197,94,0.35)", pointerEvents: "none" }} />
+                  <style>{`
+                    .claim-ev-pulse { animation: claim-ev-ring 2.5s ease-out infinite; }
+                    @keyframes claim-ev-ring { 0% { transform: scale(0.85); opacity: 1; } 100% { transform: scale(1.35); opacity: 0; } }
+                  `}</style>
+                </div>
+              </div>
+              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵犀 · EV 理赔决策助手</p>
+              <p className="text-xs mt-1.5 max-w-[280px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>新能源车专属理赔决策 · 基于人保再保《动力电池保险创新白皮书》</p>
+              <div className="mt-4 mx-auto max-w-[280px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(34,197,94,0.04)", border: "1px solid rgba(34,197,94,0.15)" }}>
+                <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
+                {[
+                  { q: "奔腾 B70 EV，时速 30km 撞了路肩，左前覆盖件凹陷，需要全检电池吗？", icon: "💥" },
+                  { q: "比亚迪汉 EV 全损，电池容量 84 度 SoH 77%，电池怎么处置？", icon: "💎" },
+                  { q: "特斯拉 Model Y 50km/h 撞底盘，怎么走理赔？", icon: "🔧" },
+                  { q: "解释一下白皮书的「电池循环经济」创新方案", icon: "📘" },
+                ].map(({ q, icon }) => (
+                  <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-start gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}><span className="shrink-0">{icon}</span><span>{q}</span></p>
+                ))}
+              </div>
+              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>Hermes 多 persona 引擎 · 团队脑共享记忆</p>
             </>
           ) : agent.id === "task-trace" ? (
             <>
@@ -1047,7 +1117,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                         ) : null; })()}
 
                         {/* 灵犀 · 分析研判 */}
-                        {(() => { const items = bizAgents.filter(a => ["task-finance","task-stock"].includes(a.id)); return items.length > 0 ? (
+                        {(() => { const items = bizAgents.filter(a => ["task-finance","task-stock","task-claim-ev","task-my-wealth"].includes(a.id)); return items.length > 0 ? (
                           <CollabGroup id="lingxi" title="灵犀 · 分析研判" icon={<TrendingUp size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
@@ -1058,7 +1128,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                         ) : null; })()}
 
                         {/* 未分类 */}
-                        {(() => { const categorized = new Set(["task-hermes","task-trace","task-evolve","task-ppt","task-code","task-slides","task-finance","task-stock"]); const items = bizAgents.filter(a => !categorized.has(a.id)); return items.length > 0 ? (
+                        {(() => { const categorized = new Set(["task-hermes","task-trace","task-evolve","task-ppt","task-code","task-slides","task-finance","task-stock","task-claim-ev","task-my-wealth"]); const items = bizAgents.filter(a => !categorized.has(a.id)); return items.length > 0 ? (
                           <CollabGroup id="other" title="其他" icon={<Bot size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
