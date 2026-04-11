@@ -375,14 +375,14 @@
   box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.42);
 }
 
-.lingxia-token-active {
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  animation: lingxiaTokenPulse 1.1s ease-in-out infinite;
+/* 通用呼吸灯：简洁线条 — 红/灰过渡，无光晕 */
+.lingxia-bubble-ai.lingxia-token-active {
+  transition: none !important;
+  animation: lingxiaTokenPulse 2s ease-in-out infinite !important;
 }
-
 @keyframes lingxiaTokenPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.0); border-color: rgba(239, 68, 68, 0.28); }
-  50% { box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25); border-color: rgba(248, 113, 113, 0.52); }
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(150,150,150,0.25); }
+  50%      { box-shadow: inset 0 0 0 1px rgba(239,68,68,0.85); }
 }
 
 /* thin dark scrollbar */
@@ -1208,21 +1208,33 @@
 
 /* ── Tool Card Final ── */
 .lingxia-toolcard {
-  margin: 0.5rem 0 0.75rem;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.028);
+  margin: 4px 0;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
   overflow: hidden;
+  max-width: 320px;
+}
+.lingxia-toolcard[open] {
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.02);
 }
 .lingxia-toolcard__header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 12px;
-  background: rgba(255,255,255,0.02);
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  padding: 5px 4px;
+  background: transparent;
+  border-bottom: none;
   font-size: 12px;
 }
+.lingxia-toolcard[open] > .lingxia-toolcard__header {
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+/* hide default details marker */
+.lingxia-toolcard summary::-webkit-details-marker { display: none; }
+.lingxia-toolcard summary::marker { display: none; content: ""; }
 .lingxia-toolcard__title  { font-weight: 500; color: var(--oc-text-primary); }
 .lingxia-toolcard__status { font-size: 11px; color: var(--muted); }
 .lingxia-toolcard__meta   { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -1590,12 +1602,34 @@
   color: #92400E !important;
 }
 
+/* ── 浅色主题：输入框聚焦边框 → 与用户气泡粉红协调 ── */
+:root[data-theme-mode="light"] .lingxia-input-wrap:focus-within {
+  border-color: #be1e2d !important;
+  box-shadow: 0 0 0 2px rgba(190,30,45,0.18) !important;
+}
+
+/* ── 浅色主题：token-active 呼吸灯 ──
+   关键：keyframes 内的 !important 被 CSS 规范忽略，所以这里只动 box-shadow
+   父规则用 !important 设静态值；keyframes 用普通值让动画生效
+   动画原理：用多层 box-shadow 模拟红色光环，inset 实色边 + 外发光呼吸
+*/
+:root[data-theme-mode="light"] .lingxia-bubble-ai.lingxia-token-active {
+  background: #FFFFFF !important;
+  border-color: rgba(190,30,45,0.6) !important;
+  transition: none !important;
+  animation: lingxiaTokenPulseLight 2s ease-in-out infinite;
+}
+@keyframes lingxiaTokenPulseLight {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(180,180,180,0.35); }
+  50%      { box-shadow: inset 0 0 0 1px rgba(190,30,45,0.95); }
+}
+
 /* ── 修复项 3：AI 回复消息框加边框 — 白卡片浮在灰底上 ── */
 :root[data-theme-mode="light"] .lingxia-bubble-ai {
   background: #FFFFFF !important;
   border: 1px solid #E5E7EB !important;
   color: var(--text) !important;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06) !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 :root[data-theme-mode="light"] .lingxia-bubble-ai:hover {
   background: #FFFFFF !important;

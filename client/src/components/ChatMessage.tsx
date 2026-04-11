@@ -111,6 +111,128 @@ function GatewayToolInline({ tc }: { tc: ToolCallEntry }) {
   );
 }
 
+
+function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; filePath: string; fileName: string }) {
+  const [state, setState] = useState<"idle" | "running" | "done">("idle");
+  const [result, setResult] = useState<{ exitCode: number; stdout: string; stderr: string } | null>(null);
+
+  const handleRun = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setState("running");
+    try {
+      const resp = await fetch("/api/claw/workspace/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ adoptId, path: filePath }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        setResult({ exitCode: 1, stdout: "", stderr: data.error || `HTTP ${resp.status}` });
+      } else {
+        setResult({ exitCode: data.exitCode, stdout: data.stdout || "", stderr: data.stderr || "" });
+      }
+    } catch (err) {
+      setResult({ exitCode: 1, stdout: "", stderr: String(err) });
+    }
+    setState("done");
+  };
+
+  return (
+    <>
+      <button
+        onClick={handleRun}
+        type="button"
+        disabled={state === "running"}
+        title="在沙箱中运行"
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 3,
+          padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 500,
+          color: state === "running" ? "#9ca3af" : "#34d399",
+          background: state === "running" ? "rgba(156,163,175,0.08)" : "rgba(52,211,153,0.10)",
+          border: `1px solid ${state === "running" ? "rgba(156,163,175,0.2)" : "rgba(52,211,153,0.25)"}`,
+          cursor: state === "running" ? "wait" : "pointer",
+          whiteSpace: "nowrap", flexShrink: 0,
+        }}
+      >
+        {state === "running" ? (
+          <><span className="animate-pulse">●</span> 运行中</>
+        ) : (
+          <><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg> 运行</>
+        )}
+      </button>
+      {state === "done" && result && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+          onClick={() => { setState("idle"); setResult(null); }}
+        >
+          <div
+            style={{
+              width: "min(640px, 92vw)", maxHeight: "80vh", background: "var(--oc-panel, #1a1a2e)",
+              border: "1px solid var(--oc-border, #333)", borderRadius: 12,
+              display: "flex", flexDirection: "column", overflow: "hidden",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{
+              padding: "12px 16px", borderBottom: "1px solid var(--oc-border, #333)",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--oc-text-primary, #e5e5e5)" }}>
+                运行结果 · {fileName}
+                <span style={{
+                  marginLeft: 8, fontSize: 11, padding: "1px 6px", borderRadius: 4,
+                  background: result.exitCode === 0 ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
+                  color: result.exitCode === 0 ? "#4ade80" : "#f87171",
+                }}>
+                  exit {result.exitCode}
+                </span>
+              </div>
+              <button onClick={() => { setState("idle"); setResult(null); }} style={{
+                background: "none", border: "none", color: "var(--oc-text-secondary, #999)",
+                cursor: "pointer", fontSize: 16, padding: "0 4px",
+              }}>×</button>
+            </div>
+            <div style={{ padding: 16, overflow: "auto", flex: 1 }}>
+              {result.stdout && (
+                <div style={{ marginBottom: result.stderr ? 12 : 0 }}>
+                  <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>stdout</div>
+                  <pre style={{
+                    fontSize: 12, lineHeight: 1.5, color: "var(--oc-text-primary, #e5e5e5)",
+                    background: "rgba(0,0,0,0.2)", borderRadius: 8, padding: 12,
+                    whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 400, overflow: "auto",
+                    margin: 0,
+                  }}>{result.stdout}</pre>
+                </div>
+              )}
+              {result.stderr && (
+                <div>
+                  <div style={{ fontSize: 11, color: "#f87171", marginBottom: 4 }}>stderr</div>
+                  <pre style={{
+                    fontSize: 12, lineHeight: 1.5, color: "#fca5a5",
+                    background: "rgba(239,68,68,0.06)", borderRadius: 8, padding: 12,
+                    whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 200, overflow: "auto",
+                    margin: 0,
+                  }}>{result.stderr}</pre>
+                </div>
+              )}
+              {!result.stdout && !result.stderr && (
+                <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "center", padding: 24 }}>
+                  (无输出)
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ToolCallCard({ tc }: { tc: ToolCallEntry }) {
   const isRunning = tc.status === "running";
   const isDone    = tc.status === "done";
@@ -125,9 +247,11 @@ function ToolCallCard({ tc }: { tc: ToolCallEntry }) {
   const duration = tc.durationMs != null ? `${tc.durationMs}ms` : null;
 
   return (
-    <div className="lingxia-toolcard">
-      <div className="lingxia-toolcard__header">
-        <span>🛠️</span>
+    <details className="lingxia-toolcard" >
+      <summary className="lingxia-toolcard__header" style={{ cursor: "pointer", listStyle: "none" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: 4, background: isRunning ? "rgba(239,68,68,0.12)" : isDone ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)", flexShrink: 0 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isRunning ? "#ef4444" : isDone ? "#22c55e" : "#ef4444"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </span>
         <span className="lingxia-toolcard__title">{tc.name}</span>
         <span className="lingxia-toolcard__status">
           {isRunning && <span className="animate-pulse">执行中…</span>}
@@ -145,8 +269,9 @@ function ToolCallCard({ tc }: { tc: ToolCallEntry }) {
             <span className="lingxia-toolcard__chip lingxia-toolcard__chip--danger">安全策略拒绝</span>
           )}
           {duration && <span className="lingxia-toolcard__status">{duration}</span>}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginLeft: 4, opacity: 0.4, transition: "transform 0.2s" }} className="lingxia-toolcard__chevron"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
-      </div>
+      </summary>
 
       <div className="lingxia-toolcard__body">
         {argsDisplay && (
@@ -205,23 +330,71 @@ function ToolCallCard({ tc }: { tc: ToolCallEntry }) {
                   }
                 };
 
+                const isHtmlFile = /\.html?$/i.test(f.name);
+                const isRunnable = /\.(py|js|ts|sh|bash)$/i.test(f.name);
+
+                const handlePreview = async (e: React.MouseEvent) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  try {
+                    const path = wsPath ? wsPath : `sandbox-files/${f.name}`;
+                    const resp = await fetch("/api/claw/files/token", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify({ adoptId, path }),
+                    });
+                    if (!resp.ok) {
+                      const err = await resp.json().catch(() => ({}));
+                      alert(`预览失败：${err.error || resp.status}`);
+                      return;
+                    }
+                    const { url } = await resp.json();
+                    window.open(url + "&preview=1", "_blank", "noopener");
+                  } catch (err) {
+                    alert(`预览异常：${String(err)}`);
+                  }
+                };
+
                 return (
-                  <a key={f.name} href="#" onClick={handleDownload} className="lingxia-toolcard__file">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                      <polyline points="7 10 12 15 17 10"/>
-                      <line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
-                    <span>{f.name}</span>
-                    <span style={{ opacity: 0.6 }}>({sizeStr})</span>
-                  </a>
+                  <div key={f.name} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <a href="#" onClick={handleDownload} className="lingxia-toolcard__file" style={{ flex: 1 }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                      </svg>
+                      <span>{f.name}</span>
+                      <span style={{ opacity: 0.6 }}>({sizeStr})</span>
+                    </a>
+                    {isHtmlFile && (
+                      <button
+                        onClick={handlePreview}
+                        type="button"
+                        title="在新标签页预览"
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 3,
+                          padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 500,
+                          color: "#a78bfa", background: "rgba(124,58,237,0.10)",
+                          border: "1px solid rgba(124,58,237,0.25)", cursor: "pointer",
+                          whiteSpace: "nowrap", flexShrink: 0,
+                        }}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        预览
+                      </button>
+                    )}
+                    {isRunnable && (
+                      <RunFileButton adoptId={adoptId} filePath={wsPath || `sandbox-files/${f.name}`} fileName={f.name} />
+                    )}
+                  </div>
                 );
               })}
             </div>
           </div>
         )}
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -269,10 +442,21 @@ function ChatMessageInner({
     return (
       <div className="flex items-start gap-3 lingxia-ai-bubble-wrap lingxia-msg-fade">
         <div className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center lingxia-avatar-ai" style={{ marginTop: 2 }}><BrandIcon size={22} /></div>
-        <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-2 lingxia-bubble-ai" style={{ color: "#697086" }}>
-          <span className="animate-pulse">●</span>
-          <span className="animate-pulse" style={{ animationDelay: "0.2s" }}>●</span>
-          <span className="animate-pulse" style={{ animationDelay: "0.4s" }}>●</span>
+        <div>
+          {showToolCalls && toolCalls && toolCalls.length > 0 && (
+            <div className="mb-2">
+              {toolCalls.map((tc) =>
+                tc._gateway
+                  ? <GatewayToolInline key={tc.id} tc={tc} />
+                  : <ToolCallCard key={tc.id} tc={tc} />
+              )}
+            </div>
+          )}
+          <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-2 lingxia-bubble-ai" style={{ color: "#697086" }}>
+            <span className="animate-pulse">●</span>
+            <span className="animate-pulse" style={{ animationDelay: "0.2s" }}>●</span>
+            <span className="animate-pulse" style={{ animationDelay: "0.4s" }}>●</span>
+          </div>
         </div>
       </div>
     );

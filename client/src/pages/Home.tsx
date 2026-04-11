@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { OpenClawWSClient } from "@/lib/openclaw-ws";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { useBrand } from "@/lib/useBrand";
@@ -126,6 +127,18 @@ export default function Home() {
   // 流式聊天状态（替换原 tRPC mutation）
   const [lingxiaStreaming, setLingxiaStreaming] = useState(false);
   const lingxiaStreamAbortRef = useRef<AbortController | null>(null);
+  const wsClientRef = useRef<OpenClawWSClient | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
+
+  // 初始化 WSS 连接（后台自动尝试，不阻塞 UI）
+  useEffect(() => {
+    if (!resolvedAdoptId) return;
+    const apiBase = (import.meta as any).env?.VITE_API_URL || "";
+    const ws = new OpenClawWSClient(resolvedAdoptId, apiBase);
+    wsClientRef.current = ws;
+    ws.connect().then((ok) => { if (ok) setWsConnected(true); });
+    return () => { ws.disconnect(); wsClientRef.current = null; setWsConnected(false); };
+  }, [resolvedAdoptId]);
   const lingxiaMsgViewportRef = useRef<HTMLDivElement | null>(null);
   const [lingxiaNearBottom, setLingxiaNearBottom] = useState(true);
   // 工具执行显性化状态
@@ -282,6 +295,149 @@ export default function Home() {
       const perf: Record<string, number> = { clientSendMs: Date.now() };
       const controller = new AbortController();
       lingxiaStreamAbortRef.current = controller;
+      let wsOk = false;
+      // ── WSS 优先路径 ──
+      const wsClient = wsClientRef.current;
+      if (wsClient?.state === "connected") {
+        console.log("[WS] sending via WebSocket");
+        // WS 消息处理：后端 WS 代理已转成与 HTTP SSE 一致的格式
+        // _event 字段 = SSE 的 event: 行，其余字段 = SSE 的 data: JSON
+        // 用 setRawHandler 代替 addEventListener，跨重连自动保持
+        {
+          const wsHandler = (chunk: any) => {
+            try {
+              if (chunk.type === "connected") return;
+              lastEventAtRef.current = Date.now();
+
+              // 错误
+              if (chunk.error) {
+                setLingxiaMsgs((prev) => { const n = [...prev]; const last = n[n.length-1]; if (last?.role === "assistant") n[n.length-1] = { ...last, text: `（${chunk.error}）` }; return n; });
+                setLingxiaStreaming(false);
+                return;
+              }
+
+              // ── tool_call 事件（与 HTTP SSE event:tool_call 一致）──
+              if (chunk._event === "tool_call") {
+                const toolName = String(chunk.name || "unknown");
+                const toolTs = Date.now();
+                const isGateway = Boolean(chunk._gateway);
+                setLingxiaMsgs((prev) => {
+                  const next = [...prev]; const lastIdx = next.length - 1;
+                  if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
+                    const existing = next[lastIdx].toolCalls || [];
+                    next[lastIdx] = { ...next[lastIdx], toolCalls: [...existing, { id: String(chunk.id || ""), name: toolName, arguments: String(chunk.arguments || "{}"), status: "running" as const, ts: toolTs, _gateway: isGateway, executor: isGateway ? "gateway" : undefined }] };
+                  }
+                  return next;
+                });
+                if (!isGateway) {
+                  setActiveToolName(toolName);
+                  setActiveToolStartMs(toolTs);
+                  setActiveToolElapsed(0);
+                  setActiveToolStep(null); setActiveToolTotal(null); setActiveToolLabel(null);
+                }
+                return;
+              }
+
+              // ── tool_result 事件（与 HTTP SSE event:tool_result 一致）──
+              if (chunk._event === "tool_result") {
+                const toolCallId = String(chunk.tool_call_id || "");
+                const result = String(chunk.result ?? "");
+                const isGateway = Boolean(chunk._gateway);
+                const status = chunk.is_error ? "error" : "done";
+                if (isGateway) {
+                  setLingxiaMsgs((prev) => {
+                    const next = [...prev]; const lastIdx = next.length - 1;
+                    if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
+                      const tcs = next[lastIdx].toolCalls || [];
+                      const gwIdx = tcs.findLastIndex((tc: any) => tc._gateway && tc.status === "running");
+                      if (gwIdx >= 0) { const updated = [...tcs]; updated[gwIdx] = { ...updated[gwIdx], status: "done", durationMs: Date.now() - updated[gwIdx].ts }; next[lastIdx] = { ...next[lastIdx], toolCalls: updated }; }
+                    }
+                    return next;
+                  });
+                } else {
+                  setLingxiaMsgs((prev) => {
+                    const next = [...prev]; const lastIdx = next.length - 1;
+                    if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
+                      const tcs = next[lastIdx].toolCalls || [];
+                      next[lastIdx] = { ...next[lastIdx], toolCalls: tcs.map((tc: any) => tc.id === toolCallId ? { ...tc, result, status, durationMs: Date.now() - tc.ts, executor: chunk.executor, truncated: Boolean(chunk.truncated), outputFiles: chunk.outputFiles, adoptId: resolvedAdoptId ?? undefined } : tc) };
+                    }
+                    return next;
+                  });
+                  setActiveToolName(null); setActiveToolStartMs(null);
+                  setActiveToolStep(null); setActiveToolTotal(null); setActiveToolLabel(null);
+                }
+                return;
+              }
+
+              // ── workspace_files 事件 ──
+              if (chunk._event === "workspace_files") {
+                const wsFiles = Array.isArray(chunk.files) ? chunk.files : [];
+                const wsAdoptId = String(chunk.adoptId || "");
+                if (wsFiles.length > 0) {
+                  const pseudoTc: any = { id: `ws-files-${Date.now()}`, name: "[产出文件]", arguments: "{}", result: wsFiles.map((f: any) => f.name).join(", "), status: "done", ts: Date.now(), executor: "native", outputFiles: wsFiles.map((f: any) => ({ name: f.name, size: f.size, wsPath: f.path })), adoptId: wsAdoptId };
+                  setLingxiaMsgs((prev) => { const next = [...prev]; const lastIdx = next.length - 1; if (lastIdx >= 0 && next[lastIdx].role === "assistant") { const existing = next[lastIdx].toolCalls || []; next[lastIdx] = { ...next[lastIdx], toolCalls: [...existing, pseudoTc] }; } return next; });
+                }
+                return;
+              }
+
+              // ── agent_status 事件（进度条）──
+              if (chunk._event === "agent_status") {
+                if (chunk.kind === "heartbeat") {
+                  if (chunk.tool) setActiveToolName(String(chunk.tool));
+                  if (chunk.elapsedMs) { setActiveToolStartMs(Date.now() - Number(chunk.elapsedMs)); setActiveToolElapsed(Math.floor(Number(chunk.elapsedMs) / 1000)); }
+                } else if (chunk.kind === "progress") {
+                  if (chunk.tool) setActiveToolName(String(chunk.tool));
+                  if (chunk.step != null) setActiveToolStep(Number(chunk.step));
+                  if (chunk.total != null) setActiveToolTotal(Number(chunk.total));
+                  if (chunk.label) setActiveToolLabel(String(chunk.label));
+                  if (chunk.elapsedMs) { setActiveToolStartMs(Date.now() - Number(chunk.elapsedMs)); setActiveToolElapsed(Math.floor(Number(chunk.elapsedMs) / 1000)); }
+                }
+                return;
+              }
+
+              // ── __perf 事件（token 用量）──
+              if (chunk.__perf && typeof chunk.__perf === "object") {
+                setLingxiaMsgs(prev => {
+                  if (!prev.length || prev[prev.length - 1].role !== "assistant") return prev;
+                  const last = prev[prev.length - 1];
+                  const input = chunk.__perf.usage?.input ?? chunk.__perf.usage?.inputTokens ?? last.usage?.input ?? 0;
+                  const output = chunk.__perf.usage?.output ?? chunk.__perf.usage?.outputTokens ?? last.usage?.output ?? 0;
+                  const contextWindow = chunk.__perf.usage?.contextWindow ?? last.contextWindow;
+                  const nextModel = chunk.__perf.model && chunk.__perf.model !== "gateway-injected" ? chunk.__perf.model : last.model;
+                  return [...prev.slice(0, -1), { ...last, usage: { input, output }, model: nextModel, contextWindow, contextPercent: contextWindow && input > 0 ? Math.min(Math.round((input / contextWindow) * 100), 100) : last.contextPercent }];
+                });
+                return;
+              }
+
+              // __status（纯文本状态）
+              if (chunk.__status) {
+                setLingxiaMsgs((prev) => { const n = [...prev]; const last = n[n.length-1]; if (last?.role === "assistant") n[n.length-1] = { ...last, status: chunk.__status }; return n; });
+                return;
+              }
+
+              // 文本 delta
+              const delta = chunk?.choices?.[0]?.delta?.content;
+              if (delta) {
+                setLingxiaMsgs((prev) => { const n = [...prev]; const last = n[n.length-1]; if (last?.role === "assistant") n[n.length-1] = { ...last, text: last.text + delta, status: undefined }; return n; });
+              }
+              // 完成
+              if (chunk?.choices?.[0]?.finish_reason === "stop") {
+                setLingxiaStreaming(false);
+                wsClient.setRawHandler(null);
+              }
+            } catch {}
+          };
+          wsClient.setRawHandler(wsHandler);
+        }
+        const sent = wsClient.sendChat(text);
+        if (sent) {
+          wsOk = true;
+          return; // WSS 接管，streaming 由 wsHandler 中 finish_reason=stop 关闭
+        }
+        console.log("[WS] send failed, falling back to HTTP");
+      }
+
+      // ── HTTP SSE 路径（fallback）──
       const resp = await fetch(`${apiBase}/api/claw/chat-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -596,7 +752,7 @@ export default function Home() {
       });
     } finally {
       lingxiaStreamAbortRef.current = null;
-      setLingxiaStreaming(false);
+      if (!wsOk) setLingxiaStreaming(false);
       setConnStatus("connected");
       setActiveToolName(null);
       setActiveToolStartMs(null);
@@ -623,6 +779,8 @@ export default function Home() {
 
       if (!resp.ok) throw new Error(`重置失败 (${resp.status})`);
       setLingxiaMsgs([]);
+      // 不需要断 WS：后端已通过 OpenClaw 原生 sessions.reset 换了 sessionId，
+      // session key 不变，现有 WS 连接继续用即可，下次发消息打到新 sessionId 上
       toast.success("会话已重置（新会话）");
     } catch (error: any) {
       toast.error(error?.message || "重置会话失败");
@@ -907,96 +1065,6 @@ export default function Home() {
               className="flex-1 min-h-0 overflow-y-auto pt-6 px-6 space-y-5 stealth-scrollbar" style={{ paddingBottom: 100 }}
             >
 
-              {/* 工具执行显性化横幅 — 三态 */}
-              {activeToolName && (() => {
-                // Gateway 内部工具友好化显示
-                const TOOL_DISPLAY: Record<string, { icon: string; label: string }> = {
-                  web_search: { icon: "🔍", label: "正在搜索网页" },
-                  web_fetch: { icon: "🌐", label: "正在获取网页内容" },
-                  memory_search: { icon: "🧠", label: "正在查找记忆" },
-                  read: { icon: "📄", label: "正在读取文件" },
-                  thinking: { icon: "💭", label: "正在思考" },
-                };
-                const display = TOOL_DISPLAY[activeToolName] || { icon: "🛠️", label: `正在执行 ${activeToolName}` };
-                return (
-                <div className="max-w-4xl mx-auto">
-                  {/* 已连接 / 执行中 */}
-                  {connStatus === "connected" && (
-                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm animate-in slide-in-from-top-2"
-                      style={{
-                        background: "rgba(59,130,246,0.08)",
-                        border: "1px solid rgba(59,130,246,0.25)",
-                        color: "#60a5fa",
-                      }}>
-                      <span className="text-base shrink-0">{display.icon}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate">
-                          {display.label}
-                          {activeToolStep !== null && activeToolTotal !== null && (
-                            <span className="ml-2 text-xs font-normal opacity-80">（{activeToolStep}/{activeToolTotal}）</span>
-                          )}
-                        </p>
-                        {/* 有进度信号时：显示当前阶段 + 进度条 */}
-                        {activeToolLabel ? (
-                          <p className="text-xs mt-0.5 opacity-80">{activeToolLabel}</p>
-                        ) : (
-                          <p className="text-xs mt-0.5 opacity-75">
-                            已等待 {activeToolElapsed} 秒
-                            {activeToolElapsed >= 240 && activeToolElapsed < 300 && (
-                              <span className="ml-2 text-amber-300">⚠️ 还剩 {300 - activeToolElapsed} 秒即将超时</span>
-                            )}
-                            {activeToolElapsed >= 300 && (
-                              <span className="ml-2 text-red-400">执行超时，如需更长时间请减少任务规模</span>
-                            )}
-                          </p>
-                        )}
-                        {/* 有 step/total 时显示进度条 */}
-                        {activeToolStep !== null && activeToolTotal !== null && activeToolTotal > 0 && (
-                          <div className="mt-1.5 flex items-center gap-2">
-                            <div className="flex-1 h-1.5 bg-blue-900/40 rounded-full overflow-hidden">
-                              <div className="h-full rounded-full transition-all duration-500"
-                                style={{
-                                  width: `${Math.min(100, Math.round((activeToolStep / activeToolTotal) * 100))}%`,
-                                  background: "linear-gradient(90deg, #3b82f6, #60a5fa)",
-                                }} />
-                            </div>
-                            <span className="text-xs font-mono shrink-0" style={{ color: "#60a5fa", opacity: 0.8 }}>
-                              {Math.min(100, Math.round((activeToolStep / activeToolTotal) * 100))}%
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="shrink-0">
-                        <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                      </div>
-                    </div>
-                  )}
-                  {/* 长任务运行中（超过 90s 无 SSE 事件） */}
-                  {connStatus === "reconnecting" && (
-                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm animate-in slide-in-from-top-2"
-                      style={{
-                        background: "rgba(99,102,241,0.08)",
-                        border: "1px solid rgba(99,102,241,0.3)",
-                        color: "#a5b4fc",
-                      }}>
-                      <span className="text-base shrink-0">⚙️</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium">任务仍在后台运行，请耐心等待</p>
-                        <p className="text-xs mt-0.5 opacity-75">
-                          {activeToolLabel ?? activeToolName ? `${activeToolLabel ?? activeToolName} · ` : ""}已运行 {activeToolElapsed} 秒
-                          {activeToolElapsed >= 120 && (
-                            <span className="ml-2" style={{ color: "#f9a8d4" }}>长任务通常需要 3–5 分钟，完成后自动显示结果</span>
-                          )}
-                        </p>
-                      </div>
-                      <div className="shrink-0">
-                        <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-                      </div>
-                    </div>
-                  )}
-                </div>
-                );
-              })()}
 
               {clawByAdoptLoading && <p className="text-sm" style={{ color: "#697086" }}>加载中…</p>}
 

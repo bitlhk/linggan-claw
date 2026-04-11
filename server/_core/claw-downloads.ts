@@ -76,6 +76,21 @@ export function registerDownloadRoutes(app: express.Express) {
 
       const fileName = relPath.split("/").pop() || "download";
 
+      // preview 模式：HTML 文件直接以 text/html 返回（用于预览渲染）
+      const isPreview = req.query.preview === "1";
+      const isHtml = /\.html?$/i.test(fileName);
+      if (isPreview && isHtml) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.removeHeader("X-Frame-Options");
+        res.setHeader("Content-Security-Policy", "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors *");
+        const stream = createReadStream(filePath);
+        stream.on("error", (err) => {
+          if (!res.headersSent) res.status(500).json({ error: "file read error" });
+        });
+        stream.pipe(res);
+        return;
+      }
+
       streamFileDownload(res, filePath, fileName);
     } catch (e: any) {
       return handleRouteError(res, e);
@@ -151,7 +166,95 @@ export function registerDownloadRoutes(app: express.Express) {
 
       const fileName = relPath.split("/").pop() || "download";
 
+      // preview 模式：HTML 文件直接以 text/html 返回（用于预览渲染）
+      const isPreview = req.query.preview === "1";
+      const isHtml = /\.html?$/i.test(fileName);
+      if (isPreview && isHtml) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.removeHeader("X-Frame-Options");
+        res.setHeader("Content-Security-Policy", "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors *");
+        const stream = createReadStream(filePath);
+        stream.on("error", (err) => {
+          if (!res.headersSent) res.status(500).json({ error: "file read error" });
+        });
+        stream.pipe(res);
+        return;
+      }
+
       streamFileDownload(res, filePath, fileName);
+    } catch (e: any) {
+      return handleRouteError(res, e);
+    }
+  });
+
+
+  // ── Workspace 文件运行（在隔离沙箱中执行） ─────────────────────────
+  // POST /api/claw/workspace/run  { adoptId, path }
+  app.post("/api/claw/workspace/run", requireClawOwner, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const adoptId = parseAdoptId(body.adoptId);
+      const relPath = parseRelPath(body.path, "path");
+
+      const { getClawByAdoptId } = await import("../db");
+      const claw = await getClawByAdoptId(adoptId);
+      if (!claw) return sendError(res, "NOT_FOUND", "claw not found");
+
+      const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+      const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
+      const workspaceDir = `${remoteHome}/.openclaw/workspace-${runtimeAgentId}`;
+      const filePath = `${workspaceDir}/${relPath}`;
+
+      if (!existsSync(filePath)) return sendError(res, "NOT_FOUND", "file not found");
+
+      // 根据扩展名选择运行时
+      const ext = relPath.split(".").pop()?.toLowerCase() || "";
+      const runtimeMap: Record<string, string[]> = {
+        py:   ["python3", `/workspace/${relPath}`],
+        js:   ["node",    `/workspace/${relPath}`],
+        ts:   ["npx", "tsx", `/workspace/${relPath}`],
+        sh:   ["sh",      `/workspace/${relPath}`],
+        bash: ["bash",    `/workspace/${relPath}`],
+      };
+      const runCmd = runtimeMap[ext];
+      if (!runCmd) return sendError(res, "BAD_REQUEST", `不支持运行 .${ext} 文件`);
+
+      // Docker 沙箱执行
+      const image = ext === "py" ? "python:3.11-slim" : "node:20-slim";
+      const timeoutMs = 15000;
+      const dockerArgs = [
+        "run", "--rm",
+        "--network=none",
+        "--read-only",
+        "--tmpfs=/tmp:size=50m",
+        "--memory=256m",
+        "--cpus=0.5",
+        "--pids-limit=50",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "-v", `${workspaceDir}:/workspace:ro`,
+        "-w", "/workspace",
+        image,
+        ...runCmd,
+      ];
+
+      const result = spawnSync("docker", dockerArgs, {
+        timeout: timeoutMs,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024,
+      });
+
+      const stdout = (result.stdout || "").slice(0, 64 * 1024);
+      const stderr = (result.stderr || "").slice(0, 64 * 1024);
+
+      return res.json({
+        ok: true,
+        exitCode: result.status ?? 1,
+        stdout,
+        stderr,
+        durationMs: 0,
+        signal: result.signal || null,
+      });
     } catch (e: any) {
       return handleRouteError(res, e);
     }

@@ -239,6 +239,10 @@ export function ipWhitelistMiddleware() {
 export function ipBlacklistMiddleware() {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // localhost / loopback 永远不封禁
+      const _ip = getClientIp(req);
+      if (_ip === "127.0.0.1" || _ip === "::1" || _ip === "::ffff:127.0.0.1") return next();
+
       const isBlacklisted = await checkIpBlacklist(req);
       if (isBlacklisted) {
         const clientIP = getClientIp(req);

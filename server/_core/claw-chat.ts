@@ -41,9 +41,39 @@ export function registerChatStreamRoutes(app: express.Express) {
 
     const isSessionResetCmd = ["/new", "/reset"].includes(msgStr.trim());
     if (isSessionResetCmd) {
-      const epoch = bumpSessionEpoch(String(adoptId));
-      res.status(200).json({ ok: true, reset: true, epoch });
-      return;
+      // 用 OpenClaw 原生 sessions.reset RPC 重置会话
+      // 这样 session key 不变（agent:xxx:main），但内部 sessionId 换了，上下文清空
+      // 不需要前端断 WS 重连，HTTP 和 WS 路径自动同步
+      try {
+        const dbAgentId = String((claw as any).agentId || "").trim();
+        const trialAgentId = `trial_${String(adoptId)}`;
+        const remoteHomeReset = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+        const trialAgentDirReset = `${remoteHomeReset}/.openclaw/agents/${trialAgentId}`;
+        const runtimeAgentIdReset = existsSync(trialAgentDirReset) ? trialAgentId : dbAgentId;
+        const sessionKeyReset = `agent:${runtimeAgentIdReset}:main`;
+
+        const { execFileSync } = await import("child_process");
+        const remoteHostReset = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
+        const gatewayPortReset = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
+        const gatewayTokenReset = process.env.CLAW_GATEWAY_TOKEN || "";
+
+        execFileSync("openclaw", [
+          "gateway", "call", "sessions.reset",
+          "--url", `ws://${remoteHostReset}:${gatewayPortReset}`,
+          "--token", gatewayTokenReset,
+          "--params", JSON.stringify({ key: sessionKeyReset, reason: "new" }),
+          "--json",
+        ], { timeout: 8000, encoding: "utf8" });
+
+        // 同时也升级灵虾的 epoch（保留向后兼容，老的注册表机制还在用）
+        const epoch = bumpSessionEpoch(String(adoptId));
+        res.status(200).json({ ok: true, reset: true, epoch, sessionKey: sessionKeyReset });
+        return;
+      } catch (e: any) {
+        console.error("[reset] failed:", e?.message || e);
+        res.status(500).json({ error: "reset failed: " + (e?.message || String(e)) });
+        return;
+      }
     }
 
     // /dreaming 命令拦截
@@ -507,15 +537,20 @@ const options = {
         stopGatewayGapDetection(); // 清理 Gateway 空白检测
         const streamEndMs = Date.now();
         if (!res.writableEnded) {
-          // 扫描 workspace/output/ 目录（递归），只推本次流期间新生成的文件
+          // 扫描 workspace 目录（递归 + 含根目录），只推本次流期间新生成的文件
+          // 关键：技能/exec 写到根目录的 .html 等产物也要被发现，不只是 output/
           try {
-            const outputDir = `${toolCtx.workspaceDir}/output`;
-            if (existsSync(outputDir)) {
+            const wsDir = toolCtx.workspaceDir;
+            if (existsSync(wsDir)) {
               const allFiles: Array<{ name: string; size: number; path: string }> = [];
-              const scanDir = (dir: string, relBase: string) => {
+              // 跳过这些系统/缓存目录，避免扫描太深
+              const SKIP_DIRS = new Set(["skills", "memory", "node_modules", ".git", ".dreams", "dist", "build", ".openclaw"]);
+              const scanDir = (dir: string, relBase: string, depth: number) => {
+                if (depth > 3) return; // 限制递归深度
                 try {
                   for (const entry of readdirSync(dir)) {
                     if (entry.startsWith(".")) continue;
+                    if (depth === 0 && SKIP_DIRS.has(entry)) continue;
                     const full = `${dir}/${entry}`;
                     const rel = relBase ? `${relBase}/${entry}` : entry;
                     try {
@@ -523,16 +558,16 @@ const options = {
                       if (s.isFile()) {
                         // 只返回本次流开始后新生成的文件
                         if (s.mtimeMs >= startedAt) {
-                          allFiles.push({ name: entry, size: s.size, path: `output/${rel}` });
+                          allFiles.push({ name: entry, size: s.size, path: rel });
                         }
                       } else if (s.isDirectory()) {
-                        scanDir(full, rel);
+                        scanDir(full, rel, depth + 1);
                       }
                     } catch {}
                   }
                 } catch {}
               };
-              scanDir(outputDir, "");
+              scanDir(wsDir, "", 0);
               const sorted = allFiles.sort((a, b) => b.path.localeCompare(a.path));
               if (sorted.length > 0) {
                 res.write("event: workspace_files\ndata: " + JSON.stringify({ adoptId: String(adoptId), files: sorted }) + "\n\n");

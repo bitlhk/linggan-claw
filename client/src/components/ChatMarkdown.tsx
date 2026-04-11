@@ -29,25 +29,56 @@ function extractLang(className?: string): string {
 
 function FencedCodeBlock({ code, className }: { code: string; className?: string }) {
   const [copied, setCopied] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const lang = extractLang(className) || "text";
+  const isHtml = lang === "html" || lang === "htm";
 
   const onCopy = async () => {
     try { await navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
+  };
+
+  const onOpenNewTab = () => {
+    const w = window.open("", "_blank");
+    if (w) { w.document.open(); w.document.write(code); w.document.close(); }
   };
 
   return (
     <div className="lingxia-codeblock">
       <div className="lingxia-codeblock__header">
         <span className="lingxia-codeblock__lang">{lang}</span>
-        <button className="lingxia-codeblock__copy" onClick={onCopy} type="button">
-          {copied ? (
-            <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>Copied!</>
-          ) : (
-            <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {isHtml && (
+            <>
+              <button className="lingxia-codeblock__copy" onClick={() => setPreviewing(!previewing)} type="button" title={previewing ? "关闭预览" : "预览"}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                {previewing ? "关闭" : "预览"}
+              </button>
+              <button className="lingxia-codeblock__copy" onClick={onOpenNewTab} type="button" title="新窗口打开">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                新窗口
+              </button>
+            </>
           )}
-        </button>
+          <button className="lingxia-codeblock__copy" onClick={onCopy} type="button">
+            {copied ? (
+              <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>Copied!</>
+            ) : (
+              <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</>
+            )}
+          </button>
+        </div>
       </div>
-      <pre className="lingxia-codeblock__body"><code className={className}>{code}</code></pre>
+      {previewing && isHtml && (
+        <div style={{ background: "#fff", borderRadius: "0 0 8px 8px", overflow: "hidden" }}>
+          <iframe
+            srcDoc={code}
+            sandbox="allow-scripts allow-modals"
+            style={{ width: "100%", height: 480, border: "none", display: "block" }}
+            title="HTML Preview"
+          />
+        </div>
+      )}
+      {!previewing && <pre className="lingxia-codeblock__body"><code className={className}>{code}</code></pre>}
     </div>
   );
 }

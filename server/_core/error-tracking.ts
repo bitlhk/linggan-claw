@@ -122,6 +122,8 @@ export async function track4xxError(
   }
 
   // 如果错误数量超过自动封禁阈值，自动将 IP 添加到黑名单
+  // localhost / loopback 永远不自动封禁
+  if (clientIP === "127.0.0.1" || clientIP === "::1" || clientIP === "::ffff:127.0.0.1") return;
   if (errorCount.count >= autoBlockThreshold) {
     // 检查是否已经在黑名单中
     const alreadyBlacklisted = await isIpBlacklisted(clientIP);

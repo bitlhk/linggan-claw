@@ -33,6 +33,7 @@ import { registerMemoryRoutes } from "./claw-memory";
 import { registerDownloadRoutes } from "./claw-downloads";
 import { registerSandboxRoutes } from "./claw-sandbox";
 import { registerChatStreamRoutes } from "./claw-chat";
+import { registerWSProxy } from "./claw-ws-proxy";
 import { registerIframeRoutes } from "./claw-iframe";
 import { registerMiscRoutes } from "./claw-misc";
 import { APP_ROOT } from "./helpers";
@@ -187,6 +188,7 @@ async function startServer() {
   registerDownloadRoutes(app);
   registerSandboxRoutes(app);
   registerChatStreamRoutes(app);
+  registerWSProxy(server);
   registerIframeRoutes(app);
   registerMiscRoutes(app);
 

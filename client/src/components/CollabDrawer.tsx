@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { CodeAgentView } from "./code-agent/CodeAgentView";
-import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3 } from "lucide-react";
+import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3, Compass} from "lucide-react";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ function agentIcon(id: string, size = 16) {
   if (id === "task-code") return <Code2 size={size} style={style} />;
   if (id === "task-finance") return <TrendingUp size={size} style={style} />;
   if (id === "task-hermes") return <Dna size={size} style={{ color: "#be1e2d" }} />;
+  if (id === "task-trace") return <Bot size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-stock") return <BarChart3 size={size} style={{ color: "#ef4444" }} />;
   return <Bot size={size} style={style} />;
 }
@@ -150,10 +151,11 @@ function AgentHeroAnimation({ agentId }: { agentId: string }) {
 function agentDesc(id: string) {
   if (id === "task-ppt") return "多轮对话生成 PPT，完成后可下载";
   if (id === "task-slides") return "用于创建令人惊叹的、动画丰富的 HTML 演示文稿";
-  if (id === "task-evolve") return "基于华为 JiuwenClaw 引擎，在对话中创建和优化 AI 技能";
+  if (id === "task-evolve") return "对话中创建和打磨 AI 技能，越用越聪明";
   if (id === "task-code") return "在沙箱中执行代码，安全隔离";
-  if (id === "task-finance") return "DCF/LBO 建模、竞争分析、行业研究报告（远端金融投顾）";
+  if (id === "task-finance") return "DCF/LBO 建模、竞争分析、行业研究报告";
   if (id === "task-hermes") return "团队每次对话都在编织集体智慧";
+  if (id === "task-trace") return "交付复杂任务，自动拆解规划、逐步推进";
   if (id === "task-stock") return "AI 智能选股，11+ 交易策略，技术面+消息面+筹码分析";
   return "业务智能体";
 }
@@ -551,7 +553,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
         <span className="flex items-center justify-center" style={{ width: 18, height: 18 }}>{agentIcon(agent.id, 18)}</span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold truncate" style={{ color: "var(--oc-text-primary)" }}>{agent.name}</div>
-          <div className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{agent.id === "task-hermes" ? "共享空间 · 集体记忆" : agent.id === "task-stock" ? "A股/港股/美股 · 11策略" : "per-session · 独立沙箱"}</div>
+          <div className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{agent.id === "task-hermes" ? "灵枢 · 共享空间" : agent.id === "task-stock" ? "灵犀 · 11策略" : agent.id === "task-trace" ? "灵枢 · 深度求索" : "per-session · 独立沙箱"}</div>
         </div>
         {countdown !== null && <span className="text-[10px] px-1.5 py-0.5 rounded animate-pulse" style={{ background: "rgba(239,68,68,.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,.3)" }}>{Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")} 后超时</span>}
         {sessionKey && !countdown && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.25)" }}>进行中</span>}
@@ -568,7 +570,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
           {agent.id === "task-hermes" ? (
             <>
               <div className="flex items-center justify-center"><Dna size={40} style={{ color: "#be1e2d" }} /></div>
-              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵犀 · 共享智脑</p>
+              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵枢 · 共享智脑（Hermes Agent）</p>
               <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>每个人的对话，都在编织集体智慧</p>
               <div className="mt-4 mx-auto max-w-[240px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(190,30,45,0.04)", border: "1px solid rgba(190,30,45,0.12)" }}>
                 <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
@@ -584,7 +586,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
           ) : agent.id === "task-stock" ? (
             <>
               <div className="flex items-center justify-center text-3xl">📈</div>
-              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵鉴 · 股票分析</p>
+              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵犀 · 股票分析</p>
               <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>AI 驱动的多策略选股分析，支持 A 股、港股、美股</p>
               <div className="mt-4 mx-auto max-w-[260px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(34,197,94,0.04)", border: "1px solid rgba(34,197,94,0.12)" }}>
                 <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
@@ -610,6 +612,30 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
               <p className="text-sm mt-4 font-medium" style={{ color: "var(--oc-text-primary)" }}>{agent.name}</p>
               <p className="text-xs mt-1" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(agent.id)}</p>
               <p className="text-[10px] mt-2" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>支持多轮对话 · 30分钟无操作自动终止</p>
+            </>
+          ) : agent.id === "task-trace" ? (
+            <>
+              <div className="flex items-center justify-center">
+                <div style={{ position: "relative", width: 96, height: 96 }}>
+                  <img src="/uploads/panda_no_bg.png?v=2" alt="作者头像" className="trace-panda" style={{ width: 96, height: 96, objectFit: "contain", display: "block" }} />
+                  <span className="trace-pulse" style={{ position: "absolute", inset: -6, borderRadius: "50%", border: "2px solid rgba(190,30,45,0.3)", pointerEvents: "none" }} />
+                  <style>{`
+                    .trace-pulse { animation: trace-ring 2s ease-out infinite; }
+                    @keyframes trace-ring { 0% { transform: scale(0.85); opacity: 1; } 100% { transform: scale(1.35); opacity: 0; } }
+                    .trace-panda { animation: trace-panda-bob 3s ease-in-out infinite; }
+                    @keyframes trace-panda-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+                  `}</style>
+                </div>
+              </div>
+              <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵枢 · 深度求索</p>
+              <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>交付复杂任务，自动拆解规划、逐步推进</p>
+              <div className="mt-4 mx-auto max-w-[240px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(190,30,45,0.04)", border: "1px solid rgba(190,30,45,0.12)" }}>
+                <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
+                {["帮我分析微服务架构的优缺点", "制定一个产品上线计划", "研究 AI Agent 的技术方案"].map((q) => (
+                  <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}>{q}</p>
+                ))}
+              </div>
+              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>TRACE 五阶段推理 · DeepSeek 驱动</p>
             </>
           ) : (
             <>
@@ -867,25 +893,53 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                 {mainTab === "market" ? (
                   <>
                     {/* ── 业务能力（折叠组） */}
-                    <CollabGroup
-                      id="biz"
-                      title="业务智能体"
-                      icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>}
-                      count={bizAgents.length}
-                      collapsed={collapsed}
-                      setCollapsed={setCollapsed}
-                    >
-                      {bizLoading ? <div className="flex items-center gap-2 py-3 justify-center"><Loader2 size={13} className="animate-spin" style={{ color: "var(--oc-text-secondary)" }} /><span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>加载中...</span></div> : null}
-                      <div className="space-y-1.5">
-                        {bizAgents.map((a) => (
-                          <button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
-                            <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
-                            <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
-                          </button>
-                        ))}
-                      </div>
-                    </CollabGroup>
+                    {bizLoading ? <div className="flex items-center gap-2 py-3 justify-center"><Loader2 size={13} className="animate-spin" style={{ color: "var(--oc-text-secondary)" }} /><span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>加载中...</span></div> : (
+                      <>
+                        {/* 灵枢 · 核心引擎 */}
+                        {(() => { const items = bizAgents.filter(a => ["task-hermes","task-trace","task-evolve"].includes(a.id)); return items.length > 0 ? (
+                          <CollabGroup id="lingshu" title="灵枢 · 核心引擎" icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#be1e2d" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
+                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
+                              <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
+                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
+                            </button>))}</div>
+                          </CollabGroup>
+                        ) : null; })()}
+
+                        {/* 灵匠 · 创作工具 */}
+                        {(() => { const items = bizAgents.filter(a => ["task-ppt","task-code","task-slides"].includes(a.id)); return items.length > 0 ? (
+                          <CollabGroup id="lingjiang" title="灵匠 · 创作工具" icon={<Code2 size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
+                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
+                              <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
+                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
+                            </button>))}</div>
+                          </CollabGroup>
+                        ) : null; })()}
+
+                        {/* 灵犀 · 分析研判 */}
+                        {(() => { const items = bizAgents.filter(a => ["task-finance","task-stock"].includes(a.id)); return items.length > 0 ? (
+                          <CollabGroup id="lingxi" title="灵犀 · 分析研判" icon={<TrendingUp size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
+                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
+                              <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
+                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
+                            </button>))}</div>
+                          </CollabGroup>
+                        ) : null; })()}
+
+                        {/* 未分类 */}
+                        {(() => { const categorized = new Set(["task-hermes","task-trace","task-evolve","task-ppt","task-code","task-slides","task-finance","task-stock"]); const items = bizAgents.filter(a => !categorized.has(a.id)); return items.length > 0 ? (
+                          <CollabGroup id="other" title="其他" icon={<Bot size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
+                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
+                              <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
+                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
+                            </button>))}</div>
+                          </CollabGroup>
+                        ) : null; })()}
+                      </>
+                    )}
 
                     {/* ── 同事智能体（折叠组） */}
                     <CollabGroup

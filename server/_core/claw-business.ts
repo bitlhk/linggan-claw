@@ -2,10 +2,50 @@ import express from "express";
 import { sanitizeFileName, streamFileDownload } from "./helpers";
 import { mkdirSync, existsSync, readdirSync, statSync } from "fs";
 import { clawChatLimiter } from "./security";
+import { beginTenantSession, auditTenantAccess, ensurePerTenantAgent, type TenantContext } from "./tenant-isolation";
 import { resolveRequesterUserId, readOpenclawJson, OPENCLAW_HOME } from "./helpers";
 import path from "path";
+import { createHmac } from "crypto";
 
 export function registerBusinessRoutes(app: express.Express) {
+
+  // ── TIL 辅助：远端 file-service 代理 + tenantShort 计算 ────────────
+  const TENANT_SECRET_LOCAL = process.env.TENANT_SECRET || "linggan-tenant-2026-default-change-me";
+  const REMOTE_FILE_SERVICE_PORT = 19798;
+  function computeTenantShort(uid: number, aid: string): string {
+    return createHmac("sha256", TENANT_SECRET_LOCAL).update(`uid:${uid}|agent:${aid}`).digest("hex").slice(0, 16);
+  }
+  function getRemoteFileServiceUrl(bizAgent: any): string | null {
+    if (!bizAgent?.apiUrl) return null;
+    try {
+      const u = new URL(bizAgent.apiUrl);
+      return `${u.protocol}//${u.hostname}:${REMOTE_FILE_SERVICE_PORT}`;
+    } catch { return null; }
+  }
+  async function fetchRemoteFiles(bizAgent: any, tenantShort: string): Promise<any[]> {
+    const fsUrl = getRemoteFileServiceUrl(bizAgent);
+    if (!fsUrl) return [];
+    const httpMod = await import("http");
+    return await new Promise<any[]>((resolve, reject) => {
+      const r = httpMod.get(
+        `${fsUrl}/files?tenant=${tenantShort}`,
+        { headers: { "Authorization": `Bearer ${bizAgent.apiToken || "public-skill-demo-2026"}` } },
+        (resp) => {
+          let buf = "";
+          resp.on("data", (c) => buf += c);
+          resp.on("end", () => {
+            try {
+              const parsed = JSON.parse(buf);
+              resolve(parsed?.files || []);
+            } catch (e) { reject(e); }
+          });
+        }
+      );
+      r.on("error", reject);
+      r.setTimeout(5000, () => { r.destroy(new Error("file-service timeout")); });
+    });
+  }
+
 
   // ── 代码智能体系统提示词 ──
   const TASK_CODE_SYSTEM_PROMPT = [
@@ -163,14 +203,25 @@ export function registerBusinessRoutes(app: express.Express) {
 
     // ── Hermes Agent 专用分支：走 /v1/runs + events SSE ──────────────
     if (bizAgentCfg?.kind === "remote" && agentId === "task-hermes") {
-      console.log("[HERMES] starting run", { agentId, session: resolvedSessionKey });
+      // TIL：构建租户上下文（sessionKey 脱敏 + 审计 + 映射）
+      const tenantCtx: TenantContext = await beginTenantSession(
+        userId, agentId, "chat_send",
+        { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
+      );
+      // 用脱敏后的 sessionKey 覆盖原 resolvedSessionKey（向下传递）
+      const hermesSessionKey = tenantCtx.sessionKey;
+      console.log("[HERMES] starting run", {
+        agentId,
+        session: hermesSessionKey,
+        tenant: tenantCtx.tenantShort,
+      });
       const hermesUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8642");
       const hermesToken = bizAgentCfg.apiToken || "";
 
       // Step 1: POST /v1/runs → 获取 run_id
       const runBody = JSON.stringify({
         input: HERMES_SAFETY_PREFIX + "\n用户消息：" + msgStr,
-        session_id: resolvedSessionKey,
+        session_id: hermesSessionKey,  // 使用 TIL 脱敏后的 sessionKey
       });
 
       const runReq = http.request({
@@ -281,6 +332,8 @@ export function registerBusinessRoutes(app: express.Express) {
               eventsRes.on("end", () => {
                 console.log("[HERMES] events stream ended");
                 clearInterval(hermesHeartbeat);
+                // TIL: 记录 chat_done 审计
+                auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
                 if (!res.writableEnded) {
                   res.write(`data: [DONE]\n\n`);
                   res.end();
@@ -313,14 +366,166 @@ export function registerBusinessRoutes(app: express.Express) {
     }
 
 
-    // ── Stock Analysis Agent 专用分支：走 /api/v1/agent/chat/stream SSE ──
+    // ── hi-agent (灵枢·深度求索) 专用分支：POST /runs → 轮询结果 ──────
+    if (bizAgentCfg?.kind === "remote" && agentId === "task-trace") {
+      // TIL: 构建租户上下文
+      const tenantCtxTrace: TenantContext = await beginTenantSession(
+        userId, agentId, "chat_send",
+        { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
+      );
+      const traceSessionKey = tenantCtxTrace.sessionKey;
+      console.log("[TRACE] starting run", { agentId, session: traceSessionKey, tenant: tenantCtxTrace.tenantShort });
+      const traceUrl = bizAgentCfg.apiUrl || "http://127.0.0.1:8080";
+      const sseDelta = (text: string) => {
+        const chunk = `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
+        res.write(chunk);
+        if (typeof (res as any).flush === 'function') (res as any).flush();
+      };
+
+      try {
+        // Step 1: POST /runs 创建任务
+        const runBody = JSON.stringify({ goal: msgStr, task_family: "quick_task", risk_level: "low" });
+        const createResp = await fetch(`${traceUrl}/runs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: runBody,
+        });
+        const runData = await createResp.json();
+        const runId = runData.run_id;
+        if (!runId) {
+          sseDelta("任务创建失败: " + JSON.stringify(runData));
+          res.write(`data: [DONE]\n\n`);
+          res.end();
+          return;
+        }
+
+        // 不发任何启动提示，等 LLM 直接输出
+
+        // Step 2: 轮询 GET /runs/{id} 直到完成
+        const maxPolls = 90; // 最多轮询 90 次 (3分钟)
+        let pollCount = 0;
+        let lastState = "";
+
+        const poll = async (): Promise<void> => {
+          if (res.destroyed) return;
+          pollCount++;
+          if (pollCount > maxPolls) {
+            sseDelta("\n\n⏱️ 任务执行超时，请稍后查看结果");
+            res.write(`data: [DONE]\n\n`);
+            res.end();
+            return;
+          }
+
+          try {
+            const statusResp = await fetch(`${traceUrl}/runs/${runId}`);
+            const statusData = await statusResp.json();
+            const state = statusData.state || "unknown";
+
+            // 状态追踪（不向前端发送中间状态文字）
+            if (state !== lastState) {
+              lastState = state;
+            }
+
+            if (state === "completed" || state === "failed" || state === "cancelled") {
+              auditTenantAccess(tenantCtxTrace, "chat_done", { final_state: state }).catch(() => {});
+              if (state !== "completed") {
+                sseDelta("\n---\n\n❌ " + (statusData.error || statusData.result || "任务失败"));
+                res.write(`data: [DONE]\n\n`);
+                res.end();
+                return;
+              }
+
+              // TRACE 完成后，直接调 DeepSeek 生成回答（不发额外提示）
+
+              try {
+                const llmResp = await fetch("https://api.deepseek.com/v1/chat/completions", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY || ""}`,
+                  },
+                  body: JSON.stringify({
+                    model: "deepseek-chat",
+                    messages: [
+                      { role: "system", content: "你是灵枢·深度求索，一个专业的AI分析助手。请对用户的问题进行深入、结构化的分析，给出全面而有深度的回答。使用 markdown 格式，包含标题、要点、表格等。" },
+                      { role: "user", content: msgStr },
+                    ],
+                    stream: true,
+                    max_tokens: 4096,
+                  }),
+                });
+
+                if (!llmResp.ok || !llmResp.body) {
+                  sseDelta("❌ LLM 调用失败: " + llmResp.status);
+                  res.write(`data: [DONE]\n\n`);
+                  res.end();
+                  return;
+                }
+
+                // 流式读取 DeepSeek SSE 响应
+                const reader = llmResp.body.getReader();
+                const decoder = new TextDecoder();
+                let llmBuf = "";
+                while (true) {
+                  const { done: rdDone, value: rdVal } = await reader.read();
+                  if (rdDone) break;
+                  llmBuf += decoder.decode(rdVal, { stream: true });
+                  const lines = llmBuf.split("\n");
+                  llmBuf = lines.pop() || "";
+                  for (const line of lines) {
+                    if (!line.startsWith("data: ")) continue;
+                    const raw = line.slice(6).trim();
+                    if (raw === "[DONE]") continue;
+                    try {
+                      const j = JSON.parse(raw);
+                      const delta = j.choices?.[0]?.delta?.content;
+                      if (delta) sseDelta(delta);
+                    } catch {}
+                  }
+                }
+              } catch (llmErr: any) {
+                sseDelta("\n\n❌ LLM 流式调用异常: " + (llmErr.message || String(llmErr)));
+              }
+
+              res.write(`data: [DONE]\n\n`);
+              res.end();
+              return;
+            }
+
+            // 继续轮询
+            setTimeout(poll, 2000);
+          } catch (pollErr) {
+            sseDelta("\n\n❌ 轮询状态失败: " + String(pollErr));
+            res.write(`data: [DONE]\n\n`);
+            res.end();
+          }
+        };
+
+        await poll();
+      } catch (e: any) {
+        console.error("[TRACE] error:", e);
+        sseDelta("❌ 灵枢任务异常: " + (e.message || String(e)));
+        res.write(`data: [DONE]\n\n`);
+        res.end();
+      }
+      return;
+    }
+
+
+        // ── Stock Analysis Agent 专用分支：走 /api/v1/agent/chat/stream SSE ──
     if (bizAgentCfg?.kind === "remote" && agentId === "task-stock") {
-      console.log("[STOCK] starting chat stream", { agentId, session: resolvedSessionKey });
+      // TIL: 构建租户上下文
+      const tenantCtxStock: TenantContext = await beginTenantSession(
+        userId, agentId, "chat_send",
+        { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
+      );
+      const stockSessionKey = tenantCtxStock.sessionKey;
+      console.log("[STOCK] starting chat stream", { agentId, session: stockSessionKey, tenant: tenantCtxStock.tenantShort });
       const stockUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8188");
 
       const stockBody = JSON.stringify({
         message: msgStr,
-        session_id: resolvedSessionKey,
+        session_id: stockSessionKey,
       });
 
       const stockReq = http.request({
@@ -382,6 +587,7 @@ export function registerBusinessRoutes(app: express.Express) {
         stockRes.on("end", () => {
           console.log("[STOCK] stream ended");
           clearInterval(stockHeartbeat);
+          auditTenantAccess(tenantCtxStock, "chat_done", {}).catch(() => {});
           if (!res.writableEnded) { res.write(`data: [DONE]\n\n`); res.end(); }
         });
       });
@@ -397,17 +603,90 @@ export function registerBusinessRoutes(app: express.Express) {
     }
 
     if (bizAgentCfg?.kind === "remote") {
-      console.log("[BIZ-STREAM] remote branch", { agentId, url: bizAgentCfg.apiUrl, remoteAgentId: bizAgentCfg.remoteAgentId });
+      // TIL: 构建租户上下文（覆盖 task-evolve / task-finance / task-slides / task-code 等通用 remote agent）
+      const tenantCtxRemote: TenantContext = await beginTenantSession(
+        userId, agentId, "chat_send",
+        { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
+      );
+      const remoteSessionKey = tenantCtxRemote.sessionKey;
+      console.log("[BIZ-STREAM] remote branch", {
+        agentId, url: bizAgentCfg.apiUrl, remoteAgentId: bizAgentCfg.remoteAgentId,
+        session: remoteSessionKey, tenant: tenantCtxRemote.tenantShort,
+      });
       const remoteUrl = new URL(bizAgentCfg.apiUrl || "http://3.16.70.167:19789");
       const remoteGatewayHost = remoteUrl.hostname;
       const remoteGatewayPort = parseInt(String(remoteUrl.port || "19789"), 10);
       const remoteGatewayToken = bizAgentCfg.apiToken || "public-skill-demo-2026";
       const remoteAgentId = bizAgentCfg.remoteAgentId || "main";
 
+      // remote agents: inject system prompt to avoid blocking AskUserQuestion tool
+      // 关键：task-code / task-slides 共享同一个远程 claude-code 服务，
+      // 必须注入各自专属 system prompt，覆盖远程默认人格，防止串扰
+      const remoteMessages: Array<{role: string; content: string}> = [];
+      if (agentId === "task-slides") {
+        remoteMessages.push({ role: "system", content: [
+          "你是 HTML 演示文稿专家，通过多轮对话帮用户创建精美的单文件 HTML 幻灯片。",
+          "",
+          "【关键约束】你正在通过 API 代理与用户通信，不支持交互式工具。",
+          "- 绝对不要使用 AskUserQuestion 工具，它会导致会话阻塞。",
+          "- 如果需要用户确认或选择，直接把问题作为普通文本输出，用户会在下一条消息中回复。",
+          "- 支持多轮对话：先了解需求，再逐步完善。",
+          "",
+          "【工作流程】",
+          "1. 第一轮：如果用户需求模糊，用文本询问关键信息（主题、页数、风格偏好）",
+          "2. 收到确认后：直接生成完整的单文件 HTML 幻灯片（含 CSS 动画、键盘左右翻页）",
+          "3. 后续轮次：根据用户反馈修改优化",
+          "",
+          "始终用中文回复。生成的 HTML 放在 markdown 代码块中（```html）。",
+        ].join("\n") });
+      } else if (agentId === "task-code") {
+        // 复用本地模式的代码助手 system prompt + 远程模式约束
+        remoteMessages.push({ role: "system", content: [
+          TASK_CODE_SYSTEM_PROMPT,
+          "",
+          "【关键约束】你正在通过 API 代理与用户通信，不支持交互式工具。",
+          "- 绝对不要使用 AskUserQuestion 工具，它会导致会话阻塞。",
+          "- 如果需要用户确认或选择，直接把问题作为普通文本输出，用户会在下一条消息中回复。",
+          "- 禁止生成 HTML 幻灯片或演示文稿（那是其他 Agent 的职责）。",
+        ].join("\n") });
+      } else if (agentId === "task-ppt") {
+        remoteMessages.push({ role: "system", content: [
+          "你是 PPT 生成技能，通过 scripts/generate.js 从 content.json 生成 PPT 文件。",
+          "",
+          "【关键约束】你正在通过 API 代理与用户通信，不支持交互式工具。",
+          "- 绝对不要使用 AskUserQuestion 工具，它会导致会话阻塞。",
+          "- 如果需要澄清，直接把问题作为普通文本输出，用户会在下一条消息回复。",
+          "",
+          "【租户隔离 CRITICAL】本次会话的 tenant token 是：",
+          `  ${tenantCtxRemote.tenantShort}`,
+          "",
+          "调用 scripts/generate.js 时，必须把此 tenant token 作为第 3 个参数硬编码传入，例如：",
+          `  node /workspace/skills/ppt-insight/scripts/generate.js /workspace/output/content.json "文件名.pptx" "${tenantCtxRemote.tenantShort}"`,
+          "",
+          "⚠️ 不要使用 \"$SESSION_KEY\" 这样的环境变量占位符；必须硬编码上面 16 位 hex 值。",
+          `传对了文件会落到 output/${tenantCtxRemote.tenantShort}/ 子目录（租户隔离）；`,
+          "传错或没传会落到 output/default/，导致跨租户数据泄露。",
+          "",
+          "【工作流程】",
+          "1. 默认先返回文字结论；只有用户明确要 PPT 时才生成。",
+          "2. 生成 PPT 时：",
+          "   a. 用 write 工具在 /workspace/output/content.json 写入 slide 数据（格式见 skills/ppt-insight/SKILL.md 和 scripts/content_example.json）",
+          "   b. exec 执行上面的 node 命令（第 3 参数必须是 tenant token）",
+          "   c. 确认 exit 0，在回复里告诉用户文件名和完整路径",
+          "",
+          "【内嵌预览 CRITICAL】生成 PPT 成功后，必须在你的回复**最末尾**追加一行隐藏 marker（前端渲染用，用户看不到）：",
+          "   <!-- __files:[{\"name\":\"xxx.pptx\",\"ext\":\".pptx\",\"size\":0,\"url\":\"xxx.pptx\"},{\"name\":\"xxx-preview.html\",\"ext\":\".html\",\"size\":0,\"url\":\"xxx-preview.html\"}] -->",
+          "其中两个 `xxx` 都要替换成你实际生成的文件名（不含路径，不含 output 目录前缀）。必须包含 .pptx 和同名的 -preview.html 两个条目。不要改动 JSON 格式，不要放在摘要中间，必须是回复的最后一行。",
+          "",
+          "始终用中文回复。",
+        ].join("\n") });
+      }
+      remoteMessages.push({ role: "user", content: msgStr });
+
       const body = JSON.stringify({
         model: `openclaw/${remoteAgentId}`,
         stream: true,
-        messages: [{ role: "user", content: msgStr }],
+        messages: remoteMessages,
       });
 
       const proxyReq = http.request({
@@ -421,7 +700,9 @@ export function registerBusinessRoutes(app: express.Express) {
           "Content-Length": Buffer.byteLength(body),
           "Authorization": `Bearer ${remoteGatewayToken}`,
           "x-openclaw-scopes": "operator.write",
-          "x-openclaw-session-key": resolvedSessionKey,
+          "x-openclaw-session-key": remoteSessionKey,
+          "x-tenant-token": tenantCtxRemote.tenantToken,
+          "x-tenant-workspace": tenantCtxRemote.workspace,
         },
       }, (proxyRes: any) => {
         // Manual forwarding instead of pipe — ensures keepalive writes don't get buffered
@@ -432,7 +713,43 @@ export function registerBusinessRoutes(app: express.Express) {
         proxyRes.on("end", () => {
           console.log("[BIZ-STREAM] proxyRes ended");
           clearInterval(bizHeartbeat);
-          if (!res.writableEnded) res.end();
+          auditTenantAccess(tenantCtxRemote, "chat_done", {}).catch(() => {});
+          // TIL: 调远端 file-service 拿文件列表，推送 workspace_files 事件
+          (async () => {
+            try {
+              if (tenantCtxRemote.tenantShort) {
+                const remoteFiles = await fetchRemoteFiles(bizAgentCfg, tenantCtxRemote.tenantShort);
+                const cutoff = Date.now() / 1000 - 5 * 60;
+                const recent = remoteFiles
+                  .filter((f: any) => (f.mtime || 0) >= cutoff)
+                  .map((f: any) => ({ name: f.name, size: f.size, path: f.name }));
+                if (recent.length > 0 && !res.writableEnded) {
+                  // 旧通道：保留 workspace_files 事件（兼容其他可能的监听方）
+                  res.write("event: workspace_files\ndata: " + JSON.stringify({ adoptId: String(agentId), files: recent }) + "\n\n");
+
+                  // 新通道：注入 __files: marker 到 assistant text，触发 CollabDrawer 的 inline preview card
+                  // 前端 filesMatch regex: /<!-- __files:(\[.*?\]) -->/
+                  // 字段：name, ext, size, url — url 会被 split("/").pop() 提取 filename
+                  const filesForMarker = recent.map((f: any) => {
+                    const ext = "." + ((f.name.split(".").pop() || "").toLowerCase());
+                    return { name: f.name, ext, size: f.size, url: f.name };
+                  });
+                  const marker = "\n\n<!-- __files:" + JSON.stringify(filesForMarker) + " -->";
+                  const deltaChunk = {
+                    id: "files-marker-" + Date.now(),
+                    object: "chat.completion.chunk",
+                    choices: [{ index: 0, delta: { content: marker }, finish_reason: null }]
+                  };
+                  res.write("data: " + JSON.stringify(deltaChunk) + "\n\n");
+
+                  console.log("[BIZ-STREAM] pushed", recent.length, "remote files + __files marker (agent-side + server-side) for tenant", tenantCtxRemote.tenantShort);
+                }
+              }
+            } catch (e: any) {
+              console.warn("[BIZ-STREAM] remote file list failed:", e?.message);
+            }
+            if (!res.writableEnded) res.end();
+          })();
         });
       });
 
@@ -453,7 +770,16 @@ export function registerBusinessRoutes(app: express.Express) {
       return;
     }
 
-    // ── 本地 Agent 路由（task-ppt / task-code）────────────────────────
+    // ── 本地 Agent 路由（task-ppt 等本地 OpenClaw agent）────────────
+    // TIL: 构建租户上下文 + 动态注册 per-tenant agent
+    const tenantCtxLocal: TenantContext = await beginTenantSession(
+      userId, agentId, "chat_send",
+      { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
+    );
+    const templateAgentId = String((bizAgentCfg as any)?.localAgentId || agentId);
+    const perTenantAgentId = ensurePerTenantAgent(templateAgentId, tenantCtxLocal);
+    console.log("[LOCAL]", agentId, "→ per-tenant agent:", perTenantAgentId, "tenant:", tenantCtxLocal.tenantShort);
+
     const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
     const gatewayPort = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
     const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
@@ -474,8 +800,8 @@ export function registerBusinessRoutes(app: express.Express) {
       "Content-Type": "application/json",
       "Content-Length": Buffer.byteLength(body),
       "Authorization": `Bearer ${gatewayToken}`,
-      "x-openclaw-agent-id": String((bizAgentCfg as any)?.localAgentId || agentId),
-      "x-openclaw-session-key": resolvedSessionKey,
+      "x-openclaw-agent-id": perTenantAgentId,  // 用 per-tenant agent
+      "x-openclaw-session-key": tenantCtxLocal.sessionKey,
     };
     if (backendModel) headers["x-openclaw-model"] = backendModel;
 
@@ -494,15 +820,14 @@ export function registerBusinessRoutes(app: express.Express) {
       proxyRes.on("end", () => {
           console.log("[BIZ-STREAM] proxyRes ended (local)");
         clearInterval(localHeartbeat);
+        auditTenantAccess(tenantCtxLocal, "chat_done", { agent: perTenantAgentId }).catch(() => {});
         if (!res.writableEnded) {
           // ── 扫描 workspace/output/ 推送产出文件（与 sandbox 路由同逻辑）──
           try {
-            const ocJson = readOpenclawJson();
-            const localAgentId = String((bizAgentCfg as any)?.localAgentId || agentId);
-            const agentCfg = (ocJson?.agents?.list || []).find((a: any) => a.id === localAgentId);
-            const workspaceBase = agentCfg?.workspace || `${OPENCLAW_HOME}/workspace-${localAgentId}`;
-            // 按用户隔离的输出目录
-            const userOutputDir = `${workspaceBase}/output/user_${userId}`;
+            // TIL: 用 per-tenant workspace（已经物理隔离）
+            const tenantWorkspace = tenantCtxLocal.workspace;
+            // 兼容两种产物位置：workspace 根目录 或 workspace/output/
+            const userOutputDir = existsSync(`${tenantWorkspace}/output`) ? `${tenantWorkspace}/output` : tenantWorkspace;
             if (existsSync(userOutputDir)) {
               const allFiles: Array<{ name: string; size: number; path: string }> = [];
               const scanDir = (dir: string, relBase: string) => {
@@ -513,7 +838,7 @@ export function registerBusinessRoutes(app: express.Express) {
                     const rel = relBase ? `${relBase}/${entry}` : entry;
                     try {
                       const s = statSync(full);
-                      if (s.isFile()) allFiles.push({ name: entry, size: s.size, path: `output/user_${userId}/${rel}` });
+                      if (s.isFile()) allFiles.push({ name: entry, size: s.size, path: rel });
                       else if (s.isDirectory()) scanDir(full, rel);
                     } catch {}
                   }
@@ -574,6 +899,25 @@ export function registerBusinessRoutes(app: express.Express) {
     const { getBusinessAgent } = await import("../db");
     const bizAgent = await getBusinessAgent(agentId);
     if (!bizAgent || bizAgent.enabled !== 1) return res.status(403).json({ error: "不允许" });
+    if (bizAgent.kind === "remote") {
+      // TIL: 远端业务 Agent → 通过 remote file service 代理
+      try {
+        const tenantShort = computeTenantShort(userId, agentId);
+        const remoteFiles = await fetchRemoteFiles(bizAgent, tenantShort);
+        const items = remoteFiles
+          .map((f: any) => ({
+            name: f.name,
+            size: f.size,
+            updatedAt: new Date((f.mtime || 0) * 1000).toISOString(),
+          }))
+          .sort((a: any, b: any) => b.updatedAt.localeCompare(a.updatedAt))
+          .slice(0, 30);
+        return res.json({ files: items });
+      } catch (e: any) {
+        console.warn("[business-files list] remote fetch failed:", e?.message);
+        return res.json({ files: [] });
+      }
+    }
     if (bizAgent.kind !== "local") return res.json({ files: [] });
 
     try {
@@ -609,6 +953,39 @@ export function registerBusinessRoutes(app: express.Express) {
     const { getBusinessAgent } = await import("../db");
     const bizAgent = await getBusinessAgent(agentId);
     if (!bizAgent || bizAgent.enabled !== 1) return res.status(403).json({ error: "不允许" });
+    if (bizAgent.kind === "remote") {
+      // TIL: 代理下载远端文件
+      const fsUrl = getRemoteFileServiceUrl(bizAgent);
+      const safeFile = sanitizeFileName(fileName);
+      if (!fsUrl || !safeFile) return res.status(400).json({ error: "非法" });
+      const tenantShort = computeTenantShort(userId, agentId);
+      try {
+        const httpMod = await import("http");
+        const fileUrl = `${fsUrl}/download/${tenantShort}/${encodeURIComponent(fileName)}`;
+        httpMod.get(
+          fileUrl,
+          { headers: { "Authorization": `Bearer ${bizAgent.apiToken || "public-skill-demo-2026"}` } },
+          (proxyRes) => {
+            if (proxyRes.statusCode !== 200) {
+              res.status(proxyRes.statusCode || 404).json({ error: "远端文件不存在" });
+              return;
+            }
+            const ct = proxyRes.headers["content-type"];
+            if (ct) res.setHeader("Content-Type", ct as string);
+            const cl = proxyRes.headers["content-length"];
+            if (cl) res.setHeader("Content-Length", cl as string);
+            const cd = proxyRes.headers["content-disposition"];
+            if (cd) res.setHeader("Content-Disposition", cd as string);
+            proxyRes.pipe(res);
+          }
+        ).on("error", (err: any) => {
+          if (!res.headersSent) res.status(502).json({ error: "远端下载失败: " + err.message });
+        });
+        return;
+      } catch (e: any) {
+        return res.status(500).json({ error: e?.message || "远端下载异常" });
+      }
+    }
     if (bizAgent.kind !== "local") return res.status(404).json({ error: "远端 Agent 无本地文件" });
     const safeFileName = sanitizeFileName(fileName);
       if (!safeFileName) {
@@ -640,6 +1017,43 @@ export function registerBusinessRoutes(app: express.Express) {
     const { getBusinessAgent } = await import("../db");
     const bizAgent = await getBusinessAgent(agentId);
     if (!bizAgent || bizAgent.enabled !== 1) return res.status(403).json({ error: "不允许" });
+    if (bizAgent.kind === "remote") {
+      // TIL: 代理 DELETE 到 remote file service
+      const fsUrl = getRemoteFileServiceUrl(bizAgent);
+      if (!fsUrl) return res.status(500).json({ error: "remote file service unavailable" });
+      const tenantShort = computeTenantShort(userId, agentId);
+      try {
+        const httpMod = await import("http");
+        const fsPath = clearAll
+          ? `/delete/${tenantShort}`
+          : `/delete/${tenantShort}/${encodeURIComponent(fileName)}`;
+        const fsFullUrl = new URL(fsPath, fsUrl);
+        const result: any = await new Promise((resolve, reject) => {
+          const r = httpMod.request({
+            hostname: fsFullUrl.hostname,
+            port: fsFullUrl.port,
+            path: fsFullUrl.pathname,
+            method: "DELETE",
+            headers: { "Authorization": `Bearer ${bizAgent.apiToken || "public-skill-demo-2026"}` },
+          }, (resp) => {
+            let buf = "";
+            resp.on("data", (c) => buf += c);
+            resp.on("end", () => {
+              try { resolve({ status: resp.statusCode, body: JSON.parse(buf || "{}") }); } catch (e) { reject(e); }
+            });
+          });
+          r.on("error", reject);
+          r.setTimeout(5000, () => { r.destroy(new Error("timeout")); });
+          r.end();
+        });
+        if (result.status === 200 || result.status === 404) {
+          return res.json({ ok: true, deleted: result.body?.deleted ?? 0 });
+        }
+        return res.status(result.status || 500).json(result.body || { error: "delete failed" });
+      } catch (e: any) {
+        return res.status(502).json({ error: e?.message || "remote delete failed" });
+      }
+    }
     if (bizAgent.kind !== "local") return res.status(404).json({ error: "远端 Agent 无本地文件" });
 
     try {
@@ -679,6 +1093,43 @@ export function registerBusinessRoutes(app: express.Express) {
     const bizAgent = await getBusinessAgent(agentId);
     if (!bizAgent || bizAgent.enabled !== 1 || bizAgent.kind !== "remote") {
       return res.status(403).json({ error: "不允许" });
+    }
+
+    // TIL: task-ppt 走 file-service + tenantShort 隔离（其他 agent 走老的 /files/ 代理）
+    if (agentId === "task-ppt") {
+      const fsUrl = getRemoteFileServiceUrl(bizAgent);
+      if (fsUrl) {
+        const tenantShort = computeTenantShort(userId, agentId);
+        const fileUrl = `${fsUrl}/download/${tenantShort}/${encodeURIComponent(fileName)}`;
+        try {
+          const httpMod = await import("http");
+          httpMod.get(
+            fileUrl,
+            { headers: { "Authorization": `Bearer ${bizAgent.apiToken || "public-skill-demo-2026"}` } },
+            (proxyRes) => {
+              if (proxyRes.statusCode !== 200) {
+                res.status(proxyRes.statusCode || 404).json({ error: "远端文件不存在" });
+                return;
+              }
+              const ct = proxyRes.headers["content-type"];
+              if (ct) res.setHeader("Content-Type", ct as string);
+              const cl = proxyRes.headers["content-length"];
+              if (cl) res.setHeader("Content-Length", cl as string);
+              // preview=1 且 HTML：放宽 iframe CSP
+              if (req.query.preview === "1" && (ct as string | undefined)?.includes("html")) {
+                res.removeHeader("X-Frame-Options");
+                res.setHeader("Content-Security-Policy", "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors *");
+              }
+              proxyRes.pipe(res);
+            }
+          ).on("error", (err: any) => {
+            if (!res.headersSent) res.status(502).json({ error: "远端下载失败: " + err.message });
+          });
+        } catch (e: any) {
+          if (!res.headersSent) res.status(500).json({ error: e?.message || "远端下载异常" });
+        }
+        return;
+      }
     }
 
     // Forward to remote proxy file server
