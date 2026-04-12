@@ -781,16 +781,23 @@ export const clawRouter = router({
           return execSync(cmd, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] }).trim();
         };
 
-        const SHARED_META: Record<string, { label: string; desc: string; emoji: string }> = {
-          "stock-query":      { label: "股票行情", desc: "查询A股/港股/美股实时行情", emoji: "📈" },
-          "finance-news":     { label: "金融资讯", desc: "A股市场动态与宏观政策", emoji: "📰" },
-          "research-report":  { label: "研报分析", desc: "解读研究报告与财务数据", emoji: "🔬" },
-          "quant-lite":       { label: "量化分析", desc: "技术指标计算与趋势判断", emoji: "📊" },
-        };
+        const SHARED_META: Record<string, { label: string; desc: string; emoji: string }> = {};
 
         const SYSTEM_META: Record<string, { label: string; desc: string; emoji: string }> = {
-          "skill-creator": { label: "技能创作", desc: "帮你设计新 OpenClaw 技能", emoji: "🛠" },
-          "weather": { label: "天气查询", desc: "查询任意城市实时天气", emoji: "🌤" },
+          // 办公效率
+          "docx":             { label: "Word 文档", desc: "创建、读取、编辑 Word 文档", emoji: "📄" },
+          "xlsx":             { label: "Excel 表格", desc: "电子表格与数据分析", emoji: "📊" },
+          "pdf":              { label: "PDF 处理", desc: "读取、创建、合并 PDF", emoji: "📑" },
+          "pptx-doc":         { label: "PPT 演示", desc: "创建与编辑演示文稿", emoji: "📽" },
+          "internal-comms":   { label: "公文写作", desc: "通知、纪要、周报模板", emoji: "📋" },
+          // 金融分析
+          "stock-query":      { label: "股票行情", desc: "A股/港股/美股实时行情", emoji: "📈" },
+          "finance-news":     { label: "金融资讯", desc: "市场动态与宏观政策", emoji: "📰" },
+          "research-report":  { label: "研报解读", desc: "研究报告与财务数据", emoji: "🔬" },
+          "quant-lite":       { label: "量化工具", desc: "技术指标与趋势判断", emoji: "📉" },
+          // 工具
+          "skill-creator":    { label: "技能工坊", desc: "设计与创建新技能", emoji: "🛠" },
+          "weather":          { label: "天气查询", desc: "查询城市实时天气", emoji: "🌤" },
         };
 
         const lsLines = (cmd: string) => {

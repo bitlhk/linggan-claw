@@ -76,6 +76,35 @@ export function registerChatStreamRoutes(app: express.Express) {
       }
     }
 
+    // /help command: return help text locally
+    if (msgStr.trim().toLowerCase() === "/help" || msgStr.trim().toLowerCase() === "/commands") {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      const helpText = "## \u53ef\u7528\u547d\u4ee4\n\n" +
+        "| \u547d\u4ee4 | \u8bf4\u660e |\n|---|---|\n" +
+        "| `/help` | \u67e5\u770b\u53ef\u7528\u547d\u4ee4 |\n" +
+        "| `/status` | \u67e5\u770b\u5f53\u524d\u72b6\u6001 |\n" +
+        "| `/tools` | \u67e5\u770b\u53ef\u7528\u5de5\u5177 |\n" +
+        "| `/model` | \u5207\u6362\u6a21\u578b |\n" +
+        "| `/dreaming status` | \u67e5\u770b\u68a6\u5883\u8bb0\u5fc6\u72b6\u6001 |\n" +
+        "| `/context` | \u67e5\u770b\u4e0a\u4e0b\u6587\u4fe1\u606f |\n" +
+        "| `/usage` | \u67e5\u770b\u7528\u91cf\u7edf\u8ba1 |\n" +
+        "| `/whoami` | \u67e5\u770b\u5f53\u524d\u8eab\u4efd |\n" +
+        "| `/new` | \u5f00\u542f\u65b0\u4f1a\u8bdd |\n" +
+        "| `/reset` | \u91cd\u7f6e\u4f1a\u8bdd\u4e0a\u4e0b\u6587 |\n" +
+        "| `/think` | \u6df1\u5ea6\u601d\u8003\u6a21\u5f0f |\n" +
+        "| `/fast` | \u5feb\u901f\u6a21\u5f0f |\n" +
+        "| `/compact` | \u538b\u7f29\u4e0a\u4e0b\u6587 |\n" +
+        "| `/tasks` | \u67e5\u770b\u4efb\u52a1\u5217\u8868 |\n\n" +
+        "> \ud83d\udca1 \u4e5f\u53ef\u4ee5\u76f4\u63a5\u7528\u81ea\u7136\u8bed\u8a00\u8ddf\u6211\u5bf9\u8bdd\uff0c\u6211\u4f1a\u81ea\u52a8\u8c03\u7528\u5408\u9002\u7684\u5de5\u5177\u3002";
+      const chunk = { choices: [{ delta: { content: helpText }, index: 0 }] };
+      res.write("data: " + JSON.stringify(chunk) + "\n\n");
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
+
     // /dreaming 命令拦截
     const dreamingMatch = msgStr.trim().match(/^\/dreaming(?:\s+(status|on|off|help))?$/);
     if (dreamingMatch) {

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, RefreshCw, Store, ChevronDown, ChevronRight, Settings2, Upload } from "lucide-react";
+import { Search, RefreshCw, Store, ChevronDown, ChevronRight, Settings2, Upload, Package, Sparkles } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { PageContainer } from "@/components/console/PageContainer";
 import { toast } from "sonner";
+import { MarketplacePage } from "./MarketplacePage";
 
 export type SkillSource = "shared" | "private" | "system" | "installed" | "extra";
 export type SkillItem = {
@@ -25,9 +26,9 @@ type StatusFilter = "all" | "ready" | "needsSetup" | "disabled" | "bound";
 
 function getGroupLabel(source: SkillSource) {
   switch (source) {
-    case "shared": return "公共技能";
+    case "shared": return "平台技能";
     case "private": return "我的技能";
-    case "system": return "系统技能";
+    case "system": return "平台技能";
     case "installed":
     case "extra": return "扩展技能";
     default: return "其他技能";
@@ -62,7 +63,6 @@ function SkillsHeader({ onRefresh, onUpload, onMarket }: { onRefresh?: () => voi
 
       <div className="flex items-center gap-2">
         <button className="skills-btn" onClick={onRefresh}><RefreshCw size={14} /> 刷新</button>
-        <button className="skills-btn" onClick={onMarket}><Store size={14} /> 技能市场</button>
         <button className="btn-primary-soft" onClick={onUpload}><Upload size={13} style={{ marginRight: 6 }} /> 上传技能包</button>
       </div>
     </div>
@@ -510,6 +510,7 @@ export function SkillsPage({ skills, canEdit, pending, onToggle, adoptId }:
   const [myPackages, setMyPackages] = useState<any[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [showMarket, setShowMarket] = useState(false);
+  const [skillTab, setSkillTab] = useState<"market"|"mine"|"upload">("mine");
 
 
   useEffect(() => {
@@ -654,12 +655,12 @@ export function SkillsPage({ skills, canEdit, pending, onToggle, adoptId }:
   }), [normalized, qDebounced, status]);
 
   const groups = useMemo(() => {
-    const order = ["我的技能", "公共技能", "系统技能"];
+    const order = ["我的技能", "平台技能"];
     const m = new Map<string, SkillItem[]>();
     for (const k of order) m.set(k, []);
     for (const s of filtered) {
       let k = getGroupLabel(s.source);
-      if (k === "扩展技能" || k === "其他技能") k = "公共技能";
+      if (k === "扩展技能" || k === "其他技能") k = "平台技能";
       if (!m.has(k)) m.set(k, []);
       m.get(k)!.push(s);
     }
@@ -854,44 +855,37 @@ export function SkillsPage({ skills, canEdit, pending, onToggle, adoptId }:
   };
 
   return (
-    <PageContainer title="技能" desc="管理当前子 Agent 可用技能">
-      <SkillsHeader onUpload={onUploadPackage} onMarket={() => setShowMarket(true)} onRefresh={() => {
-        setDetail(null);
-        setQ("");
-        setStatus("all");
-        setCollapsed({});
-        fetch(`/api/claw/skill-package/mine?adoptId=${encodeURIComponent(adoptId)}`)
-          .then(r => r.json())
-          .then(d => setMyPackages(Array.isArray(d?.items) ? d.items : []))
-          .catch(() => setMyPackages([]));
-      }} />
-      <SkillsToolbar q={q} setQ={setQ} status={status} setStatus={setStatus} />
-
-      <div className="skills-summary text-xs" style={{ color: "var(--muted)", marginTop: 10 }}>共 {filtered.length} 个匹配技能 {pending || bindingLoading || uploading || publishing ? "· 正在更新…" : ""}</div>
-
-      <div className="grid gap-3 mt-3">
-        {groups.map(([g, arr]) => (
-          <SkillGroupSection
-            key={g}
-            title={g}
-            skills={arr}
-            collapsed={!!collapsed[g]}
-            setCollapsed={(v) => setCollapsed((p) => ({ ...p, [g]: v }))}
-            onBatch={(v) => { if (pending) return; arr.forEach((sk) => onToggleAgent(sk, v)); }}
-            onToggle={(id, v) => {
-              const sk = arr.find((x) => x.id === id);
-              if (sk) onToggleAgent(sk, v);
-            }}
-            onOpen={setDetail}
-          />
-
-        ))}
-        {filtered.length === 0 && <div className="settings-card text-sm" style={{ color: "var(--muted)" }}>暂无匹配技能</div>}
+    <PageContainer title="技能">
+      {/* ── Sub-tab 栏 ── */}
+      <div className="console-tabs">
+        <button className={`console-tab ${skillTab === "market" ? "active" : ""}`} onClick={() => setSkillTab("market")}><Store size={12} /> 技能市场</button>
+        <button className={`console-tab ${skillTab === "mine" ? "active" : ""}`} onClick={() => setSkillTab("mine")}><Package size={12} /> 我的技能</button>
       </div>
 
-      <SkillDetailDrawer skill={detail} adoptId={adoptId} onClose={() => setDetail(null)} onToggle={(v) => detail && onToggleAgent(detail, v)} onDeletePrivate={onDeletePrivatePackage} onInstallPrivate={onInstallPrivatePackage} />
+      {/* ── 技能市场 Tab ── */}
+      {skillTab === "market" && (
+        <MarketplacePage adoptId={adoptId} />
+      )}
 
-      <SkillMarketModal open={showMarket} onClose={() => setShowMarket(false)} adoptId={adoptId} myPackages={myPackages} />
+      {/* ── 我的技能 Tab ── */}
+      {skillTab === "mine" && (
+        <>
+          <SkillsHeader onUpload={onUploadPackage} onMarket={() => setSkillTab("market")} onRefresh={() => {
+            setDetail(null); setQ(""); setStatus("all"); setCollapsed({});
+            fetch(`/api/claw/skill-package/mine?adoptId=${encodeURIComponent(adoptId || "")}`)
+              .then(r => r.json()).then(d => setMyPackages(Array.isArray(d?.items) ? d.items : [])).catch(() => setMyPackages([]));
+          }} />
+          <SkillsToolbar q={q} setQ={setQ} status={status} setStatus={setStatus} />
+          <div className="skills-summary text-xs" style={{ color: "var(--muted)", marginTop: 10 }}>共 {filtered.length} 个匹配技能 {pending || bindingLoading || uploading || publishing ? "· 正在更新…" : ""}</div>
+          <div className="grid gap-3 mt-3">
+            {groups.map(([g, arr]) => (
+              <SkillGroupSection key={g} title={g} skills={arr} collapsed={!!collapsed[g]} setCollapsed={(v) => setCollapsed((p) => ({ ...p, [g]: v }))} onBatch={(v) => { if (pending) return; arr.forEach((sk) => onToggleAgent(sk, v)); }} onToggle={(id, v) => { const sk = arr.find((x) => x.id === id); if (sk) onToggleAgent(sk, v); }} onOpen={setDetail} />
+            ))}
+            {filtered.length === 0 && <div className="settings-card text-sm" style={{ color: "var(--muted)" }}>暂无匹配技能</div>}
+          </div>
+          <SkillDetailDrawer skill={detail} adoptId={adoptId} onClose={() => setDetail(null)} onToggle={(v) => detail && onToggleAgent(detail, v)} onDeletePrivate={onDeletePrivatePackage} onInstallPrivate={onInstallPrivatePackage} />
+        </>
+      )}
     </PageContainer>
   );
 }

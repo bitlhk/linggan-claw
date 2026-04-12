@@ -1,5 +1,4 @@
 import { MessageSquareText, Bot, Sparkles, CalendarClock, Settings2, BookOpen, Users, Moon } from "lucide-react";
-
 export type PageKey = "chat" | "skills" | "agent" | "schedule" | "dreams" | "collab" | "settings" | "docs";
 
 const items: { key: PageKey; label: string; icon: any }[] = [

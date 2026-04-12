@@ -145,7 +145,7 @@ export function registerCronRoutes(app: express.Express) {
       }
       // 清理 delivery
       const rawDelivery = job?.delivery || {};
-      const cleanDelivery: any = { mode: String(rawDelivery.mode || "none") };
+      const cleanDelivery: any = { mode: String(rawDelivery.mode || "announce"), to: String(rawDelivery.to || "conversation") };
       if (rawDelivery.channel) cleanDelivery.channel = String(rawDelivery.channel);
 
       const payload = {

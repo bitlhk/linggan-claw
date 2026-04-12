@@ -1188,7 +1188,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                         ) : null; })()}
 
                         {/* 灵犀 · 分析研判 */}
-                        {(() => { const items = bizAgents.filter(a => ["task-finance","task-stock","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"].includes(a.id)); return items.length > 0 ? (
+                        {(() => { const items = bizAgents.filter(a => ["task-stock","task-trading","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"].includes(a.id)); return items.length > 0 ? (
                           <CollabGroup id="lingxi" title="灵犀 · 分析研判" icon={<TrendingUp size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
@@ -1199,7 +1199,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                         ) : null; })()}
 
                         {/* 未分类 */}
-                        {(() => { const categorized = new Set(["task-hermes","task-trace","task-evolve","task-ppt","task-code","task-slides","task-finance","task-stock","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"]); const items = bizAgents.filter(a => !categorized.has(a.id)); return items.length > 0 ? (
+                        {(() => { const categorized = new Set(["task-hermes","task-trace","task-evolve","task-ppt","task-code","task-slides","task-stock","task-trading","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"]); const items = bizAgents.filter(a => !categorized.has(a.id)); return items.length > 0 ? (
                           <CollabGroup id="other" title="其他" icon={<Bot size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>

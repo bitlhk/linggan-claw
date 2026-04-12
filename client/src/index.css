@@ -721,21 +721,21 @@
 }
 .skills-group-count { color: var(--muted); font-size: 12px; }
 .skills-switch {
-  width: 34px; height: 18px; border-radius: 999px; border: 1px solid var(--oc-border); background: rgba(255,255,255,0.10); position: relative; transition: all .15s ease;
+  width: 40px; height: 22px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.18); position: relative; transition: all .2s ease; cursor: pointer;
 }
 .skills-switch.is-on {
-  background: rgba(255,92,92,0.85);
-  border-color: rgba(255,112,112,0.95);
-  box-shadow: 0 0 0 2px rgba(255,92,92,0.18);
+  background: #22c55e;
+  border-color: #16a34a;
+  box-shadow: 0 0 0 2px rgba(34,197,94,0.25);
 }
 .skills-switch.is-off {
-  background: rgba(255,255,255,0.10);
-  border-color: var(--oc-border);
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.2);
 }
 .skills-switch-dot {
-  position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 999px; background: #fff; transition: all .15s ease;
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 999px; background: #fff; transition: all .2s ease; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
-.skills-switch-dot.on { left: 18px; background: #fff; }
+.skills-switch-dot.on { left: 20px; background: #fff; }
 .skills-drawer-mask {
   position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; justify-content: flex-end; z-index: 80;
 }
@@ -1442,10 +1442,7 @@
   color: var(--muted);
 }
 
-/* ⑥ 浅色：skills-switch 背景 */
-:root[data-theme-mode="light"] .skills-switch {
-  background: rgba(0,0,0,0.08);
-}
+/* ⑥ 浅色：skills-switch */:root[data-theme-mode="light"] .skills-switch {  background: rgba(0,0,0,0.12);  border-color: rgba(0,0,0,0.2);}:root[data-theme-mode="light"] .skills-switch.is-on {  background: #16a34a;  border-color: #15803d;  box-shadow: 0 0 0 2px rgba(22,163,74,0.2);}:root[data-theme-mode="light"] .skills-switch.is-off {  background: rgba(0,0,0,0.12);  border-color: rgba(0,0,0,0.2);}
 
 /* ⑦ 浅色：settings-card 内 border 透明修正 */
 :root[data-theme-mode="light"] .settings-card {
@@ -2387,4 +2384,60 @@ html:has(:root[data-theme-mode="light"]) body {
 :root[data-theme-mode="light"] .collab-file-card {
   background: #F8F7FF !important;
   border-color: #D4D0E8 !important;
+}
+
+/* ═══ Console Tab 统一规范 ═══ */
+.console-tabs {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.console-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; font-size: 12px; font-weight: 400;
+  border-radius: 9999px; border: 1px solid var(--oc-border);
+  background: rgba(255,255,255,0.04); color: var(--oc-text-secondary);
+  cursor: pointer; transition: all .15s ease;
+}
+.console-tab.active {
+  background: var(--accent-subtle); color: var(--oc-accent);
+  font-weight: 500; border-color: var(--oc-border);
+}
+.console-tab:hover:not(.active) {
+  background: rgba(255,255,255,0.08);
+}
+
+/* ═══ 移动端适配 ═══ */
+@media (max-width: 768px) {
+  /* sidebar 在手机上默认隐藏，只显示图标列 */
+  .sidebar-container {
+    width: 0 !important;
+    min-width: 0 !important;
+    overflow: hidden;
+  }
+  .sidebar-container.mobile-open {
+    width: 220px !important;
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    z-index: 90;
+    background: var(--oc-panel);
+    box-shadow: 4px 0 20px rgba(0,0,0,0.4);
+  }
+  /* 主内容区全宽 */
+  .main-content-area {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  /* 技能市场卡片单列 */
+  .marketplace-grid {
+    grid-template-columns: 1fr !important;
+  }
+  /* 隐藏不必要的桌面元素 */
+  .desktop-only { display: none !important; }
+  /* 缩小间距 */
+  .px-6 { padding-left: 16px !important; padding-right: 16px !important; }
+  .py-5 { padding-top: 12px !important; padding-bottom: 12px !important; }
+  /* console-tab 适配 */
+  .console-tabs { gap: 4px; }
+  .console-tab { padding: 5px 10px; font-size: 11px; }
+  /* 设置卡片 */
+  .settings-card { padding: 8px 12px; }
 }

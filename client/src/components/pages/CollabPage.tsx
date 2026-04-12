@@ -263,7 +263,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
 
   return (
     <PageContainer title="智能体协作" icon={<Users size={18} />}>
-      <div className="mb-4 flex items-center gap-2 flex-wrap">
+      <div className="console-tabs">
         {tabs.map(t => {
           const Icon = t.icon;
           const active = activeTab === t.key;
@@ -271,7 +271,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-colors"
+              className={`console-tab ${activeTab === t.key ? "active" : ""}`}
               style={{
                 border: "1px solid var(--oc-border)",
                 background: active ? "var(--accent-subtle)" : "rgba(255,255,255,0.04)",

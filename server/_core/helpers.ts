@@ -1,3 +1,4 @@
+import { execFileSync, execSync } from "child_process";
 import path from "path";
 import { createHash, createHmac } from "crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync, readdirSync, createReadStream } from "fs";
@@ -171,7 +172,7 @@ export const resolveRuntimeAgentId = (adoptId: string, dbAgentIdRaw: any) => {
 };
 
 export const callClawGatewayRpc = (method: string, params: Record<string, any> = {}) => {
-  const { execFileSync } = require("child_process");
+  
   const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
   const gatewayPort = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
   const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
@@ -277,7 +278,7 @@ export function verifyFileToken(rawToken: string): { ok: true; adoptId: string; 
   const payload = rawToken.slice(0, dotIdx);
   const sig = rawToken.slice(dotIdx + 1);
 
-  const { createHmac } = require("crypto");
+  
   const secret = process.env.FILE_TOKEN_SECRET || process.env.JWT_SECRET || "";
   if (!secret) return { ok: false, error: "server secret not configured", status: 500 };
   const expectedSig = createHmac("sha256", secret).update(payload).digest("base64url");

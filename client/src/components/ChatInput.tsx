@@ -31,6 +31,8 @@ export function ChatInput({
 
   // ── 语音录制状态 ──
   const [recording, setRecording] = useState(false);
+
+
   const [transcribing, setTranscribing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);

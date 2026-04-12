@@ -45,7 +45,7 @@ const emptyForm: FormState = {
   scheduleKind: "every", everyAmount: "30", everyUnit: "minutes",
   atValue: "", cronExpr: "0 8 * * *", cronTz: "Asia/Shanghai",
   payloadKind: "agentTurn", payloadText: "", payloadModel: "",
-  sessionTarget: "isolated", deliveryMode: "none",
+  sessionTarget: "isolated", deliveryMode: "announce",
 };
 
 const fmt = (ms?: number) =>
@@ -163,7 +163,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
         ? { kind: "agentTurn", message: form.payloadText, model: form.payloadModel || undefined }
         : { kind: "systemEvent", text: form.payloadText },
       sessionTarget: form.sessionTarget,
-      delivery: { mode: form.deliveryMode },
+      delivery: { mode: form.deliveryMode, to: form.deliveryMode === "announce" ? "conversation" : undefined },
     };
   };
 
@@ -529,12 +529,6 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
             </>
           )}
 
-          <FieldRow label="执行类型">
-            <select style={selectStyle} value={form.payloadKind} onChange={e => setForm({ ...form, payloadKind: e.target.value as any })}>
-              <option value="agentTurn">Agent 执行（后台跑，结果在运行记录）</option>
-              <option value="systemEvent">系统事件（写入主会话）</option>
-            </select>
-          </FieldRow>
 
           <FieldRow label="执行内容（Prompt）*">
             <textarea
@@ -554,15 +548,14 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
 
           <FieldRow label="会话目标">
             <select style={selectStyle} value={form.sessionTarget} onChange={e => setForm({ ...form, sessionTarget: e.target.value as any })}>
-              <option value="isolated">独立会话 — 后台跑，结果看运行记录</option>
-              <option value="main">主会话 — 写入聊天流（仅默认 agent）</option>
+              <option value="isolated">独立会话（推荐）</option>
             </select>
           </FieldRow>
 
           <FieldRow label="结果投递">
             <select style={selectStyle} value={form.deliveryMode} onChange={e => setForm({ ...form, deliveryMode: e.target.value as any })}>
-              <option value="none">仅记录日志（推荐）</option>
-              <option value="announce">推送到频道（需绑定 Telegram 等）</option>
+              <option value="announce">发送到主聊天（推荐）</option>
+              <option value="none">仅记录日志</option>
             </select>
           </FieldRow>
 

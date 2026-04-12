@@ -7,10 +7,10 @@ import { ToolsPanel } from "@/components/pages/agent/ToolsPanel";
 import type { AgentPanel, CoreFileMeta, EffectiveResp, ToolPolicy } from "@/components/pages/agent/types";
 
 const PANELS: { id: AgentPanel; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "files", label: "Files" },
-  { id: "tools", label: "Tools" },
-  { id: "skills", label: "Skills" },
+  { id: "overview", label: "概览" },
+  { id: "files", label: "文件" },
+  { id: "tools", label: "工具" },
+  { id: "skills", label: "技能" },
 ];
 
 function getInitialPanel(): AgentPanel {
@@ -133,23 +133,12 @@ export function AgentPage({ adoptId, skills }: { adoptId: string; skills?: { sha
 
   return (
     <PageContainer title="代理">
-      <div className="flex items-center justify-end gap-2 mb-3">
-        <select className="settings-input px-2 py-1 text-xs rounded" value={adoptId || ""} disabled>
-          <option value={adoptId || ""}>{adoptId || "当前 Agent"}</option>
-        </select>
-        <button className="skills-btn" onClick={load}>{loading ? "刷新中…" : "Refresh"}</button>
-      </div>
-      <div className="mb-3 flex items-center gap-2 flex-wrap">
+      <div className="console-tabs">
         {PANELS.map((p) => (
           <button
             key={p.id}
             onClick={() => setActivePanel(p.id)}
-            className="px-3 py-1.5 rounded-full text-xs"
-            style={{
-              border: "1px solid var(--oc-border)",
-              background: activePanel === p.id ? "rgba(158,24,34,0.22)" : "rgba(255,255,255,0.04)",
-              color: activePanel === p.id ? "#f1d7da" : "var(--oc-text-secondary)",
-            }}
+            className={`console-tab ${activePanel === p.id ? "active" : ""}`}
           >
             {p.label}
           </button>

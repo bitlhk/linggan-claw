@@ -30,7 +30,9 @@ export default function Home() {
   // 灵虾子域名聊天态（MVP）
   const brand = useBrand();
   const [lingxiaInput, setLingxiaInput] = useState("");
-  const [lingxiaMsgs, setLingxiaMsgs] = useState<Array<{ role: "user" | "assistant"; text: string; timeLabel: string; usage?: { input: number; output: number }; model?: string; contextWindow?: number; contextPercent?: number; toolCalls?: import("@/components/ChatMessage").ToolCallEntry[] }>>([]);
+  const [lingxiaMsgs, setLingxiaMsgs] = useState<Array<{ role: "user" | "assistant"; text: string; timeLabel: string; usage?: { input: number; output: number }; model?: string; contextWindow?: number; contextPercent?: number; toolCalls?: import("@/components/ChatMessage").ToolCallEntry[] }>>(() => {
+    try { const s = localStorage.getItem("lingxia-chat-history"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
   const [lingxiaToolCalls, setLingxiaToolCalls] = useState<ToolCallEntry[]>([]);
   const [lingxiaShowToolCalls, setLingxiaShowToolCalls] = useState(true);
   const [lingxiaDisplayName, setLingxiaDisplayName] = useState(brand.name);
@@ -46,7 +48,7 @@ export default function Home() {
   const [lingxiaContextTurns, setLingxiaContextTurns] = useState(20);
   const [lingxiaModelId, setLingxiaModelId] = useState("glm5/glm-5.1");
   const [sidebarWidth, setSidebarWidth] = useState(260);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768);
   const [openclawVersion, setOpenclawVersion] = useState("v2026.3.27");
   const [runtimeAgentId, setRuntimeAgentId] = useState("");
   const prettyRuntimeAgentName = (agentId: string) => {
@@ -279,6 +281,14 @@ export default function Home() {
     const text = lingxiaInput.trim();
     const nowLabel = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
     const assistantTimeLabel = nowLabel;
+
+    setLingxiaMsgs((prev) => [...prev,
+        { role: "user" as const, text, timeLabel: nowLabel },
+        { role: "assistant" as const, text: helpMd, timeLabel: assistantTimeLabel },
+      ]);
+      setLingxiaInput("");
+      return;
+    }
 
     setLingxiaMsgs((prev) => [
       ...prev,

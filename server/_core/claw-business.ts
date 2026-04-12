@@ -1613,6 +1613,101 @@ export function registerBusinessRoutes(app: express.Express) {
       return;
     }
 
+    // ── task-trading: TradingAgents 多 Agent 金融分析 ──
+    if (bizAgentCfg?.kind === "remote" && agentId === "task-trading") {
+      const tenantCtxTrading: TenantContext = await beginTenantSession(
+        userId, agentId, "chat_send",
+        { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
+      );
+      console.log("[TRADING] starting analysis", { agentId, tenant: tenantCtxTrading.tenantShort });
+      const tradingUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8189");
+      const tradingBody = JSON.stringify({ message: msgStr, ticker: "" });
+
+      const tradingReq = http.request({
+        hostname: tradingUrl.hostname,
+        port: parseInt(String(tradingUrl.port || "8189"), 10),
+        path: "/api/analyze",
+        method: "POST",
+        timeout: 0,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(tradingBody),
+        },
+      }, (tradingRes: any) => {
+        let buf = "";
+        const heartbeat = setInterval(() => {
+          if (!res.writableEnded) res.write(`: keepalive\n\n`);
+          else clearInterval(heartbeat);
+        }, 5000);
+
+        tradingRes.on("data", (chunk: Buffer) => {
+          buf += chunk.toString();
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const raw = line.slice(6).trim();
+            if (raw === "[DONE]") {
+              if (!res.writableEnded) { res.write("data: [DONE]\n\n"); res.end(); }
+              clearInterval(heartbeat);
+              return;
+            }
+            if (!raw) continue;
+            try {
+              const evt = JSON.parse(raw);
+              const stage = evt.stage || "";
+              const text = evt.text || "";
+              const label = evt.label || "";
+
+              if (stage === "init" || stage === "analyst" || stage === "debate") {
+                res.write(`data: ${JSON.stringify({ __status: text })}\n\n`);
+              } else if (stage === "report" || stage === "debate_result") {
+                const header = label ? `**${label}**\n\n` : "";
+                res.write(`data: ${JSON.stringify({
+                  choices: [{ index: 0, delta: { content: header + text + "\n\n---\n\n" } }],
+                })}\n\n`);
+              } else if (stage === "decision") {
+                res.write(`data: ${JSON.stringify({
+                  choices: [{ index: 0, delta: { content: "## \u4ea4\u6613\u51b3\u7b56\n\n" + text + "\n\n" } }],
+                })}\n\n`);
+              } else if (stage === "risk") {
+                res.write(`data: ${JSON.stringify({
+                  choices: [{ index: 0, delta: { content: "## \u98ce\u63a7\u8bc4\u4f30\n\n" + text + "\n\n" } }],
+                })}\n\n`);
+              } else if (stage === "result") {
+                res.write(`data: ${JSON.stringify({
+                  choices: [{ index: 0, delta: { content: text } }],
+                })}\n\n`);
+              } else if (stage === "done") {
+                res.write(`data: ${JSON.stringify({
+                  choices: [{ index: 0, delta: { content: "" }, finish_reason: "stop" }],
+                })}\n\n`);
+              } else if (stage === "error") {
+                res.write(`data: ${JSON.stringify({ error: text })}\n\n`);
+              }
+            } catch (_) {}
+          }
+          if (typeof (res as any).flush === "function") (res as any).flush();
+        });
+
+        tradingRes.on("end", () => {
+          console.log("[TRADING] stream ended");
+          clearInterval(heartbeat);
+          auditTenantAccess(tenantCtxTrading, "chat_done", {}).catch(() => {});
+          if (!res.writableEnded) { res.write("data: [DONE]\n\n"); res.end(); }
+        });
+      });
+
+      tradingReq.on("error", (err: any) => {
+        console.error("[TRADING] request error:", err.message);
+        if (!res.writableEnded) { res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`); res.end(); }
+      });
+      req.on("close", () => { tradingReq.destroy(); });
+      tradingReq.write(tradingBody);
+      tradingReq.end();
+      return;
+    }
+
     if (bizAgentCfg?.kind === "remote") {
       // TIL: 构建租户上下文（覆盖 task-evolve / task-finance / task-slides / task-code 等通用 remote agent）
       const tenantCtxRemote: TenantContext = await beginTenantSession(
