@@ -21,6 +21,7 @@ export function registerBusinessRoutes(app: express.Express) {
     if (!bizAgent?.apiUrl) return null;
     try {
       const u = new URL(bizAgent.apiUrl);
+      if (u.hostname === "127.0.0.1" || u.hostname === "localhost") return null;
       return `${u.protocol}//${u.hostname}:${REMOTE_FILE_SERVICE_PORT}`;
     } catch { return null; }
   }
@@ -211,6 +212,495 @@ export function registerBusinessRoutes(app: express.Express) {
 
     // ── 远端 Agent 动态路由（从 DB 读取 api_url / api_token）──────────────
     const bizAgentCfg = bizAgentList.find((a: any) => a.id === agentId);
+
+    // ── 智贷决策助手专用分支：走 Hermes + 银保监+工银智涌 grounding ──
+    if (bizAgentCfg?.kind === "remote" && agentId === "task-credit-risk") {
+      const tenantCtx: TenantContext = await beginTenantSession(
+        userId, agentId, "chat_send",
+        { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
+      );
+      const creditSessionKey = `task-credit-risk_user${userId}_${tenantCtx.sessionKey}`;
+      console.log("[CREDIT-RISK] starting run", { agentId, session: creditSessionKey, tenant: tenantCtx.tenantShort });
+      const creditUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8642");
+      const creditToken = bizAgentCfg.apiToken || "";
+
+      const CREDIT_SYSTEM_PROMPT = [
+        "你是「灵犀 · 智贷决策助手」，面向中国商业银行的信贷风控 AI 助手。",
+        "",
+        "【3 个权威框架】",
+        "1. 银保监《商业银行授信工作尽职指引》—— 国家强制性法规",
+        "2. 工商银行《工银智涌/智贷通/工小审》—— 行业最权威大模型落地标杆，累计调用 10 亿次",
+        "3. 《商业银行金融资产风险分类办法》—— 五级分类强制标准",
+        "",
+        "【银保监三查框架】",
+        "贷前调查（抵押产权 + 评估价值 + 处置流动性 + 保证人代偿能力）",
+        "贷时审查（客户评分 + 风险预警 + 差异化定价）",
+        "贷后检查（经营动态 + 财务健康 + 信用履约 + 担保物状态）",
+        "",
+        "【工行『智贷通』5 大类能力】（你的工具集对应这 5 类）",
+        "1. 知识助手 - 制度查询 + 案例库 → compliance_check",
+        "2. 数据助手 - 客户征信 + 流水分析 → credit_lookup, financial_statement",
+        "3. 任务助手 - 流程编排（agent 自身的工作流编排）",
+        "4. 文档助手 - 报告自动生成（agent 输出的 markdown）",
+        "5. 风控助手 - 准入决策 → guarantee_value, risk_classification, pricing_recommend, post_loan_monitor",
+        "",
+        "【五级分类（每次决策必给）】正常 → 关注 → 次级 → 可疑 → 损失",
+        "",
+        "【3 个工作模式】",
+        "PRE-LOAN: 贷前评估 → credit_lookup + financial_statement + guarantee_value + risk_classification + pricing_recommend + compliance_check",
+        "POST-LOAN: 贷后预警 → post_loan_monitor + risk_classification + guarantee_value",
+        "COMPLIANCE: 合规自查 → compliance_check",
+        "",
+        "【7 个工具】均位于 /home/ubuntu/.hermes/skills/finance/credit-risk/tools/，必须用 terminal 调用：",
+        "echo \'{...}\' | python /home/ubuntu/.hermes/skills/finance/credit-risk/tools/<tool>.py",
+        "",
+        "工具：credit_lookup / financial_statement / guarantee_value / risk_classification / pricing_recommend / post_loan_monitor / compliance_check",
+        "",
+        "【行为约束 - 红线，比 task-bond 更严格】",
+        "1. 永远用中文回复",
+        "2. 每次决策必须：引用至少一个框架 + 给出五级分类 + 加免责强调'人工复核'",
+        "3. **永远在末尾加免责声明**：'本建议为 AI 辅助决策，最终归档需经人工授信审批委员会复核'",
+        "4. 5 个红线：",
+        "   - 不直接做'准入'决策（只能给'建议准入'）",
+        "   - 不替代真人审贷会",
+        "   - 不预测企业未来盈利",
+        "   - 不承诺担保物价值不变",
+        "   - 不暗示监管会'睁一只眼闭一只眼'",
+        "5. 数据时效性：所有数据是 mock，生产部署接客户的征信库 / 法院 API / 工商 API",
+        "",
+        "【输出格式】中文 markdown：🏦 决策类型 / 🔍 案件分析 / 🛠️ 工具调用 / 💡 审贷建议（含五级分类） / 📚 框架依据 / ⚠️ 免责声明",
+      ].join("\n");
+
+      const runBody = JSON.stringify({
+        input: msgStr,
+        instructions: CREDIT_SYSTEM_PROMPT,
+        session_id: creditSessionKey,
+      });
+
+      const runReq = http.request({
+        hostname: creditUrl.hostname,
+        port: parseInt(String(creditUrl.port || "8642"), 10),
+        path: "/v1/runs",
+        method: "POST",
+        timeout: 10000,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(runBody),
+          ...(creditToken ? { "Authorization": `Bearer ${creditToken}` } : {}),
+          "X-Hermes-User-Id": `lingxia_user_${userId}`,
+        },
+      }, (runRes: any) => {
+        let data = "";
+        runRes.on("data", (c: Buffer) => { data += c.toString(); });
+        runRes.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            const runId = parsed.run_id;
+            if (!runId) {
+              res.write(`data: ${JSON.stringify({ error: "task-credit-risk run failed: " + data })}\n\n`);
+              res.end();
+              return;
+            }
+            console.log("[CREDIT-RISK] run started:", runId);
+
+            const CR_TOOL_ICONS: Record<string, string> = {
+              credit_lookup: "🏛️",
+              financial_statement: "📑",
+              guarantee_value: "🏠",
+              risk_classification: "📊",
+              pricing_recommend: "💵",
+              post_loan_monitor: "🔍",
+              compliance_check: "⚖️",
+            };
+            const CR_TOOL_LABELS: Record<string, string> = {
+              credit_lookup: "查央行征信",
+              financial_statement: "三表分析",
+              guarantee_value: "担保物估值",
+              risk_classification: "五级分类",
+              pricing_recommend: "风险定价",
+              post_loan_monitor: "贷后预警",
+              compliance_check: "合规自查",
+            };
+            const translateTool = (toolName: string, preview: string): [string, string] => {
+              if (toolName === "terminal" && typeof preview === "string") {
+                const m = preview.match(/finance\/credit-risk\/tools\/(\w+)\.py/);
+                if (m && CR_TOOL_ICONS[m[1]]) {
+                  const friendly = m[1];
+                  return [friendly, `${CR_TOOL_ICONS[friendly]} ${CR_TOOL_LABELS[friendly] || friendly}`];
+                }
+              }
+              return [toolName || "tool", preview || ""];
+            };
+
+            const eventsReq = http.request({
+              hostname: creditUrl.hostname,
+              port: parseInt(String(creditUrl.port || "8642"), 10),
+              path: `/v1/runs/${runId}/events`,
+              method: "GET",
+              timeout: 0,
+              headers: {
+                "Accept": "text/event-stream",
+                ...(creditToken ? { "Authorization": `Bearer ${creditToken}` } : {}),
+              },
+            }, (eventsRes: any) => {
+              let buf = "";
+              const creditHeartbeat = setInterval(() => {
+                if (!res.writableEnded) { res.write(`: keepalive\n\n`); if (typeof (res as any).flush === 'function') (res as any).flush(); }
+                else clearInterval(creditHeartbeat);
+              }, 5000);
+
+              eventsRes.on("data", (chunk: Buffer) => {
+                buf += chunk.toString();
+                const lines = buf.split("\n");
+                buf = lines.pop() ?? "";
+
+                for (const line of lines) {
+                  if (line.startsWith(": ")) continue;
+                  if (!line.startsWith("data: ")) continue;
+                  const raw = line.slice(6).trim();
+                  if (!raw) continue;
+
+                  try {
+                    const evt = JSON.parse(raw);
+                    const evtType = evt.event || "";
+
+                    if (evtType === "message.delta") {
+                      const deltaText = evt.delta || "";
+                      res.write(`data: ${JSON.stringify({
+                        choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
+                      })}\n\n`);
+                    } else if (evtType === "tool.started") {
+                      // 🛡️ L2 安全护栏
+                      if (evt.tool === "terminal") {
+                        const previewStr = String(evt.preview || "");
+                        const isWhitelisted = previewStr.includes("/finance/credit-risk/");
+                        if (!isWhitelisted) {
+                          console.warn("[CREDIT-RISK SECURITY] 拦截非授权 terminal 调用:", previewStr.slice(0, 200));
+                          res.write(`data: ${JSON.stringify({ __status: "⚠️ 安全策略：检测到未授权工具调用，会话已中止" })}\n\n`);
+                          res.write(`data: ${JSON.stringify({ error: "安全策略拦截：本次会话尝试调用非授权命令，已自动终止。" })}\n\n`);
+                          res.write(`data: [DONE]\n\n`);
+                          auditTenantAccess(tenantCtx, "security_alert", {
+                            reason: "terminal_whitelist_violation",
+                            attempted_command: previewStr.slice(0, 500),
+                            agent_id: agentId,
+                          }).catch(() => {});
+                          try { eventsRes.destroy(); } catch {}
+                          if (!res.writableEnded) res.end();
+                          clearInterval(creditHeartbeat);
+                          return;
+                        }
+                      }
+                      const [friendlyName, friendlyPreview] = translateTool(evt.tool || "", evt.preview || "");
+                      res.write(`data: ${JSON.stringify({ __status: `${friendlyName}: ${friendlyPreview || "执行中..."}` })}\n\n`);
+                      res.write(`data: ${JSON.stringify({
+                        __hermes_tool: "started",
+                        id: `credit_${Date.now()}`,
+                        name: friendlyName,
+                        preview: friendlyPreview,
+                      })}\n\n`);
+                    } else if (evtType === "tool.completed") {
+                      const [friendlyName] = translateTool(evt.tool || "", evt.preview || "");
+                      res.write(`data: ${JSON.stringify({
+                        __hermes_tool: "completed",
+                        name: friendlyName,
+                        is_error: Boolean(evt.error),
+                        durationMs: Math.round((evt.duration || 0) * 1000),
+                      })}\n\n`);
+                    } else if (evtType === "reasoning.available") {
+                      res.write(`data: ${JSON.stringify({ __reasoning: evt.text || "" })}\n\n`);
+                    } else if (evtType === "run.completed") {
+                      if (evt.usage) {
+                        res.write(`data: ${JSON.stringify({ __perf: { usage: evt.usage } })}\n\n`);
+                      }
+                      res.write(`data: [DONE]\n\n`);
+                    } else if (evtType === "run.failed") {
+                      res.write(`data: ${JSON.stringify({ error: evt.error || "task-credit-risk run failed" })}\n\n`);
+                      res.write(`data: [DONE]\n\n`);
+                    }
+                  } catch {}
+                }
+                if (typeof (res as any).flush === 'function') (res as any).flush();
+              });
+
+              eventsRes.on("end", () => {
+                console.log("[CREDIT-RISK] events stream ended");
+                clearInterval(creditHeartbeat);
+                auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
+                if (!res.writableEnded) {
+                  res.write(`data: [DONE]\n\n`);
+                  res.end();
+                }
+              });
+            });
+
+            eventsReq.on("error", (err: any) => {
+              console.error("[CREDIT-RISK] events req error:", err.message);
+              if (!res.writableEnded) {
+                res.write(`data: ${JSON.stringify({ error: "events stream error: " + err.message })}\n\n`);
+                res.end();
+              }
+            });
+            eventsReq.end();
+          } catch (e: any) {
+            console.error("[CREDIT-RISK] parse runId error:", e.message);
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ error: "credit-risk: " + e.message })}\n\n`);
+              res.end();
+            }
+          }
+        });
+      });
+      runReq.on("error", (err: any) => {
+        console.error("[CREDIT-RISK] run req error:", err.message);
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ error: "credit-risk create run failed: " + err.message })}\n\n`);
+          res.end();
+        }
+      });
+      runReq.write(runBody);
+      runReq.end();
+      return;
+    }
+
+    // ── 债券投研助手专用分支：走 Hermes + 中央结算+中诚信 grounding + akshare 中债真实数据 ──
+    if (bizAgentCfg?.kind === "remote" && agentId === "task-bond") {
+      const tenantCtx: TenantContext = await beginTenantSession(
+        userId, agentId, "chat_send",
+        { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
+      );
+      const bondSessionKey = `task-bond_user${userId}_${tenantCtx.sessionKey}`;
+      console.log("[BOND] starting run", { agentId, session: bondSessionKey, tenant: tenantCtx.tenantShort });
+      const bondUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8642");
+      const bondToken = bizAgentCfg.apiToken || "";
+
+      const BOND_SYSTEM_PROMPT = [
+        "你是「灵犀 · 债券投研助手」，专业的中文债券投研 AI 助手。",
+        "你的方法论完全基于两个权威框架：",
+        "1. 中央国债登记结算公司《中债估值方法论》—— 国内债券市场权威定价基准（自 1999 起）",
+        "2. 中诚信国际信用评级框架 —— 国内市占率 33.92% 的龙头评级机构",
+        "",
+        "【中诚信违约预警 5 因子】每次信用分析都引用：",
+        "1. 行业景气度（敏感性分析）",
+        "2. 财务健康度（资产负债率/速动比率/利息保障倍数）",
+        "3. 经营现金流稳定性",
+        "4. 评级机构观点变化（外部评级下调/展望负面）",
+        "5. 二级市场利差扩大幅度",
+        "关键事实：中诚信 2024 年首次违约预警平均提前 747 天（2023 年 562 天）",
+        "",
+        "【3 个工作模式】",
+        "YIELD: 收益率/价格分析 → yield_curve + bond_lookup + duration_analyzer",
+        "CREDIT: 信用风险分析 → bond_lookup + rating_lookup + credit_spread + default_warning",
+        "MACRO: 利率宏观影响 → yield_curve + duration_analyzer 场景模拟",
+        "",
+        "【6 个工具】均位于 /home/ubuntu/.hermes/skills/finance/bond/tools/，必须用 terminal 调用：",
+        "echo \'{...}\' | python /home/ubuntu/.hermes/skills/finance/bond/tools/<tool>.py",
+        "",
+        "工具：",
+        "- yield_curve         拉中债收益率曲线（akshare 真实数据，国债/商业银行/中短票）",
+        "- bond_lookup         查债券基本信息（票面/期限/评级/发行人）",
+        "- duration_analyzer   久期/凸性/DV01/场景分析",
+        "- credit_spread       信用利差（vs 同期限国债）+ 历史百分位",
+        "- default_warning     中诚信 5 因子打分（0-100）",
+        "- rating_lookup       中诚信/联合资信 评级查询",
+        "",
+        "【行为约束】",
+        "1. 永远用中文回复",
+        "2. 每次决策必须引用至少一个框架",
+        "3. **永远在末尾加免责声明**：'本分析为 AI 辅助研究，仅供参考，投资有风险，决策由您本人承担'",
+        "4. 红线：不推荐具体债券标的 / 不预测利率方向 / 不打包票",
+        "5. 数据时效性：中债是 EOD 数据，不是实时",
+        "",
+        "【输出格式】中文 markdown：📊 决策类型 / 🔍 案件分析 / 🛠️ 工具调用 / 💡 决策建议 / 📚 框架依据 / ⚠️ 免责",
+      ].join("\n");
+
+      const runBody = JSON.stringify({
+        input: msgStr,
+        instructions: BOND_SYSTEM_PROMPT,
+        session_id: bondSessionKey,
+      });
+
+      const runReq = http.request({
+        hostname: bondUrl.hostname,
+        port: parseInt(String(bondUrl.port || "8642"), 10),
+        path: "/v1/runs",
+        method: "POST",
+        timeout: 10000,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(runBody),
+          ...(bondToken ? { "Authorization": `Bearer ${bondToken}` } : {}),
+          "X-Hermes-User-Id": `lingxia_user_${userId}`,
+        },
+      }, (runRes: any) => {
+        let data = "";
+        runRes.on("data", (c: Buffer) => { data += c.toString(); });
+        runRes.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            const runId = parsed.run_id;
+            if (!runId) {
+              res.write(`data: ${JSON.stringify({ error: "task-bond run failed: " + data })}\n\n`);
+              res.end();
+              return;
+            }
+            console.log("[BOND] run started:", runId);
+
+            const BOND_TOOL_ICONS: Record<string, string> = {
+              yield_curve: "📉",
+              bond_lookup: "📋",
+              duration_analyzer: "⏱️",
+              credit_spread: "📊",
+              default_warning: "⚠️",
+              rating_lookup: "🏛️",
+            };
+            const BOND_TOOL_LABELS: Record<string, string> = {
+              yield_curve: "拉中债收益率曲线",
+              bond_lookup: "查债券基本信息",
+              duration_analyzer: "算久期/凸性/DV01",
+              credit_spread: "算信用利差",
+              default_warning: "5 因子违约预警",
+              rating_lookup: "查评级",
+            };
+            const translateTool = (toolName: string, preview: string): [string, string] => {
+              if (toolName === "terminal" && typeof preview === "string") {
+                const m = preview.match(/finance\/bond\/tools\/(\w+)\.py/);
+                if (m && BOND_TOOL_ICONS[m[1]]) {
+                  const friendly = m[1];
+                  return [friendly, `${BOND_TOOL_ICONS[friendly]} ${BOND_TOOL_LABELS[friendly] || friendly}`];
+                }
+              }
+              return [toolName || "tool", preview || ""];
+            };
+
+            const eventsReq = http.request({
+              hostname: bondUrl.hostname,
+              port: parseInt(String(bondUrl.port || "8642"), 10),
+              path: `/v1/runs/${runId}/events`,
+              method: "GET",
+              timeout: 0,
+              headers: {
+                "Accept": "text/event-stream",
+                ...(bondToken ? { "Authorization": `Bearer ${bondToken}` } : {}),
+              },
+            }, (eventsRes: any) => {
+              let buf = "";
+              const bondHeartbeat = setInterval(() => {
+                if (!res.writableEnded) { res.write(`: keepalive\n\n`); if (typeof (res as any).flush === 'function') (res as any).flush(); }
+                else clearInterval(bondHeartbeat);
+              }, 5000);
+
+              eventsRes.on("data", (chunk: Buffer) => {
+                buf += chunk.toString();
+                const lines = buf.split("\n");
+                buf = lines.pop() ?? "";
+
+                for (const line of lines) {
+                  if (line.startsWith(": ")) continue;
+                  if (!line.startsWith("data: ")) continue;
+                  const raw = line.slice(6).trim();
+                  if (!raw) continue;
+
+                  try {
+                    const evt = JSON.parse(raw);
+                    const evtType = evt.event || "";
+
+                    if (evtType === "message.delta") {
+                      const deltaText = evt.delta || "";
+                      res.write(`data: ${JSON.stringify({
+                        choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
+                      })}\n\n`);
+                    } else if (evtType === "tool.started") {
+                      // 🛡️ L2 安全护栏：terminal 沙箱区检查
+                      if (evt.tool === "terminal") {
+                        const previewStr = String(evt.preview || "");
+                        const isWhitelisted = previewStr.includes("/finance/bond/");
+                        if (!isWhitelisted) {
+                          console.warn("[BOND SECURITY] 拦截非授权 terminal 调用:", previewStr.slice(0, 200));
+                          res.write(`data: ${JSON.stringify({ __status: "⚠️ 安全策略：检测到未授权工具调用，会话已中止" })}\n\n`);
+                          res.write(`data: ${JSON.stringify({ error: "安全策略拦截：本次会话尝试调用非授权命令，已自动终止。" })}\n\n`);
+                          res.write(`data: [DONE]\n\n`);
+                          auditTenantAccess(tenantCtx, "security_alert", {
+                            reason: "terminal_whitelist_violation",
+                            attempted_command: previewStr.slice(0, 500),
+                            agent_id: agentId,
+                          }).catch(() => {});
+                          try { eventsRes.destroy(); } catch {}
+                          if (!res.writableEnded) res.end();
+                          clearInterval(bondHeartbeat);
+                          return;
+                        }
+                      }
+                      const [friendlyName, friendlyPreview] = translateTool(evt.tool || "", evt.preview || "");
+                      res.write(`data: ${JSON.stringify({ __status: `${friendlyName}: ${friendlyPreview || "执行中..."}` })}\n\n`);
+                      res.write(`data: ${JSON.stringify({
+                        __hermes_tool: "started",
+                        id: `bond_${Date.now()}`,
+                        name: friendlyName,
+                        preview: friendlyPreview,
+                      })}\n\n`);
+                    } else if (evtType === "tool.completed") {
+                      const [friendlyName] = translateTool(evt.tool || "", evt.preview || "");
+                      res.write(`data: ${JSON.stringify({
+                        __hermes_tool: "completed",
+                        name: friendlyName,
+                        is_error: Boolean(evt.error),
+                        durationMs: Math.round((evt.duration || 0) * 1000),
+                      })}\n\n`);
+                    } else if (evtType === "reasoning.available") {
+                      res.write(`data: ${JSON.stringify({ __reasoning: evt.text || "" })}\n\n`);
+                    } else if (evtType === "run.completed") {
+                      if (evt.usage) {
+                        res.write(`data: ${JSON.stringify({ __perf: { usage: evt.usage } })}\n\n`);
+                      }
+                      res.write(`data: [DONE]\n\n`);
+                    } else if (evtType === "run.failed") {
+                      res.write(`data: ${JSON.stringify({ error: evt.error || "task-bond run failed" })}\n\n`);
+                      res.write(`data: [DONE]\n\n`);
+                    }
+                  } catch {}
+                }
+                if (typeof (res as any).flush === 'function') (res as any).flush();
+              });
+
+              eventsRes.on("end", () => {
+                console.log("[BOND] events stream ended");
+                clearInterval(bondHeartbeat);
+                auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
+                if (!res.writableEnded) {
+                  res.write(`data: [DONE]\n\n`);
+                  res.end();
+                }
+              });
+            });
+
+            eventsReq.on("error", (err: any) => {
+              console.error("[BOND] events req error:", err.message);
+              if (!res.writableEnded) {
+                res.write(`data: ${JSON.stringify({ error: "events stream error: " + err.message })}\n\n`);
+                res.end();
+              }
+            });
+            eventsReq.end();
+          } catch (e: any) {
+            console.error("[BOND] parse runId error:", e.message);
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ error: "bond: " + e.message })}\n\n`);
+              res.end();
+            }
+          }
+        });
+      });
+      runReq.on("error", (err: any) => {
+        console.error("[BOND] run req error:", err.message);
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ error: "bond create run failed: " + err.message })}\n\n`);
+          res.end();
+        }
+      });
+      runReq.write(runBody);
+      runReq.end();
+      return;
+    }
 
     // ── 个人理财助手专用分支：走 Hermes + 中行+招行 白皮书 grounding + akshare 数据 ──
     if (bizAgentCfg?.kind === "remote" && agentId === "task-my-wealth") {
