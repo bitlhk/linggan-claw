@@ -30,7 +30,7 @@ function getToolMeta(name: string) {
   for (const [key, meta] of Object.entries(TOOL_META)) {
     if (name.toLowerCase().includes(key)) return meta;
   }
-  return { icon: Terminal, label: name, color: "#9ca3af" };
+  return { icon: Terminal, label: name, color: "var(--oc-text-secondary)" };
 }
 
 function ToolCallCardInner({ toolName, args, status, output, durationMs }: ToolCallCardProps) {

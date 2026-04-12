@@ -1,5 +1,5 @@
 export type ThemeMode = "system" | "light" | "dark";
-export type ThemeName = "claw" | "knot" | "dash";
+export type ThemeName = "claw" | "knot" | "dash" | "ember";
 
 export interface UiSettings {
   theme: ThemeName;

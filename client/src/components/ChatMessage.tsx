@@ -200,7 +200,7 @@ function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; fileP
             <div style={{ padding: 16, overflow: "auto", flex: 1 }}>
               {result.stdout && (
                 <div style={{ marginBottom: result.stderr ? 12 : 0 }}>
-                  <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>stdout</div>
+                  <div style={{ fontSize: 11, color: "var(--oc-text-secondary)", marginBottom: 4 }}>stdout</div>
                   <pre style={{
                     fontSize: 12, lineHeight: 1.5, color: "var(--oc-text-primary, #e5e5e5)",
                     background: "rgba(0,0,0,0.2)", borderRadius: 8, padding: 12,
@@ -221,7 +221,7 @@ function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; fileP
                 </div>
               )}
               {!result.stdout && !result.stderr && (
-                <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "center", padding: 24 }}>
+                <div style={{ fontSize: 13, color: "var(--oc-text-secondary)", textAlign: "center", padding: 24 }}>
                   (无输出)
                 </div>
               )}

@@ -7,7 +7,7 @@ const _listeners: Array<(s: UiSettings) => void> = [];
 
 function normalizeSettings(s: Partial<UiSettings>): UiSettings {
   const merged = { ...DEFAULT_SETTINGS, ...s };
-  const validThemes: ThemeName[] = ["claw", "knot", "dash"];
+  const validThemes: ThemeName[] = ["claw", "knot", "dash", "ember"];
   const validModes: ThemeMode[] = ["system", "light", "dark"];
   if (!validThemes.includes(merged.theme)) merged.theme = DEFAULT_SETTINGS.theme;
   if (!validModes.includes(merged.themeMode)) merged.themeMode = DEFAULT_SETTINGS.themeMode;

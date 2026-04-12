@@ -162,8 +162,9 @@ function agentDesc(id: string) {
   if (id === "task-evolve") return "对话中创建和打磨 AI 技能，越用越聪明";
   if (id === "task-code") return "在沙箱中执行代码，安全隔离";
   if (id === "task-finance") return "DCF/LBO 建模、竞争分析、行业研究报告";
-  if (id === "task-hermes") return "团队每次对话都在编织集体智慧";
+  if (id === "task-hermes") return "共享智脑 · 融合债券/理财/保险/信贷四大专业能力，支持跨领域综合分析";
   if (id === "task-trace") return "交付复杂任务，自动拆解规划、逐步推进";
+  if (id === "task-trading") return "多Agent辩论框架：基本面/技术面/情绪面/新闻面 → 多空辩论 → 交易决策";
   if (id === "task-stock") return "AI 智能选股，11+ 交易策略，技术面+消息面+筹码分析";
   if (id === "task-claim-ev") return "新能源车专属理赔决策助手 · 基于人保再保《动力电池保险创新白皮书》框架";
   if (id === "task-my-wealth") return "您的专属 AI 理财顾问 · 中行《全球资产配置白皮书》+ 招行《私人财富报告》双框架";
@@ -551,10 +552,10 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
             <>
               <div className="flex items-center justify-center"><Dna size={40} style={{ color: "#be1e2d" }} /></div>
               <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵枢 · 共享智脑（Hermes Agent）</p>
-              <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>每个人的对话，都在编织集体智慧</p>
+              <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>融合债券·理财·保险·信贷，一个入口解决跨领域金融问题</p>
               <div className="mt-4 mx-auto max-w-[240px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(190,30,45,0.04)", border: "1px solid rgba(190,30,45,0.12)" }}>
                 <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
-                {["团队最近在关注什么？", "帮我搜索最新的 AI 新闻", "有人研究过 K8s 部署吗？"].map((q) => (
+                {["客户贷款500万买厂房，需要什么保险覆盖？", "手上5000万国债，如何对冲利率风险？", "新能源车贷款+保险打包方案怎么设计？", "2000万闲置资金，国债和理财怎么配比？"].map((q) => (
                   <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}>{q}</p>
                 ))}
               </div>
@@ -562,6 +563,61 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
                 <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "#22c55e", opacity: 0.8 }} />
                 共享空间 · 对话将沉淀为团队记忆
               </p>
+            </>
+          ) : agent.id === "task-trading" ? (
+            <>
+              <div className="flex items-center justify-center" style={{ marginBottom: 4 }}>
+                <div style={{ position: "relative", width: 180, height: 80 }}>
+                  {[
+                    { x: 10, y: 0, label: "基本面", delay: "0s", emoji: "📊" },
+                    { x: 130, y: 0, label: "技术面", delay: "0.3s", emoji: "📈" },
+                    { x: 10, y: 50, label: "情绪面", delay: "0.6s", emoji: "💬" },
+                    { x: 130, y: 50, label: "新闻面", delay: "0.9s", emoji: "📰" },
+                  ].map((n, i) => (
+                    <div key={i} style={{
+                      position: "absolute", left: n.x, top: n.y,
+                      width: 44, height: 28, borderRadius: 6,
+                      background: "rgba(201,100,66,0.08)", border: "1px solid rgba(201,100,66,0.2)",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 2,
+                      fontSize: 10, color: "var(--oc-text-secondary)",
+                      animation: `fadeInUp 0.5s ease-out ${n.delay} both`,
+                    }}>
+                      <span style={{ fontSize: 11 }}>{n.emoji}</span>
+                      <span>{n.label}</span>
+                    </div>
+                  ))}
+                  <div style={{
+                    position: "absolute", left: 62, top: 18,
+                    width: 56, height: 44, borderRadius: 10,
+                    background: "rgba(201,100,66,0.15)", border: "1px solid rgba(201,100,66,0.35)",
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                    animation: "fadeInUp 0.5s ease-out 1.2s both",
+                  }}>
+                    <span style={{ fontSize: 16 }}>{"⚖️"}</span>
+                    <span style={{ fontSize: 8, color: "var(--oc-text-secondary)" }}>多空辩论</span>
+                  </div>
+                </div>
+              </div>
+              <style>{`@keyframes fadeInUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }`}</style>
+              <p className="text-sm mt-2 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵犀 · 智能交易分析</p>
+              <p className="text-xs mt-1 max-w-[280px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>多 Agent 辩论框架：4 层分析师 → 多空辩论 → 交易决策 → 风控评估</p>
+              <div className="mt-3 mx-auto max-w-[260px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(201,100,66,0.04)", border: "1px solid rgba(201,100,66,0.12)" }}>
+                <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
+                {[
+                  { q: "分析工商银行 601398", icon: "🏦" },
+                  { q: "分析贵州茅台 600519", icon: "🍶" },
+                  { q: "分析比亚迪 002594", icon: "🚗" },
+                  { q: "分析宁德时代 300750", icon: "🔋" },
+                ].map(({ q, icon }) => (
+                  <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-center gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}><span>{icon}</span>{q}</p>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+                {["基本面", "技术面", "情绪面", "新闻面", "多空辩论", "风控评估"].map(s => (
+                  <span key={s} className="px-2 py-0.5 rounded-full text-[10px]" style={{ background: "rgba(201,100,66,0.08)", color: "#c96442", border: "1px solid rgba(201,100,66,0.15)" }}>{s}</span>
+                ))}
+              </div>
+              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>A股/港股/美股 · AkShare 数据 · DeepSeek 驱动</p>
             </>
           ) : agent.id === "task-stock" ? (
             <>

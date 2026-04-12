@@ -361,12 +361,14 @@
   --card: var(--card);
   --border-strong: var(--border-strong);
   --ring: var(--ring);
-  --bg: #0e1116;
-  --panel: #12151b;
+  --bg: #0a0c10;
+  --panel: #0f1114;
   --card-2: #181c24;
-  --border: #2a2f39;
+  --border: rgba(255, 255, 255, 0.08);
   --text: #e5e7eb;
   --muted: #9ca3af;
+  --oc-text-tertiary: #6b7280;
+  --oc-text-quaternary: #4b5563;
   --accent: #ff5c5c;
 }
 
@@ -526,6 +528,7 @@
   border: 1px solid var(--oc-border);
   border-radius: 12px;
   padding: 10px 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.03);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
 }
 .settings-row {
@@ -568,7 +571,7 @@
   border: 1px solid transparent;
   background: var(--oc-accent);
   color: #fff;
-  transition: all .15s ease;
+  transition: all .25s ease-out;
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
@@ -821,21 +824,44 @@
   --focus-glow:   rgba(180, 120, 64, 0.18);
 }
 
-/* ---- 亮色模式（通用）：背景变浅，文字变深 ---- */
+/* ---- Ember：余烬，文学暖感（Claude 致敬）---- */
+:root[data-theme="ember"] {
+  --accent:       #c96442;
+  --accent-hover: #d97757;
+  --accent-subtle:rgba(201, 100, 66, 0.12);
+  --accent-glow:  rgba(201, 100, 66, 0.22);
+  --primary:      #c96442;
+  --ring:         #c96442;
+  --focus-ring:   rgba(201, 100, 66, 0.40);
+  --focus-glow:   rgba(201, 100, 66, 0.18);
+  /* 深色：暖黑基调，所有灰都带暖调 */
+  --bg:           #141413;
+  --panel:        #1c1c1a;
+  --card:         #242422;
+  --card-2:       #2c2c29;
+  --border:       rgba(255, 245, 230, 0.08);
+  --text:         #e8e5de;
+  --muted:        #87867f;
+  --oc-text-tertiary:  #5e5d59;
+  --oc-text-quaternary:#4d4c48;
+}
+
+
+/* ---- 亮色模式（Apple 风格）：干净白底 + 精致灰度 ---- */
 :root[data-theme-mode="light"] {
-  --bg:           #f8f9fa;
+  --bg:           #f5f5f7;
   --bg-elevated:  #ffffff;
-  --panel:        #f1f3f8;
+  --panel:        #ffffff;
   --card:         #ffffff;
   --popover:      #ffffff;
   --input:        #ffffff;
-  --text:         #18181b;
-  --text-strong:  #09090b;
-  --muted:        #71717a;
-  --faint:        #a1a1aa;
-  --border:       #e5e5ea;
-  --border-strong:#d4d4d8;
-  --border-hover: #a1a1aa;
+  --text:         #1d1d1f;
+  --text-strong:  #1d1d1f;
+  --muted:        #6e6e73;
+  --faint:        #86868b;
+  --border:       rgba(0, 0, 0, 0.08);
+  --border-strong:rgba(0, 0, 0, 0.12);
+  --border-hover: rgba(0, 0, 0, 0.18);
 
   --oc-bg:            var(--bg);
   --oc-panel:         var(--panel);
@@ -843,6 +869,9 @@
   --oc-border:        var(--border);
   --oc-text-primary:  var(--text-strong);
   --oc-text-secondary:var(--muted);
+  --oc-text-tertiary: #86868b;
+  --oc-text-quaternary:#aeaeb2;
+  --accent-subtle:    rgba(220, 38, 38, 0.06);
 }
 
 /* 亮色 Claw：红色在亮色下稍深 */
@@ -871,6 +900,26 @@
   --ring:         #6e4828;
   --focus-ring:   rgba(110, 72, 40, 0.35);
 }
+
+/* Ember 浅色：羊皮纸暖感 */
+:root[data-theme="ember"][data-theme-mode="light"] {
+  --accent:       #b85a3a;
+  --accent-hover: #a04e30;
+  --accent-subtle:rgba(184, 90, 58, 0.08);
+  --primary:      #b85a3a;
+  --ring:         #b85a3a;
+  --focus-ring:   rgba(184, 90, 58, 0.35);
+  --bg:           #f5f4ed;
+  --panel:        #faf9f5;
+  --card:         #ffffff;
+  --border:       #e8e6dc;
+  --text:         #141413;
+  --text-strong:  #141413;
+  --muted:        #5e5d59;
+  --oc-text-tertiary:  #87867f;
+  --oc-text-quaternary:#b0aea5;
+}
+
 
 /* 圆角变量（applyBorderRadius 动态写入时会覆盖） */
 :root {
@@ -1281,7 +1330,7 @@
   background: rgba(99,102,241,0.12);
   border: 1px solid rgba(99,102,241,0.25);
   color: #a5b4fc;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.25s ease-out, border-color 0.25s ease-out;
 }
 .lingxia-toolcard__file:hover {
   background: rgba(99,102,241,0.22);
@@ -1426,7 +1475,7 @@
   background: rgba(0,0,0,0.04);
 }
 :root[data-theme-mode="light"] .sidebar-item.active {
-  background: rgba(158,24,34,0.10);
+  background: rgba(220, 38, 38, 0.08);
 }
 
 /* ④ 浅色：badge */
@@ -1446,8 +1495,8 @@
 
 /* ⑦ 浅色：settings-card 内 border 透明修正 */
 :root[data-theme-mode="light"] .settings-card {
-  border-color: var(--border);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  border-color: rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 
 /* ⑧ 浅色：输入框 placeholder 和文字 */
@@ -2033,7 +2082,7 @@ html:has(:root[data-theme-mode="light"]) body {
 /* hover 时眼睛微眯（稍扁） */
 .lingxia-icon:hover .lingxia-icon__eye-l,
 .lingxia-icon:hover .lingxia-icon__eye-r {
-  transition: transform 0.15s ease;
+  transition: transform 0.25s ease-out;
   transform: scaleY(0.7) !important;
 }
 
@@ -2387,6 +2436,21 @@ html:has(:root[data-theme-mode="light"]) body {
 }
 
 /* ═══ Console Tab 统一规范 ═══ */
+/* 浅色：console-tab Apple 风格 */
+:root[data-theme-mode="light"] .console-tab {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #6e6e73;
+}
+:root[data-theme-mode="light"] .console-tab.active {
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--accent);
+  border-color: rgba(220, 38, 38, 0.15);
+}
+:root[data-theme-mode="light"] .console-tab:hover:not(.active) {
+  background: rgba(0, 0, 0, 0.05);
+}
+
 .console-tabs {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;
 }
@@ -2395,14 +2459,15 @@ html:has(:root[data-theme-mode="light"]) body {
   padding: 6px 12px; font-size: 12px; font-weight: 400;
   border-radius: 9999px; border: 1px solid var(--oc-border);
   background: rgba(255,255,255,0.04); color: var(--oc-text-secondary);
-  cursor: pointer; transition: all .15s ease;
+  cursor: pointer; transition: all .25s ease-out;
 }
 .console-tab.active {
   background: var(--accent-subtle); color: var(--oc-accent);
   font-weight: 500; border-color: var(--oc-border);
 }
 .console-tab:hover:not(.active) {
-  background: rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.12);
 }
 
 /* ═══ 移动端适配 ═══ */
@@ -2440,4 +2505,23 @@ html:has(:root[data-theme-mode="light"]) body {
   .console-tab { padding: 5px 10px; font-size: 11px; }
   /* 设置卡片 */
   .settings-card { padding: 8px 12px; }
+}
+
+/* 浅色：输入框 Apple 风格 */
+:root[data-theme-mode="light"] .lingxia-input-wrap {
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04) !important;
+}
+:root[data-theme-mode="light"] .lingxia-input-wrap:focus-within {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12), 0 1px 4px rgba(0, 0, 0, 0.04) !important;
+}
+
+/* 浅色：技能市场卡片 */
+:root[data-theme-mode="light"] .marketplace-grid .settings-card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.02);
+}
+:root[data-theme-mode="light"] .marketplace-grid .settings-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.04);
 }

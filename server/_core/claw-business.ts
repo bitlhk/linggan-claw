@@ -1659,7 +1659,7 @@ export function registerBusinessRoutes(app: express.Express) {
               const text = evt.text || "";
               const label = evt.label || "";
 
-              if (stage === "init" || stage === "analyst" || stage === "debate") {
+              if (stage === "init" || stage === "analyst" || stage === "debate" || stage === "progress") {
                 res.write(`data: ${JSON.stringify({ __status: text })}\n\n`);
               } else if (stage === "report" || stage === "debate_result") {
                 const header = label ? `**${label}**\n\n` : "";

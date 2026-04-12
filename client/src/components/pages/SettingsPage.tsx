@@ -15,6 +15,7 @@ const THEMES = [
   { key: "claw" as const, label: "Claw", color: "#ff5c5c", desc: "珊瑚红 · 默认" },
   { key: "knot" as const, label: "Knot", color: "#e5243b", desc: "深红 · 高对比" },
   { key: "dash" as const, label: "Dash", color: "#b47840", desc: "棕金 · 仪表盘" },
+  { key: "ember" as const, label: "Ember", color: "#c96442", desc: "余烬 · 暖感文学" },
 ];
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {

@@ -282,7 +282,25 @@ export default function Home() {
     const nowLabel = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
     const assistantTimeLabel = nowLabel;
 
-    setLingxiaMsgs((prev) => [...prev,
+    if (text.toLowerCase() === "/help" || text.toLowerCase() === "/commands") {
+      const helpMd = "## \u53ef\u7528\u547d\u4ee4\n\n" +
+        "| \u547d\u4ee4 | \u8bf4\u660e |\n|---|---|\n" +
+        "| \`/help\` | \u67e5\u770b\u53ef\u7528\u547d\u4ee4 |\n" +
+        "| \`/status\` | \u67e5\u770b\u5f53\u524d\u72b6\u6001 |\n" +
+        "| \`/tools\` | \u67e5\u770b\u53ef\u7528\u5de5\u5177 |\n" +
+        "| \`/model\` | \u5207\u6362\u6a21\u578b |\n" +
+        "| \`/dreaming status\` | \u68a6\u5883\u8bb0\u5fc6\u72b6\u6001 |\n" +
+        "| \`/context\` | \u4e0a\u4e0b\u6587\u4fe1\u606f |\n" +
+        "| \`/usage\` | \u7528\u91cf\u7edf\u8ba1 |\n" +
+        "| \`/whoami\` | \u5f53\u524d\u8eab\u4efd |\n" +
+        "| \`/new\` | \u65b0\u4f1a\u8bdd |\n" +
+        "| \`/reset\` | \u91cd\u7f6e\u4e0a\u4e0b\u6587 |\n" +
+        "| \`/think\` | \u6df1\u5ea6\u601d\u8003 |\n" +
+        "| \`/fast\` | \u5feb\u901f\u6a21\u5f0f |\n" +
+        "| \`/compact\` | \u538b\u7f29\u4e0a\u4e0b\u6587 |\n" +
+        "| \`/tasks\` | \u4efb\u52a1\u5217\u8868 |\n\n" +
+        "> \u4e5f\u53ef\u4ee5\u76f4\u63a5\u7528\u81ea\u7136\u8bed\u8a00\u5bf9\u8bdd";
+      setLingxiaMsgs((prev) => [...prev,
         { role: "user" as const, text, timeLabel: nowLabel },
         { role: "assistant" as const, text: helpMd, timeLabel: assistantTimeLabel },
       ]);
@@ -788,7 +806,7 @@ export default function Home() {
       });
 
       if (!resp.ok) throw new Error(`重置失败 (${resp.status})`);
-      setLingxiaMsgs([]);
+      setLingxiaMsgs([]); localStorage.removeItem("lingxia-chat-history");
       // 不需要断 WS：后端已通过 OpenClaw 原生 sessions.reset 换了 sessionId，
       // session key 不变，现有 WS 连接继续用即可，下次发消息打到新 sessionId 上
       toast.success("会话已重置（新会话）");
