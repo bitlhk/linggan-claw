@@ -264,6 +264,7 @@ export function registerWSProxy(server: Server) {
               console.error("[WS] workspace scan error:", e);
             }
 
+            sendToClient({ __stream_end: true });
             sendToClient({
               choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
             });

@@ -108,6 +108,8 @@ async function chatWithLingxia(adoptId: string, message: string): Promise<string
         if (raw === "[DONE]" || !raw) continue;
         try {
           const chunk = JSON.parse(raw);
+          if (chunk.__stream_end) break;
+          if (chunk.__stream_error) { result = result || `（${chunk.error || "出错了"}）`; break; }
           const delta = chunk?.choices?.[0]?.delta?.content;
           if (delta) result += delta;
         } catch {}

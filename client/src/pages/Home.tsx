@@ -338,7 +338,22 @@ export default function Home() {
               if (chunk.type === "connected") return;
               lastEventAtRef.current = Date.now();
 
-              // 错误
+              // ── 统一语义：流结束 ──
+              if (chunk.__stream_end) {
+                console.log("[DIAG] ✅ WSS 收到 __stream_end，流结束");
+                setLingxiaStreaming(false);
+                wsClient.setRawHandler(null);
+                return;
+              }
+              // ── 统一语义：终止性错误 ──
+              if (chunk.__stream_error) {
+                console.log("[DIAG] ❌ WSS 收到 __stream_error:", chunk.error);
+                setLingxiaMsgs((prev) => { const n = [...prev]; const last = n[n.length-1]; if (last?.role === "assistant") n[n.length-1] = { ...last, text: `（${chunk.error || "连接异常"}）` }; return n; });
+                setLingxiaStreaming(false);
+                wsClient.setRawHandler(null);
+                return;
+              }
+              // 错误（旧兼容）
               if (chunk.error) {
                 setLingxiaMsgs((prev) => { const n = [...prev]; const last = n[n.length-1]; if (last?.role === "assistant") n[n.length-1] = { ...last, text: `（${chunk.error}）` }; return n; });
                 setLingxiaStreaming(false);
@@ -745,6 +760,26 @@ export default function Home() {
               }
               currentEvent = "";
               continue;
+            }
+            // ── 统一语义：流结束 ──
+            if (chunk.__stream_end) {
+              console.log("[DIAG] ✅ 收到 __stream_end，流结束");
+              flushDelta();
+              sseDone = true;
+              break;
+            }
+            // ── 统一语义：终止性错误 ──
+            if (chunk.__stream_error) {
+              console.log("[DIAG] ❌ 收到 __stream_error:", chunk.error);
+              flushDelta();
+              setLingxiaMsgs((prev) => {
+                const next = [...prev];
+                if (next.length === 0 || next[next.length - 1].role !== "assistant") return prev;
+                next[next.length - 1] = { ...next[next.length - 1], text: `（${chunk.error || "连接异常"}）` };
+                return next;
+              });
+              sseDone = true;
+              break;
             }
             if (chunk.error) {
               flushDelta();

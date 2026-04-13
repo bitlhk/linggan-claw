@@ -613,6 +613,7 @@ const options = {
             }
           } catch {}
           res.write(`data: ${JSON.stringify({ __perf: { streamEndMs } })}\n\n`);
+          res.write(`data: ${JSON.stringify({ __stream_end: true })}\n\n`);
           res.write("data: [DONE]\n\n");
           res.end();  // 关闭 SSE 流
         }
@@ -637,7 +638,8 @@ const options = {
       stopToolHeartbeat();
       stopGatewayGapDetection();
       if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+        res.write(`data: ${JSON.stringify({ __stream_error: true, error: err.message })}\n\n`);
+        res.write("data: [DONE]\n\n");
         res.end();
       }
     });
