@@ -1,8 +1,8 @@
 /**
- * platform-intent.ts — 平台意图执行器
+ * intent-executor.ts — Intent Executor（意图执行器）
  * 
  * 接收已分类的 intent + StreamWriter，执行具体操作。
- * 不做分类（分类在 platform-router.ts），不关心传输协议（StreamWriter 抽象）。
+ * 不做分类（分类在 intent-agent.ts），不关心传输协议（StreamWriter 抽象）。
  */
 import type { StreamWriter } from "./stream-writer";
 

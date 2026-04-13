@@ -220,7 +220,7 @@ export function registerChatStreamRoutes(app: express.Express) {
     // ── 平台意图路由：打分 → 分类 → 执行（统一 StreamWriter）──
     {
       const { SseStreamWriter } = await import("./stream-writer");
-      const { routeMessage } = await import("./platform-router");
+      const { routeMessage } = await import("./intent-agent");
       const sseWriter = new SseStreamWriter(res);
       sseWriter.init();
       const handled = await routeMessage(String(adoptId), msgStr, sseWriter);
@@ -268,7 +268,7 @@ export function registerChatStreamRoutes(app: express.Express) {
     let upstreamBytes = 0;
     let upstreamPreview = "";
 
-    // SSE 响应头（platform-router 可能已设过，重复设置无害）
+    // SSE 响应头（intent-agent 可能已设过，重复设置无害）
     if (!res.headersSent) {
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");

@@ -1,5 +1,5 @@
 /**
- * platform-router.ts — 平台意图路由器
+ * intent-agent.ts — Intent Agent（意图识别 + 路由 + 策略）
  * 
  * L1: 关键词打分（本地，0ms）→ 过滤普通聊天
  * L2: DeepSeek 意图分类（仅 L1 命中时调用）
@@ -15,25 +15,27 @@ const DEEPSEEK_BASE = "https://api.deepseek.com";
 // L1: 关键词打分
 // ═══════════════════════════════════════════════════════
 
-const PLATFORM_KEYWORDS: [RegExp, number][] = [
-  // 定时类
-  [/定时任务/, 8], [/定时/, 5], [/每天/, 4], [/每隔/, 5], [/每周/, 4],
-  [/每\d+(?:分钟|小时|天)/, 5], [/工作日/, 4], [/提醒我/, 5],
-  [/cron/i, 6], [/schedule/i, 5],
-  // 通知/渠道类
-  [/微信/, 4], [/飞书/, 4], [/企业微信/, 4], [/企微/, 4],
-  [/webhook/i, 4], [/推送/, 4], [/发到/, 4], [/发给/, 4], [/发我/, 4],
-  // 任务管理类
-  [/删除.*任务/, 7], [/取消.*任务/, 7], [/关闭.*任务/, 7], [/停止.*任务/, 7],
-  [/我的.*任务/, 6], [/有哪些.*任务/, 6], [/列出.*任务/, 6], [/任务列表/, 6],
-  [/修改.*任务/, 6], [/暂停.*任务/, 6], [/启用.*任务/, 6],
-  // 渠道管理
-  [/绑定.*微信/, 6], [/解绑/, 5], [/哪些渠道/, 6], [/通知渠道/, 5],
-  // 组合模式（时间+频率 = 强定时信号）
-  [/(?:每天|每周|工作日).{0,10}(?:\d{1,2}[点时:：])/, 7],
-  [/(?:每隔|每)\s*\d+\s*(?:分钟|小时)/, 6],
-  // 动作修饰（单独不够，配合上面的）
-  [/查/, 1], [/搜/, 1], [/看/, 1], [/分析/, 1], [/汇报/, 2], [/报告/, 1],
+// L1 打分器：通用意图模式（不绑定具体 Agent，无需随业务变化维护）
+const INTENT_PATTERNS: [RegExp, number][] = [
+  // ── 调度意图（定时/周期/提醒）──
+  [/定时任务/, 8],
+  [/(?:每天|每周|工作日).{0,10}(?:\d{1,2}[点时:：])/, 7],  // "每天10点" 强信号
+  [/(?:每隔|每)\s*\d+\s*(?:分钟|小时|天)/, 7],            // "每30分钟" 强信号
+  [/定时/, 5], [/每天/, 4], [/每隔/, 5], [/每周/, 4],
+  [/提醒我/, 5], [/提醒.{0,6}(?:开会|吃药|打卡|提交|汇报|出发)/, 7], [/cron/i, 6], [/schedule/i, 5],
+  // ── 通知意图（发送/推送到渠道）──
+  [/(?:发|推|送)(?:到|给|去)?\s*(?:我的?)?\s*(?:微信|企[微业]微信|飞书|webhook)/i, 8],  // "发到微信" 强信号
+  [/推送/, 4], [/发到/, 4], [/发给/, 4],
+  // ── 任务管理意图（增删查改）──
+  [/(?:删除|取消|关闭|停止|暂停|启用|修改).*任务/, 7],
+  [/(?:我的|有哪些|列出|查看).*任务/, 6], [/任务列表/, 6],
+  // ── 渠道管理意图 ──
+  [/哪些渠道/, 6], [/通知渠道/, 5], [/绑定.*微信/, 6], [/解绑/, 5],
+  // ── 任务派发意图（"帮我做/生成/分析" — 可能需要专业 Agent）──
+  [/帮我.{0,4}(?:做|生成|写|制作|画)/, 5],
+  [/(?:能不能|可以|请).{0,4}(?:帮|做|生成|制作)/, 4],
+  // ── 弱信号修饰词（单独不够分，配合上面的）──
+  [/查/, 1], [/搜/, 1], [/分析/, 1],
 ];
 
 const SCORE_THRESHOLD = 7;
@@ -41,7 +43,7 @@ const SCORE_HIGH_CONFIDENCE = 12; // 高置信度：L2 失败也走平台
 
 export function scorePlatformIntent(msg: string): number {
   let score = 0;
-  for (const [pattern, weight] of PLATFORM_KEYWORDS) {
+  for (const [pattern, weight] of INTENT_PATTERNS) {
     if (pattern.test(msg)) score += weight;
   }
   return score;
@@ -51,31 +53,59 @@ export function scorePlatformIntent(msg: string): number {
 // L2: DeepSeek 意图分类
 // ═══════════════════════════════════════════════════════
 
-const INTENT_SYSTEM_PROMPT = `你是灵虾平台的意图分类器。用户消息可能是普通聊天，也可能是平台操作指令。
+const INTENT_BASE_PROMPT = `你是灵虾平台的 Intent Agent（意图分类器）。分析用户消息，判断是平台操作还是普通对话。
 
 只返回一个 JSON，不要返回其他内容。
 
+【平台操作类型】
 创建定时任务：{"type":"schedule_create","name":"简短名称","task":"要执行的具体指令","cron_expr":"cron表达式(分 时 日 月 周)","channel":"推送渠道"}
 查询定时任务：{"type":"schedule_list"}
 删除定时任务：{"type":"schedule_delete","task_name":"任务名或关键词"}
 立即发消息：{"type":"send","channel":"渠道","content":"内容"}
 查询渠道：{"type":"channels_query"}
-普通聊天/AI任务：{"type":"passthrough"}
+打开专业助手：{"type":"open_agent","agent_id":"助手ID","prefill":"用户原始需求"}
+普通对话/AI任务：{"type":"passthrough"}
 
-渠道：微信=weixin，企业微信=wecom，飞书=feishu，主聊天=conversation
-cron：每天10点半=30 10 * * *，工作日9点=0 9 * * 1-5，每30分钟=*/30 * * * *
-最小间隔30分钟。`;
+【渠道】微信=weixin，企业微信=wecom，飞书=feishu，主聊天=conversation
+【cron】每天10点半=30 10 * * *，工作日9点=0 9 * * 1-5，每30分钟=*/30 * * * *（最小间隔30分钟）
+
+【路由规则】
+- 简单问题（查股价、聊天、翻译、问天气）→ passthrough
+- 明确提到某类专业助手 → open_agent
+- 判断不了 → passthrough（宁可不路由也不误路由）`;
+
+/** 从 DB 加载可用 Agent 列表，拼入 prompt */
+async function buildIntentPrompt(): Promise<string> {
+  let agentSection = "";
+  try {
+    const resp = await fetch("http://127.0.0.1:5180/api/claw/business-agents", {
+      headers: { "X-Internal-Key": process.env.INTERNAL_API_KEY || "lingxia-bridge-2026" },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (resp.ok) {
+      const data = await resp.json() as any;
+      const agents = Array.isArray(data?.agents) ? data.agents : [];
+      if (agents.length > 0) {
+        agentSection = "\n\n【可用的专业助手】\n" +
+          agents.map((a: any) => `- ${a.id}: ${a.name} — ${(a.description || "").slice(0, 60)}`).join("\n") +
+          "\n\n当用户需求明确匹配某个助手的能力时，返回 open_agent。";
+      }
+    }
+  } catch {}
+  return INTENT_BASE_PROMPT + agentSection;
+}
 
 export async function classifyIntent(message: string): Promise<any> {
   if (!DEEPSEEK_API_KEY) return { type: "passthrough" };
   try {
+    const systemPrompt = await buildIntentPrompt();
     const resp = await fetch(`${DEEPSEEK_BASE}/v1/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${DEEPSEEK_API_KEY}` },
       body: JSON.stringify({
         model: "deepseek-chat",
         messages: [
-          { role: "system", content: INTENT_SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           { role: "user", content: message },
         ],
         temperature: 0,
@@ -160,7 +190,7 @@ export async function routeMessage(
   }
 
   // auto: 直接执行
-  const { executePlatformIntent } = await import("./platform-intent");
+  const { executePlatformIntent } = await import("./intent-executor");
   await executePlatformIntent(adoptId, intent, writer);
   return true;
 }

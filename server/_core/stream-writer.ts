@@ -3,7 +3,7 @@
  * 
  * StreamWriter 统一 SSE / WebSocket / 未来渠道的流式输出接口。
  * 传输层（claw-chat / claw-ws-proxy）创建对应 Writer，
- * 路由层（platform-router）和执行层（platform-intent）只依赖此接口。
+ * 路由层（intent-agent）和执行层（intent-executor）只依赖此接口。
  */
 
 export interface StreamWriter {
