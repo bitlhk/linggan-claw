@@ -318,14 +318,15 @@ export default function Home() {
     setLingxiaNearBottom(true);
     setLingxiaToolCalls([]);
 
+    let wsOk = false;
     try {
       const apiBase = import.meta.env.VITE_API_URL || "";
       const perf: Record<string, number> = { clientSendMs: Date.now() };
       const controller = new AbortController();
       lingxiaStreamAbortRef.current = controller;
-      let wsOk = false;
       // ── WSS 优先路径 ──
       const wsClient = wsClientRef.current;
+      console.log(`[DIAG] wsClient.state = ${wsClient?.state ?? "null"}, will ${wsClient?.state === "connected" ? "try WSS first" : "use HTTP SSE directly"}`);
       if (wsClient?.state === "connected") {
         console.log("[WS] sending via WebSocket");
         // WS 消息处理：后端 WS 代理已转成与 HTTP SSE 一致的格式
@@ -450,6 +451,7 @@ export default function Home() {
               }
               // 完成
               if (chunk?.choices?.[0]?.finish_reason === "stop") {
+                console.log("[DIAG] ✅ WSS finish_reason=stop，流结束");
                 setLingxiaStreaming(false);
                 wsClient.setRawHandler(null);
               }
@@ -459,13 +461,42 @@ export default function Home() {
         }
         const sent = wsClient.sendChat(text);
         if (sent) {
-          wsOk = true;
-          return; // WSS 接管，streaming 由 wsHandler 中 finish_reason=stop 关闭
+          // WSS 响应超时检测：企业代理可能静默拦截 WSS 数据
+          // 等待第一个有效事件，超时则降级到 HTTP SSE
+          const WSS_FIRST_EVENT_TIMEOUT_MS = 15000;
+          const firstEventOk = await new Promise<boolean>((resolve) => {
+            let resolved = false;
+            const timeout = setTimeout(() => {
+              if (!resolved) { resolved = true; resolve(false); }
+            }, WSS_FIRST_EVENT_TIMEOUT_MS);
+            const origHandler = wsHandler;
+            wsClient.setRawHandler((chunk: any) => {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeout);
+                resolve(true);
+              }
+              origHandler(chunk);
+            });
+          });
+
+          if (firstEventOk) {
+            // WSS 工作正常，后续由 wsHandler 接管
+            wsOk = true;
+            return;
+          }
+
+          // WSS 超时：清理 handler，降级到 HTTP
+          console.warn("[WS] no response in 15s, falling back to HTTP SSE");
+          console.log("[DIAG] ⚠️ WSS 超时降级 → 开始走 HTTP SSE 路径");
+          wsClient.setRawHandler(null);
+        } else {
+          console.log("[WS] send failed, falling back to HTTP");
         }
-        console.log("[WS] send failed, falling back to HTTP");
       }
 
       // ── HTTP SSE 路径（fallback）──
+      console.log("[DIAG] 📡 进入 HTTP SSE 路径");
       const resp = await fetch(`${apiBase}/api/claw/chat-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -515,7 +546,8 @@ export default function Home() {
       };
 
       let currentEvent = ""; // fix: 跨 chunk 保持 SSE event 状态
-      while (true) {
+      let sseDone = false;
+      while (!sseDone) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -533,9 +565,10 @@ export default function Home() {
           if (!line.startsWith("data: ")) continue;
           const raw = line.slice(6).trim();
           if (raw === "[DONE]") {
+            console.log("[DIAG] ✅ 收到 [DONE]，流结束");
             flushDelta();
-            currentEvent = "";
-            continue;
+            sseDone = true;
+            break;
           }
           try {
             const chunk = JSON.parse(raw);

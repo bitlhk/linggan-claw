@@ -1,9 +1,9 @@
-import { MessageSquareText, Bot, Sparkles, CalendarClock, Settings2, BookOpen, Users, Moon } from "lucide-react";
-export type PageKey = "chat" | "skills" | "agent" | "schedule" | "dreams" | "collab" | "settings" | "docs";
-
+import { MessageSquareText, Bot, Sparkles, MessageCircle, CalendarClock, Settings2, BookOpen, Users, Moon } from "lucide-react";
+export type PageKey = "chat" | "skills" | "weixin" | "agent" | "schedule" | "dreams" | "collab" | "settings" | "docs";
 const items: { key: PageKey; label: string; icon: any }[] = [
   { key: "chat", label: "聊天", icon: MessageSquareText },
   { key: "skills", label: "技能", icon: Sparkles },
+  { key: "weixin", label: "微信", icon: MessageCircle },
   { key: "agent", label: "代理", icon: Bot },
   { key: "schedule", label: "定时任务", icon: CalendarClock },
   { key: "dreams", label: "梦境记忆", icon: Moon },

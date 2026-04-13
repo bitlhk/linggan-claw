@@ -1,21 +1,21 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { applySettings, getSettings, subscribeSettings } from "@/lib/settings";
 import type { UiSettings } from "@/types/settings";
 
-type Section = "appearance" | "chat" | "layout";
+type Section = "appearance" | "chat" | "layout" | "notify";
 
 const SECTIONS: { key: Section; label: string; emoji: string }[] = [
   { key: "appearance", label: "外观", emoji: "🎨" },
   { key: "chat", label: "聊天", emoji: "💬" },
   { key: "layout", label: "布局", emoji: "📐" },
+  { key: "notify" as const, label: "通知", emoji: "🔔" },
 ];
 
 const THEMES = [
   { key: "claw" as const, label: "Claw", color: "#ff5c5c", desc: "珊瑚红 · 默认" },
   { key: "knot" as const, label: "Knot", color: "#e5243b", desc: "深红 · 高对比" },
   { key: "dash" as const, label: "Dash", color: "#b47840", desc: "棕金 · 仪表盘" },
-  { key: "ember" as const, label: "Ember", color: "#c96442", desc: "余烬 · 暖感文学" },
 ];
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
@@ -87,6 +87,7 @@ export function SettingsPage({
   canSave,
   saving,
   onSave,
+  adoptId,
 }: {
   memoryEnabled: "yes" | "no";
   setMemoryEnabled: (v: "yes" | "no") => void;
@@ -95,6 +96,7 @@ export function SettingsPage({
   canSave: boolean;
   saving: boolean;
   onSave: () => void;
+  adoptId?: string;
 }) {
   const [uiSettings, setUiSettings] = useState<UiSettings>(getSettings());
   const [activeSection, setActiveSection] = useState<Section>("appearance");
@@ -376,7 +378,132 @@ export function SettingsPage({
             </SettingRow>
           </div>
         )}
+        {activeSection === "notify" && (<div className="space-y-6"><SectionTitle emoji="🔔" label="通知渠道" desc="配置定时任务、协作等事件的推送通道" /><NotifySettings adoptId={adoptId} /></div>)}
       </div>
     </main>
+  );
+}
+
+function NotifySettings({ adoptId }: { adoptId?: string }) {
+  const [type, setType] = useState("none");
+  const [corpId, setCorpId] = useState("");
+  const [agentId, setAgentId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [userId, setUserId] = useState("@all");
+  const [webhook, setWebhook] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!adoptId) return;
+    fetch(`/api/claw/notify/config?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" })
+      .then(r => r.json()).then(d => { const c = d.config || {}; setType(c.type||"none"); setCorpId(c.corpId||""); setAgentId(c.agentId||""); setSecret(c.secret||""); setUserId(c.userId||"@all"); setWebhook(c.webhook||""); }).catch(() => {});
+  }, [adoptId]);
+
+  const onSave = async () => { if (!adoptId) return; setSaving(true); try { await fetch("/api/claw/notify/config", { method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({adoptId,type,corpId,agentId,secret,userId,webhook})}); toast.success("通知配置已保存"); } catch { toast.error("保存失败"); } finally { setSaving(false); } };
+  const onTest = async () => { if (!adoptId) return; setTesting(true); try { const r = await fetch("/api/claw/notify/test", { method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({adoptId})}); const d = await r.json(); if (d.ok) toast.success("测试消息已发送！"); else toast.error(d.error||"发送失败"); } catch { toast.error("发送失败"); } finally { setTesting(false); } };
+
+  const S: React.CSSProperties = { height:32, borderRadius:8, border:"1px solid var(--oc-border)", background:"var(--oc-card)", color:"var(--oc-text-primary)", padding:"0 10px", fontSize:12, width:"100%" };
+  const L: React.CSSProperties = { fontSize:12, color:"var(--muted)", marginBottom:4, display:"block" };
+
+  return (<div className="space-y-4">
+    <div className="settings-card" style={{padding:16}}><div style={L}>通知渠道</div>
+      <select value={type} onChange={e=>setType(e.target.value)} style={{...S,cursor:"pointer"}}><option value="none">关闭通知</option><option value="weixin">个人微信</option>
+              <option value="wechat_work">企业微信</option><option value="feishu">飞书</option><option value="webhook">自定义 Webhook</option></select></div>
+    {type==="weixin"&&<WeixinBind adoptId={adoptId}/>}
+    {type==="wechat_work"&&<div className="settings-card" style={{padding:16}}><div className="text-xs font-medium mb-3" style={{color:"var(--oc-text-primary)"}}>企业微信配置</div><div className="space-y-3">
+      <div><div style={L}>企业ID (CorpID)</div><input value={corpId} onChange={e=>setCorpId(e.target.value)} style={S} placeholder="wwc7cc..."/></div>
+      <div><div style={L}>应用ID (AgentID)</div><input value={agentId} onChange={e=>setAgentId(e.target.value)} style={S} placeholder="1000002"/></div>
+      <div><div style={L}>应用Secret</div><input type="password" value={secret} onChange={e=>setSecret(e.target.value)} style={S}/></div>
+      <div><div style={L}>接收人 (企微userid, @all=所有人)</div><input value={userId} onChange={e=>setUserId(e.target.value)} style={S} placeholder="@all"/></div></div></div>}
+    {type==="feishu"&&<div className="settings-card" style={{padding:16}}><div className="text-xs font-medium mb-3" style={{color:"var(--oc-text-primary)"}}>飞书配置</div><div><div style={L}>Webhook URL</div><input value={webhook} onChange={e=>setWebhook(e.target.value)} style={S} placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"/></div></div>}
+    {type==="webhook"&&<div className="settings-card" style={{padding:16}}><div className="text-xs font-medium mb-3" style={{color:"var(--oc-text-primary)"}}>自定义 Webhook</div><div><div style={L}>Webhook URL</div><input value={webhook} onChange={e=>setWebhook(e.target.value)} style={S} placeholder="https://your-server.com/webhook"/></div></div>}
+    {type!=="none"&&<div style={{display:"flex",gap:8}}><button className="btn-primary-soft" onClick={onSave} disabled={saving} style={{flex:1}}>{saving?"保存中...":"保存配置"}</button><button className="skills-btn" onClick={onTest} disabled={testing} style={{padding:"0 16px"}}>{testing?"发送中...":"测试发送"}</button></div>}
+  </div>);
+}
+
+function WeixinBind({ adoptId }: { adoptId?: string }) {
+  const [status, setStatus] = useState<"idle"|"loading"|"scanning"|"bound">("idle");
+  const [qrcodeUrl, setQrcodeUrl] = useState("");
+  const [qrcode, setQrcode] = useState("");
+  const [userId, setUserId] = useState("");
+  const [testing, setTesting] = useState(false);
+  const pollRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!adoptId) return;
+    fetch(`/api/claw/weixin/status?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" })
+      .then(r => r.json()).then(d => { if (d.bound) { setStatus("bound"); setUserId(d.userId || ""); } }).catch(() => {});
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [adoptId]);
+
+  const startBind = async () => {
+    if (!adoptId) return;
+    setStatus("loading");
+    try {
+      const r = await fetch("/api/claw/weixin/qrcode", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ adoptId }) });
+      const d = await r.json();
+      if (!d.qrcodeUrl) { toast.error("获取二维码失败"); setStatus("idle"); return; }
+      setQrcodeUrl(d.qrcodeUrl);
+      setQrcode(d.qrcode);
+      setStatus("scanning");
+      let baseUrl = "";
+      pollRef.current = setInterval(async () => {
+        try {
+          const sr = await fetch(`/api/claw/weixin/qrstatus?adoptId=${encodeURIComponent(adoptId)}&qrcode=${encodeURIComponent(d.qrcode)}${baseUrl ? "&baseUrl=" + encodeURIComponent(baseUrl) : ""}`, { credentials: "include" });
+          const sd = await sr.json();
+          if (sd.status === "confirmed") { clearInterval(pollRef.current); setStatus("bound"); setUserId(sd.userId || ""); toast.success("微信绑定成功！"); }
+          else if (sd.status === "scaned_but_redirect" && sd.baseUrl) { baseUrl = sd.baseUrl; }
+          else if (sd.status === "expired") { clearInterval(pollRef.current); toast.error("二维码已过期，请重试"); setStatus("idle"); }
+        } catch {}
+      }, 2000);
+    } catch { toast.error("获取二维码失败"); setStatus("idle"); }
+  };
+
+  const unbind = async () => {
+    if (!adoptId || !confirm("确认解绑微信？")) return;
+    await fetch("/api/claw/weixin/unbind", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ adoptId }) });
+    setStatus("idle"); setUserId(""); toast.success("已解绑");
+  };
+
+  const testSend = async () => {
+    if (!adoptId) return;
+    setTesting(true);
+    try {
+      const r = await fetch("/api/claw/weixin/test", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ adoptId }) });
+      const d = await r.json();
+      if (d.ok) toast.success("测试消息已发送！"); else toast.error(d.error || "发送失败");
+    } catch { toast.error("发送失败"); }
+    finally { setTesting(false); }
+  };
+
+  return (
+    <div className="settings-card" style={{ padding: 16 }}>
+      <div className="text-xs font-medium mb-3" style={{ color: "var(--oc-text-primary)" }}>个人微信绑定</div>
+      {status === "bound" ? (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
+            <span className="text-xs" style={{ color: "var(--oc-text-primary)" }}>已绑定</span>
+            <span className="text-xs" style={{ color: "var(--muted)" }}>{userId ? userId.split("@")[0].slice(0, 8) + "..." : ""}</span>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn-primary-soft" onClick={testSend} disabled={testing} style={{ flex: 1 }}>{testing ? "发送中..." : "测试发送"}</button>
+            <button className="skills-btn" onClick={unbind} style={{ padding: "0 16px", color: "#ef4444" }}>解绑</button>
+          </div>
+        </div>
+      ) : status === "scanning" ? (
+        <div style={{ textAlign: "center" }}>
+          <div className="text-xs mb-2" style={{ color: "var(--oc-text-secondary)" }}>请用微信扫描二维码</div>
+          {qrcodeUrl && <img src={"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(qrcodeUrl)} alt="WeChat QR" style={{ width: 200, height: 200, margin: "0 auto", borderRadius: 8, background: "#fff" }} />}
+          <div className="text-xs mt-2" style={{ color: "var(--muted)" }}>扫码后请在微信中确认</div>
+        </div>
+      ) : (
+        <div>
+          <div className="text-xs mb-3" style={{ color: "var(--oc-text-secondary)" }}>绑定个人微信后，定时任务、协作等通知将直接推送到你的微信</div>
+          <button className="btn-primary-soft" onClick={startBind} disabled={status === "loading"} style={{ width: "100%" }}>{status === "loading" ? "获取二维码..." : "扫码绑定微信"}</button>
+        </div>
+      )}
+    </div>
   );
 }

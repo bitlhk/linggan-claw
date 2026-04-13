@@ -22,8 +22,17 @@ export function registerChatStreamRoutes(app: express.Express) {
       return;
     }
 
-    const claw = await requireClawOwner(req, res, String(adoptId));
-    if (!claw) return;
+    // 内部 bridge 调用跳过 auth（通过 X-Internal-Key 头）
+    const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    let claw: any;
+    if (req.headers["x-internal-key"] === INTERNAL_KEY) {
+      const { getClawByAdoptId } = await import("../db");
+      claw = await getClawByAdoptId(String(adoptId));
+      if (!claw) { res.status(404).json({ error: "NOT_FOUND" }); return; }
+    } else {
+      claw = await requireClawOwner(req, res, String(adoptId));
+      if (!claw) return;
+    }
 
     // 安全校验：agentId 必须符合预期格式，防止 shell 注入
     const AGENT_ID_RE = /^trial_lgc-[a-z0-9]{4,30}$/;
@@ -604,6 +613,7 @@ const options = {
             }
           } catch {}
           res.write(`data: ${JSON.stringify({ __perf: { streamEndMs } })}\n\n`);
+          res.write("data: [DONE]\n\n");
           res.end();  // 关闭 SSE 流
         }
         appendLogAsync("claw-exec-detail.log", {

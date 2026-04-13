@@ -162,7 +162,7 @@ function agentDesc(id: string) {
   if (id === "task-evolve") return "对话中创建和打磨 AI 技能，越用越聪明";
   if (id === "task-code") return "在沙箱中执行代码，安全隔离";
   if (id === "task-finance") return "DCF/LBO 建模、竞争分析、行业研究报告";
-  if (id === "task-hermes") return "共享智脑 · 融合债券/理财/保险/信贷四大专业能力，支持跨领域综合分析";
+  if (id === "task-hermes") return "共享智脑 · 融合八大金融框架（债券/理财/保险/信贷/抵押物/信保/银保合作），支持跨领域综合分析";
   if (id === "task-trace") return "交付复杂任务，自动拆解规划、逐步推进";
   if (id === "task-trading") return "多Agent辩论框架：基本面/技术面/情绪面/新闻面 → 多空辩论 → 交易决策";
   if (id === "task-stock") return "AI 智能选股，11+ 交易策略，技术面+消息面+筹码分析";
@@ -552,10 +552,10 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
             <>
               <div className="flex items-center justify-center"><Dna size={40} style={{ color: "#be1e2d" }} /></div>
               <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵枢 · 共享智脑（Hermes Agent）</p>
-              <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>融合债券·理财·保险·信贷，一个入口解决跨领域金融问题</p>
+              <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>八大权威框架融合，一个入口解决跨领域金融问题</p>
               <div className="mt-4 mx-auto max-w-[240px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(190,30,45,0.04)", border: "1px solid rgba(190,30,45,0.12)" }}>
                 <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
-                {["客户贷款500万买厂房，需要什么保险覆盖？", "手上5000万国债，如何对冲利率风险？", "新能源车贷款+保险打包方案怎么设计？", "2000万闲置资金，国债和理财怎么配比？"].map((q) => (
+                {["客户贷款500万买厂房，保险+抵押物方案怎么配？", "5000万国债组合，利率风险对冲+理财配比？", "新能源车贷款+保险+残值评估一体化方案", "企业授信尽调：信贷风险+保证保险+押品估值"].map((q) => (
                   <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}>{q}</p>
                 ))}
               </div>

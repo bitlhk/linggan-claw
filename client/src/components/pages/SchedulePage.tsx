@@ -37,7 +37,7 @@ type FormState = {
   payloadKind: "agentTurn" | "systemEvent";
   payloadText: string; payloadModel: string;
   sessionTarget: "main" | "isolated";
-  deliveryMode: "announce" | "none";
+  deliveryMode: "announce" | "none" | "weixin";
 };
 
 const emptyForm: FormState = {
@@ -163,7 +163,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
         ? { kind: "agentTurn", message: form.payloadText, model: form.payloadModel || undefined }
         : { kind: "systemEvent", text: form.payloadText },
       sessionTarget: form.sessionTarget,
-      delivery: { mode: form.deliveryMode, to: form.deliveryMode === "announce" ? "conversation" : undefined },
+      delivery: { mode: form.deliveryMode === "weixin" ? "none" : form.deliveryMode, to: form.deliveryMode === "announce" ? "conversation" : undefined, weixin: form.deliveryMode === "weixin" },
     };
   };
 
@@ -556,6 +556,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
             <select style={selectStyle} value={form.deliveryMode} onChange={e => setForm({ ...form, deliveryMode: e.target.value as any })}>
               <option value="announce">发送到主聊天（推荐）</option>
               <option value="none">仅记录日志</option>
+              <option value="weixin">推送到微信</option>
             </select>
           </FieldRow>
 

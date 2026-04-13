@@ -1,4 +1,6 @@
 import express from "express";
+import { sendNotification } from "./claw-notify";
+import { sendWeixinMessage } from "./claw-weixin";
 import {
   requireClawOwner,
   resolveRuntimeAgentId,
@@ -74,6 +76,20 @@ export function registerCronRoutes(app: express.Express) {
       if (["ok","error","skipped"].includes(scope)) runs = runs.filter((r: any) => String(r?.status || "") === scope);
       runs.sort((a: any, b: any) => Number(b?.ts || 0) - Number(a?.ts || 0));
       const total = runs.length;
+      // 发通知：最新一条 ok 的 run，如果 ts 在 2 分钟内，按 job delivery 配置推送
+      const latestOk = runs.find((r: any) => r.status === "ok");
+      if (latestOk && (Date.now() - Number(latestOk.ts || 0)) < 120000) {
+        const job = targetJobs.find((j: any) => String(j.id) === String(latestOk.jobId));
+        const delivery = job?.delivery || {};
+        const msg = `定时任务「${latestOk.jobName || "未命名"}」已完成`;
+        if (delivery.weixin) {
+          sendWeixinMessage(adoptId, "", "🦞 " + msg).catch(() => {});
+        } else if (delivery.mode === "announce") {
+          // 主聊天由 OpenClaw gateway 自己处理，这里推企微/飞书
+          sendNotification(adoptId, msg, "🦞 灵虾定时任务").catch(() => {});
+        }
+        // mode === "none" 不推送
+      }
       return res.json({ runs: runs.slice(offset, offset + limit), total, limit, offset });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || e || "cron runs failed") });

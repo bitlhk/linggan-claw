@@ -1,4 +1,5 @@
 import { SkillsPage } from "@/components/pages/SkillsPage";
+import { WeixinPage } from "@/components/pages/WeixinPage";
 import { AgentPage } from "@/components/pages/AgentPage";
 import { SchedulePage } from "@/components/pages/SchedulePage";
 import { SettingsPage } from "@/components/pages/SettingsPage";
@@ -49,6 +50,7 @@ export function MainPanel({
     onSave: settings?.onSave ?? (() => {}),
   };
 
+  if (activePage === "weixin") return <WeixinPage adoptId={adoptId || ""} />;
   if (activePage === "skills") {
     return <SkillsPage skills={safeSkills.data} canEdit={safeSkills.canEdit} pending={safeSkills.pending} onToggle={safeSkills.onToggle} adoptId={safeSkills.adoptId} />;
   }
@@ -67,6 +69,7 @@ export function MainPanel({
       canSave={safeSettings.canSave}
       saving={safeSettings.saving}
       onSave={safeSettings.onSave}
+      adoptId={adoptId}
     />
   );
 }

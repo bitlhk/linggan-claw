@@ -23,6 +23,8 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerVoiceRoutes } from "./voice";
 import { startRecycler } from "./recycler";
 import { registerCronRoutes } from "./claw-cron";
+import { registerNotifyRoutes } from "./claw-notify";
+import { registerWeixinRoutes } from "./claw-weixin";
 import { registerSkillRoutes } from "./claw-skills";
 import { registerCollabRoutes } from "./claw-collab";
 import { registerBusinessRoutes } from "./claw-business";
@@ -178,6 +180,10 @@ async function startServer() {
   registerOAuthRoutes(app);
   registerVoiceRoutes(app);
   registerCronRoutes(app);
+  registerNotifyRoutes(app);
+  registerWeixinRoutes(app);
+  // 启动微信双向聊天桥
+  import("./claw-weixin-bridge").then(m => m.startWeixinBridge()).catch(e => console.error("weixin bridge start failed:", e));
   registerSkillRoutes(app);
   registerCollabRoutes(app);
   registerBusinessRoutes(app);
