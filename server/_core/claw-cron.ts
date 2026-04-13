@@ -63,8 +63,16 @@ export function registerCronRoutes(app: express.Express) {
     try {
       const adoptId = String(req.query.adoptId || "").trim();
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
-      const claw = await requireClawOwner(req, res, adoptId);
-      if (!claw) return;
+      const IK = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+      let claw: any;
+      if (req.headers["x-internal-key"] === IK) {
+        const { getClawByAdoptId } = await import("../db");
+        claw = await getClawByAdoptId(adoptId);
+        if (!claw) return res.status(404).json({ error: "NOT_FOUND" });
+      } else {
+        claw = await requireClawOwner(req, res, adoptId);
+        if (!claw) return;
+      }
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, (claw as any).agentId);
       const limit = Math.max(1, Math.min(200, Number(req.query.limit || 20)));
       const offset = Math.max(0, Number(req.query.offset || 0));

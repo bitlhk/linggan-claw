@@ -42,6 +42,8 @@ export async function executePlatformIntent(
       writer.writeText(`⚠️ ${chName}未绑定，改为推送到主聊天。可在侧边栏绑定后修改。\n\n`);
       channel = "conversation";
     }
+    // Gateway 不认识灵虾的渠道（weixin/feishu等），delivery 设为 none
+    // 灵虾平台层负责轮询 cron runs 并投递到用户渠道
     const job = {
       name: String(intent.name || "定时任务"),
       description: String(intent.task || "").slice(0, 100),
@@ -49,8 +51,18 @@ export async function executePlatformIntent(
       schedule: { kind: "cron", expr: String(intent.cron_expr || "0 9 * * *") },
       payload: { kind: "agentTurn", message: String(intent.task || "") },
       sessionTarget: "isolated",
-      delivery: { mode: "announce", to: channel, ...(channel !== "conversation" ? { channel } : {}) },
+      delivery: channel === "conversation"
+        ? { mode: "announce", to: "conversation" }
+        : { mode: "none" },
     };
+    // 记录灵虾侧的投递配置（Gateway 不管这部分）
+    if (channel !== "conversation") {
+      try {
+        const { saveCronDeliveryConfig } = await import("./cron-delivery");
+        // jobId 在创建后才知道，先存 adoptId + jobName 映射
+        await saveCronDeliveryConfig(adoptId, String(intent.name || "定时任务"), channel);
+      } catch {}
+    }
     try {
       const resp = await fetch(`${BASE}/api/claw/cron/add`, {
         method: "POST",

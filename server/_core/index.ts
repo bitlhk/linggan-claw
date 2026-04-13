@@ -184,6 +184,8 @@ async function startServer() {
   registerWeixinRoutes(app);
   // 启动微信双向聊天桥
   import("./claw-weixin-bridge").then(m => m.startWeixinBridge()).catch(e => console.error("weixin bridge start failed:", e));
+  // 启动 cron 结果投递轮询（灵虾平台侧，补充 Gateway 不支持的渠道）
+  import("./cron-delivery").then(m => m.startCronDeliveryPoller()).catch(e => console.error("cron delivery poller start failed:", e));
   registerSkillRoutes(app);
   registerCollabRoutes(app);
   registerBusinessRoutes(app);
