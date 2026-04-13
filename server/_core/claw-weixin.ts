@@ -179,6 +179,14 @@ export function registerWeixinRoutes(app: express.Express) {
           userId: data.ilink_user_id || "",
           savedAt: new Date().toISOString(),
         });
+        // 绑定成功后自动启动这只虾的 polling（无需重启服务）
+        try {
+          const { startPollForAccount } = await import("./claw-weixin-bridge");
+          startPollForAccount(adoptId);
+          console.log(`[WEIXIN] auto-started polling for ${adoptId}`);
+        } catch (e: any) {
+          console.error(`[WEIXIN] failed to start polling for ${adoptId}:`, e?.message);
+        }
         return res.json({ status: "confirmed", userId: data.ilink_user_id || "" });
       }
       let baseUrl = "";

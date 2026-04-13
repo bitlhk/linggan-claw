@@ -266,6 +266,19 @@ async function pollLoop(adoptId: string): Promise<void> {
 
 // 启动所有已绑定子虾的 polling
 /** 外部调用：给指定子虾的微信用户发消息（供 platform tool 使用） */
+// 跟踪已启动的 polling，防止重复启动
+const activePolls = new Set<string>();
+
+/** 外部调用：为新绑定的子虾启动 polling（绑定成功时调用，无需重启服务） */
+export function startPollForAccount(adoptId: string): void {
+  if (activePolls.has(adoptId)) return; // 已在 polling
+  const acct = loadAccount(adoptId);
+  if (!acct?.token) return;
+  activePolls.add(adoptId);
+  console.log(`[WEIXIN-BRIDGE] hot-start polling for ${adoptId}`);
+  pollLoop(adoptId).catch(e => console.error(`[WEIXIN-BRIDGE] ${adoptId} poll crashed:`, e));
+}
+
 export async function sendMessageToWeixin(adoptId: string, text: string): Promise<void> {
   const acct = loadAccount(adoptId);
   if (!acct?.token) throw new Error("该子虾未绑定微信");
@@ -282,6 +295,7 @@ export function startWeixinBridge(): void {
       const adoptId = file.replace(".json", "");
       const acct = loadAccount(adoptId);
       if (acct?.token) {
+        activePolls.add(adoptId);
         pollLoop(adoptId).catch(e => console.error(`[WEIXIN-BRIDGE] ${adoptId} loop crashed:`, e));
       }
     }

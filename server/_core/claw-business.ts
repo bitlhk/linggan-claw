@@ -221,21 +221,24 @@ export function registerBusinessRoutes(app: express.Express) {
       );
       const creditSessionKey = `task-credit-risk_user${userId}_${tenantCtx.sessionKey}`;
       console.log("[CREDIT-RISK] starting run", { agentId, session: creditSessionKey, tenant: tenantCtx.tenantShort });
+      // 合规验证器：缓冲报告文本，流结束后自动检查
+      let creditReportBuffer = "";
       const creditUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8642");
       const creditToken = bizAgentCfg.apiToken || "";
 
       const CREDIT_SYSTEM_PROMPT = [
         "你是「灵犀 · 智贷决策助手」，面向中国商业银行的信贷风控 AI 助手。",
         "",
-        "【3 个权威框架】",
-        "1. 银保监《商业银行授信工作尽职指引》—— 国家强制性法规",
-        "2. 工商银行《工银智涌/智贷通/工小审》—— 行业最权威大模型落地标杆，累计调用 10 亿次",
-        "3. 《商业银行金融资产风险分类办法》—— 五级分类强制标准",
+        "【监管框架（2024 最新）】",
+        "1. 金融监管总局《固定资产贷款管理办法》《流动资金贷款管理办法》（2024年第1、2号令）—— 三大贷款管理办法修订版",
+        "2. 原银保监会《商业银行授信工作尽职指引》（银监发〔2004〕51号）—— 现由金融监管总局承继执行",
+        "3. 银保监会+人民银行《商业银行金融资产风险分类办法》（2023年第1号令，2023.7.1生效）—— 五级分类最新标准",
+        "4. 工商银行《工银智涌/智贷通/工小审》—— 行业大模型落地标杆",
         "",
-        "【银保监三查框架】",
-        "贷前调查（抵押产权 + 评估价值 + 处置流动性 + 保证人代偿能力）",
-        "贷时审查（客户评分 + 风险预警 + 差异化定价）",
-        "贷后检查（经营动态 + 财务健康 + 信用履约 + 担保物状态）",
+        "【贷前-贷时-贷后三查框架（金融监管总局）】",
+        "贷前调查（借款人资质 + 贷款用途真实性 + 还款来源可靠性 + 抵押物评估 + 保证人代偿能力）",
+        "贷时审查（客户评分 + 风险预警 + 集中度检查 + LPR市场化定价）",
+        "贷后检查（经营动态 + 财务健康 + 贷款用途跟踪 + 担保物状态 + 早期预警指标）",
         "",
         "【工行『智贷通』5 大类能力】（你的工具集对应这 5 类）",
         "1. 知识助手 - 制度查询 + 案例库 → compliance_check",
@@ -366,6 +369,7 @@ export function registerBusinessRoutes(app: express.Express) {
 
                     if (evtType === "message.delta") {
                       const deltaText = evt.delta || "";
+                      creditReportBuffer += deltaText;
                       res.write(`data: ${JSON.stringify({
                         choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
                       })}\n\n`);
@@ -412,6 +416,9 @@ export function registerBusinessRoutes(app: express.Express) {
                       if (evt.usage) {
                         res.write(`data: ${JSON.stringify({ __perf: { usage: evt.usage } })}\n\n`);
                       }
+                      // 合规验证在 eventsRes.on("end") 中执行（on("data") 非 async）
+                      // creditReportBuffer 已缓冲完毕，标记 run 完成
+                      creditReportBuffer += "\n[RUN_COMPLETED]";
                       res.write(`data: [DONE]\n\n`);
                     } else if (evtType === "run.failed") {
                       res.write(`data: ${JSON.stringify({ error: evt.error || "task-credit-risk run failed" })}\n\n`);
@@ -422,11 +429,25 @@ export function registerBusinessRoutes(app: express.Express) {
                 if (typeof (res as any).flush === 'function') (res as any).flush();
               });
 
-              eventsRes.on("end", () => {
+              eventsRes.on("end", async () => {
                 console.log("[CREDIT-RISK] events stream ended");
                 clearInterval(creditHeartbeat);
                 auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
+                // ── 生成-验证者：合规自检（流结束后执行）──
+                if (creditReportBuffer.length > 100 && !res.writableEnded) {
+                  try {
+                    const { verifyCreditReport, formatVerifyResult } = await import("./credit-verifier");
+                    const verifyResult = await verifyCreditReport(creditReportBuffer);
+                    if (verifyResult) {
+                      const verifyMd = formatVerifyResult(verifyResult);
+                      res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: verifyMd }, finish_reason: null }] })}\n\n`);
+                    }
+                  } catch (e: any) {
+                    console.error("[CREDIT-VERIFIER] failed:", e?.message?.slice(0, 100));
+                  }
+                }
                 if (!res.writableEnded) {
+                  res.write(`data: ${JSON.stringify({ __stream_end: true })}\n\n`);
                   res.write(`data: [DONE]\n\n`);
                   res.end();
                 }
@@ -606,6 +627,7 @@ export function registerBusinessRoutes(app: express.Express) {
 
                     if (evtType === "message.delta") {
                       const deltaText = evt.delta || "";
+                      creditReportBuffer += deltaText;
                       res.write(`data: ${JSON.stringify({
                         choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
                       })}\n\n`);
@@ -652,6 +674,9 @@ export function registerBusinessRoutes(app: express.Express) {
                       if (evt.usage) {
                         res.write(`data: ${JSON.stringify({ __perf: { usage: evt.usage } })}\n\n`);
                       }
+                      // 合规验证在 eventsRes.on("end") 中执行（on("data") 非 async）
+                      // creditReportBuffer 已缓冲完毕，标记 run 完成
+                      creditReportBuffer += "\n[RUN_COMPLETED]";
                       res.write(`data: [DONE]\n\n`);
                     } else if (evtType === "run.failed") {
                       res.write(`data: ${JSON.stringify({ error: evt.error || "task-bond run failed" })}\n\n`);
@@ -856,6 +881,7 @@ export function registerBusinessRoutes(app: express.Express) {
 
                     if (evtType === "message.delta") {
                       const deltaText = evt.delta || "";
+                      creditReportBuffer += deltaText;
                       res.write(`data: ${JSON.stringify({
                         choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
                       })}\n\n`);
@@ -902,6 +928,9 @@ export function registerBusinessRoutes(app: express.Express) {
                       if (evt.usage) {
                         res.write(`data: ${JSON.stringify({ __perf: { usage: evt.usage } })}\n\n`);
                       }
+                      // 合规验证在 eventsRes.on("end") 中执行（on("data") 非 async）
+                      // creditReportBuffer 已缓冲完毕，标记 run 完成
+                      creditReportBuffer += "\n[RUN_COMPLETED]";
                       res.write(`data: [DONE]\n\n`);
                     } else if (evtType === "run.failed") {
                       res.write(`data: ${JSON.stringify({ error: evt.error || "task-my-wealth run failed" })}\n\n`);
@@ -1102,6 +1131,7 @@ export function registerBusinessRoutes(app: express.Express) {
 
                     if (evtType === "message.delta") {
                       const deltaText = evt.delta || "";
+                      creditReportBuffer += deltaText;
                       res.write(`data: ${JSON.stringify({
                         choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
                       })}\n\n`);
@@ -1162,6 +1192,9 @@ export function registerBusinessRoutes(app: express.Express) {
                       if (evt.usage) {
                         res.write(`data: ${JSON.stringify({ __perf: { usage: evt.usage } })}\n\n`);
                       }
+                      // 合规验证在 eventsRes.on("end") 中执行（on("data") 非 async）
+                      // creditReportBuffer 已缓冲完毕，标记 run 完成
+                      creditReportBuffer += "\n[RUN_COMPLETED]";
                       res.write(`data: [DONE]\n\n`);
                     } else if (evtType === "run.failed") {
                       res.write(`data: ${JSON.stringify({ error: evt.error || "task-claim-ev run failed" })}\n\n`);
