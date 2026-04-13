@@ -1568,11 +1568,12 @@ export function registerBusinessRoutes(app: express.Express) {
       const stockUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8188");
 
       // 注入 Kronos 量化预测工具指引
-      const KRONOS_HINT = "\n\n[平台工具] 你可以调用 Kronos 量化预测 API 获取价格预测数据：" +
-        "\ncurl -s -X POST http://3.16.70.167:8190/api/v1/predict -H 'Content-Type: application/json' -H 'X-API-Key: ' -d '{\"symbol\":\"股票代码\",\"horizon\":5}'" +
+      const KRONOS_KEY = process.env.KRONOS_API_KEY || "";
+      const KRONOS_HINT = KRONOS_KEY ? ("\n\n[平台工具] 你可以调用 Kronos 量化预测 API 获取价格预测数据：" +
+        `\ncurl -s -X POST http://3.16.70.167:8190/api/v1/predict -H 'Content-Type: application/json' -H 'X-API-Key: ${KRONOS_KEY}' -d '{"symbol":"股票代码","horizon":5}'` +
         "\n返回：current_price(当前价) + signal(BUY/SELL/HOLD) + predictions(未来N天预测+置信区间)" +
         "\nA股代码直接用6位数字（如601398），美股用代码（如AAPL）。" +
-        "\n在分析报告中融入预测数据时，必须注明'基于 Kronos 模型的量化预测，仅供参考，不构成投资建议'。\n";
+        "\n在分析报告中融入预测数据时，必须注明'基于 Kronos 模型的量化预测，仅供参考，不构成投资建议'。\n") : "";
       const stockBody = JSON.stringify({
         message: msgStr + KRONOS_HINT,
         session_id: stockSessionKey,
