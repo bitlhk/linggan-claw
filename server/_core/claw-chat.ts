@@ -217,6 +217,17 @@ export function registerChatStreamRoutes(app: express.Express) {
 
     const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
     const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+    // ── 平台意图路由：打分 → 分类 → 执行（统一 StreamWriter）──
+    {
+      const { SseStreamWriter } = await import("./stream-writer");
+      const { routeMessage } = await import("./platform-router");
+      const sseWriter = new SseStreamWriter(res);
+      sseWriter.init();
+      const handled = await routeMessage(String(adoptId), msgStr, sseWriter);
+      if (handled) return;
+      // 未命中：继续走 Agent，但 SSE headers 已发，后续 Gateway 代理不需要再发
+    }
+
     const gatewayPort = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
     const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
     const rawProfile = String((claw as any).permissionProfile || "starter");
@@ -257,12 +268,14 @@ export function registerChatStreamRoutes(app: express.Express) {
     let upstreamBytes = 0;
     let upstreamPreview = "";
 
-    // SSE 响应头
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
+    // SSE 响应头（platform-router 可能已设过，重复设置无害）
+    if (!res.headersSent) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+    }
     res.write(`data: ${JSON.stringify({ __perf: { routeEnterMs, gatewayRequestStartMs } })}\n\n`);
 
     // 用 Node 原生 http 模块直接管道，零缓冲

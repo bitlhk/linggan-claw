@@ -125,12 +125,23 @@ export async function sendWeixinMessage(adoptId: string, chatId: string, text: s
 }
 
 export function registerWeixinRoutes(app: express.Express) {
+  // Internal key for platform tool access
+  const WEIXIN_INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+
   app.get("/api/claw/weixin/status", async (req, res) => {
     try {
       const adoptId = String(req.query.adoptId || "").trim();
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
-      const claw = await requireClawOwner(req, res, adoptId);
-      if (!claw) return;
+      // Internal key bypass for platform tool
+      let claw: any;
+      if (req.headers["x-internal-key"] === WEIXIN_INTERNAL_KEY) {
+        const { getClawByAdoptId } = await import("../db");
+        claw = await getClawByAdoptId(adoptId);
+        if (!claw) return res.status(404).json({ error: "NOT_FOUND" });
+      } else {
+        claw = await requireClawOwner(req, res, adoptId);
+        if (!claw) return;
+      }
       const acct = loadAccount(adoptId);
       res.json({ bound: !!(acct && acct.token), userId: acct?.userId || "" });
     } catch (e: any) {

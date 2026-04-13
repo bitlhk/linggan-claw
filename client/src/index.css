@@ -986,6 +986,8 @@
   border: 1px solid rgba(255,255,255,0.035);
   color: var(--oc-text-primary);
   transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  overflow: hidden;
+  min-width: 0;
 }
 .lingxia-bubble-ai:hover {
   background: rgba(255,255,255,0.068);
@@ -1015,6 +1017,8 @@
   font-size: 14px;
   color: var(--oc-text-primary);
   word-break: break-word;
+  overflow: hidden;
+  min-width: 0;
 }
 .lingxia-md-h1 {
   font-size: 21px;
@@ -1151,8 +1155,8 @@
   border-radius: 3px;
   padding: 0.1em 0.35em;
   color: #c4b5a0;
-  white-space: nowrap;
-  word-break: keep-all;
+  white-space: normal;
+  word-break: break-all;
 }
 
 /* ── Code Block Final ── */

@@ -29,8 +29,16 @@ export function registerCronRoutes(app: express.Express) {
     try {
       const adoptId = String(req.query.adoptId || "").trim();
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
-      const claw = await requireClawOwner(req, res, adoptId);
-      if (!claw) return;
+      const IK = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+      let claw: any;
+      if (req.headers["x-internal-key"] === IK) {
+        const { getClawByAdoptId } = await import("../db");
+        claw = await getClawByAdoptId(adoptId);
+        if (!claw) return res.status(404).json({ error: "NOT_FOUND" });
+      } else {
+        claw = await requireClawOwner(req, res, adoptId);
+        if (!claw) return;
+      }
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, (claw as any).agentId);
       const limit = Math.max(1, Math.min(200, Number(req.query.limit || 20)));
       const offset = Math.max(0, Number(req.query.offset || 0));
@@ -101,8 +109,17 @@ export function registerCronRoutes(app: express.Express) {
       const adoptId = String(req.body?.adoptId || "").trim();
       const job = req.body?.job || {};
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
-      const claw = await requireClawOwner(req, res, adoptId);
-      if (!claw) return;
+      // 内部 API key 绕过 auth（供 platform tool 调用）
+      const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+      let claw: any;
+      if (req.headers["x-internal-key"] === INTERNAL_KEY) {
+        const { getClawByAdoptId } = await import("../db");
+        claw = await getClawByAdoptId(adoptId);
+        if (!claw) return res.status(404).json({ error: "NOT_FOUND" });
+      } else {
+        claw = await requireClawOwner(req, res, adoptId);
+        if (!claw) return;
+      }
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, (claw as any).agentId);
       // ── 安全限制：最小间隔 30 分钟，每 agent 最多 5 个 job ──
       const CRON_MIN_INTERVAL_MS = 30 * 60 * 1000; // 30 分钟
@@ -215,8 +232,16 @@ export function registerCronRoutes(app: express.Express) {
       const adoptId = String(req.body?.adoptId || "").trim();
       const id = String(req.body?.id || "").trim();
       if (!adoptId || !id) return res.status(400).json({ error: "adoptId and id required" });
-      const claw = await requireClawOwner(req, res, adoptId);
-      if (!claw) return;
+      const IK = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+      let claw: any;
+      if (req.headers["x-internal-key"] === IK) {
+        const { getClawByAdoptId } = await import("../db");
+        claw = await getClawByAdoptId(adoptId);
+        if (!claw) return res.status(404).json({ error: "NOT_FOUND" });
+      } else {
+        claw = await requireClawOwner(req, res, adoptId);
+        if (!claw) return;
+      }
       const out = callClawGatewayRpc("cron.remove", { id });
       return res.json(out);
     } catch (e: any) {

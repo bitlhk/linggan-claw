@@ -332,7 +332,6 @@ export default function Home() {
         // WS 消息处理：后端 WS 代理已转成与 HTTP SSE 一致的格式
         // _event 字段 = SSE 的 event: 行，其余字段 = SSE 的 data: JSON
         // 用 setRawHandler 代替 addEventListener，跨重连自动保持
-        {
           const wsHandler = (chunk: any) => {
             try {
               if (chunk.type === "connected") return;
@@ -473,7 +472,6 @@ export default function Home() {
             } catch {}
           };
           wsClient.setRawHandler(wsHandler);
-        }
         const sent = wsClient.sendChat(text);
         if (sent) {
           // WSS 响应超时检测：企业代理可能静默拦截 WSS 数据

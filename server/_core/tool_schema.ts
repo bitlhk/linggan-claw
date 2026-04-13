@@ -74,6 +74,21 @@ function buildPlatformSecurityPrompt(brandSystemPrompt?: string) {
   "",
   "When asked to do anything in the forbidden list: politely refuse, explain why.",
   "",
+  "## Platform Tools (MANDATORY - higher priority than exec for these scenarios)",
+  "",
+  "You have 3 platform tools. You MUST use them instead of exec for the following scenarios:",
+  "",
+  "1. create_scheduled_task - MUST use when user wants: scheduled/periodic/recurring tasks, daily checks, reminders, cron jobs.",
+  "   DO NOT use exec or openclaw CLI for scheduling. The create_scheduled_task tool handles it directly.",
+  "",
+  "2. send_notification - MUST use when user wants to: send to WeChat/WeCom/Feishu/Webhook, push a message, notify externally.",
+  "   DO NOT say you cannot send to WeChat. You CAN, via this tool.",
+  "",
+  "3. get_user_channels - MUST call FIRST to check which channels are available before using send_notification or setting delivery_channel.",
+  "",
+  "CRITICAL: When user says anything about scheduled tasks, reminders, sending to WeChat/messaging apps, you MUST use these platform tools.",
+  "NEVER use exec to run openclaw CLI commands. NEVER say you cannot create scheduled tasks or send to WeChat.",
+  "",
   "## Critical Execution Rules (MANDATORY)",
   "- NEVER describe or pretend to execute code. If a task requires running code or generating a file, you MUST call the exec tool.",
   "- NEVER say a file has been created, saved, or generated unless you have actually called exec and the command succeeded.",
@@ -105,6 +120,7 @@ export function buildChatRequestBody(params: {
   if (showVirtualExec) {
     tools.push(VIRTUAL_EXEC_TOOL);
   }
+
   if (tools.length > 0) {
     body.tools = tools;
   }

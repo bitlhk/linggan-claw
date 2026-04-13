@@ -98,12 +98,21 @@ export async function sendNotification(adoptId: string, text: string, title?: st
 
 export function registerNotifyRoutes(app: express.Express) {
   // 获取通知配置
+  const NOTIFY_INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+
   app.get("/api/claw/notify/config", async (req, res) => {
     try {
       const adoptId = String(req.query.adoptId || "").trim();
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
-      const claw = await requireClawOwner(req, res, adoptId);
-      if (!claw) return;
+      let claw: any;
+      if (req.headers["x-internal-key"] === NOTIFY_INTERNAL_KEY) {
+        const { getClawByAdoptId } = await import("../db");
+        claw = await getClawByAdoptId(adoptId);
+        if (!claw) return res.status(404).json({ error: "NOT_FOUND" });
+      } else {
+        claw = await requireClawOwner(req, res, adoptId);
+        if (!claw) return;
+      }
       const configs = loadConfigs();
       const cfg = configs[adoptId] || { type: "none" };
       // 不返回 secret 明文

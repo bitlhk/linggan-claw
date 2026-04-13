@@ -314,11 +314,23 @@ export function registerWSProxy(server: Server) {
     });
 
     // ── 浏览器消息 ──
-    client.on("message", (raw: Buffer) => {
+    client.on("message", async (raw: Buffer) => {
       try {
         const msg = JSON.parse(raw.toString());
         if (msg.type === "chat" && sessionKey) {
           lastUserSendMs = Date.now();
+
+          // ── 平台意图路由（与 HTTP 路径共用 platform-router）──
+          try {
+            const { WsStreamWriter } = await import("./stream-writer");
+            const { routeMessage } = await import("./platform-router");
+            const wsWriter = new WsStreamWriter(client, WebSocket.OPEN);
+            const handled = await routeMessage(meta.adoptId, String(msg.message || ""), wsWriter);
+            if (handled) return; // 平台已处理，不发 Gateway
+          } catch (e) {
+            console.error("[WS] platform router error:", e);
+          }
+
           const rpc = JSON.stringify({
             type: "req", id: randomUUID(), method: "sessions.send",
             params: { key: sessionKey, message: msg.message },

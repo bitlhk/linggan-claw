@@ -265,6 +265,15 @@ async function pollLoop(adoptId: string): Promise<void> {
 }
 
 // 启动所有已绑定子虾的 polling
+/** 外部调用：给指定子虾的微信用户发消息（供 platform tool 使用） */
+export async function sendMessageToWeixin(adoptId: string, text: string): Promise<void> {
+  const acct = loadAccount(adoptId);
+  if (!acct?.token) throw new Error("该子虾未绑定微信");
+  if (!acct.lastChatId) throw new Error("尚未收到过微信消息，无法回复");
+  const trimmed = text.length > 4000 ? text.slice(0, 3990) + "\n..." : text;
+  await sendToWeixin(acct, acct.lastChatId, trimmed, acct.lastContextToken || "");
+}
+
 export function startWeixinBridge(): void {
   try {
     const files = readdirSync(WEIXIN_CONFIG_DIR).filter(f => f.endsWith(".json"));
