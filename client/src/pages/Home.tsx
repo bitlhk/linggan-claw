@@ -276,6 +276,7 @@ export default function Home() {
     return () => clearInterval(id);
   }, [lingxiaStreaming]);
 
+  const skipCollabRef = useRef(false);
   const sendLingxiaMessage = async () => {
     if (!resolvedAdoptId || !lingxiaInput.trim() || lingxiaStreaming) return;
     const text = lingxiaInput.trim();
@@ -308,6 +309,32 @@ export default function Home() {
       return;
     }
 
+    // ── 前端 collab 意图检测：推荐专业助手 ──
+    const COLLAB_AGENTS: Array<{ pattern: RegExp; id: string; name: string; emoji: string }> = [
+      { pattern: /PPT|幻灯片|演示文稿|路演.*材料|做个.*演示/i, id: "task-ppt", name: "灵匠 · 幻灯片（PPT）", emoji: "📊" },
+      { pattern: /HTML.*幻灯片|网页.*演示|slides/i, id: "task-slides", name: "灵匠 · 幻灯片（HTML）", emoji: "🎨" },
+      { pattern: /写代码|写个.*脚本|编程|调试.*代码|跑.*脚本|代码助手/i, id: "task-code", name: "灵匠 · 代码助手", emoji: "💻" },
+      { pattern: /股票分析|选股|个股.*分析|K线|技术面.*分析|股票助手/i, id: "task-stock", name: "灵犀 · 股票分析", emoji: "📈" },
+      { pattern: /深度分析|深度.*思考|拆解.*任务|复杂.*任务|帮我.*规划/i, id: "task-trace", name: "灵枢 · 深度求索", emoji: "🔍" },
+    ];
+    const collabMatch = COLLAB_AGENTS.find(a => a.pattern.test(text));
+    if (collabMatch && !skipCollabRef.current) {
+      const cardMd = `> 💡 **检测到专业需求，推荐使用：**\n>\n> ${collabMatch.emoji} **${collabMatch.name}**\n>\n> _点击下方按钮打开助手，或选择继续在主对话中处理。_`;
+      setLingxiaMsgs((prev) => [
+        ...prev,
+        { role: "user" as const, text, timeLabel: nowLabel },
+        {
+          role: "assistant" as const,
+          text: cardMd,
+          timeLabel: assistantTimeLabel,
+          collabSuggestion: { agentId: collabMatch.id, agentName: collabMatch.name, agentEmoji: collabMatch.emoji, originalPrompt: text },
+        } as any,
+      ]);
+      setLingxiaInput("");
+      return;
+    }
+
+    skipCollabRef.current = false;
     setLingxiaMsgs((prev) => [
       ...prev,
       { role: "user", text, timeLabel: nowLabel },
@@ -1185,8 +1212,8 @@ export default function Home() {
                 const isLast = idx === lingxiaMsgs.length - 1;
                 const isPlaceholder = isLast && m.role === "assistant" && m.text === "" && lingxiaStreaming;
                 return (
+                  <div key={idx}>
                   <ChatMessage
-                    key={idx}
                     role={m.role as "user" | "assistant"}
                     text={m.text}
                     isLast={isLast}
@@ -1201,6 +1228,44 @@ export default function Home() {
                     contextPercent={m.contextPercent}
                     onDelete={m.role === "assistant" ? () => { setLingxiaMsgs(prev => prev.filter((_, i) => i !== idx)); } : undefined}
                   />
+                  {/* 协作推荐卡片按钮 */}
+                  {(m as any).collabSuggestion && (
+                    <div className="flex gap-2 ml-12 mt-2 mb-1 lingxia-msg-fade">
+                      <button
+                        className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                        style={{ background: "var(--oc-accent, #6366f1)", color: "#fff", border: "none", cursor: "pointer", opacity: 0.9 }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.9"; e.currentTarget.style.transform = "none"; }}
+                        onClick={() => {
+                          setCollabOpen(true);
+                          // 存预填信息到 sessionStorage，CollabDrawer 读取
+                          try {
+                            const cs = (m as any).collabSuggestion;
+                            sessionStorage.setItem("collab_prefill", JSON.stringify({ agentId: cs.agentId, prompt: cs.originalPrompt }));
+                          } catch {}
+                        }}
+                      >
+                        {(m as any).collabSuggestion.agentEmoji} 打开助手
+                      </button>
+                      <button
+                        className="px-4 py-2 rounded-lg text-sm transition-all"
+                        style={{ background: "rgba(255,255,255,0.06)", color: "var(--oc-text-secondary)", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+                        onClick={() => {
+                          // 删掉推荐卡片，设 skipCollab，重新发送给 Agent
+                          const originalText = (m as any).collabSuggestion.originalPrompt;
+                          setLingxiaMsgs((prev) => prev.filter((_, i) => i !== idx && i !== idx - 1));
+                          skipCollabRef.current = true;
+                          setLingxiaInput(originalText);
+                          setTimeout(() => sendLingxiaMessage(), 50);
+                        }}
+                      >
+                        💬 继续对话
+                      </button>
+                    </div>
+                  )}
+                  </div>
                 );
               })}
 
