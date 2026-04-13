@@ -66,7 +66,7 @@ function GatewayToolInline({ tc }: { tc: ToolCallEntry }) {
       borderRadius: 10,
       background: isRunning ? "rgba(99,102,241,0.06)" : "rgba(120,120,140,0.04)",
       border: `1px solid ${isRunning ? "rgba(99,102,241,0.15)" : "rgba(120,120,140,0.1)"}`,
-      fontSize: 13, color: isRunning ? "#818cf8" : "#8b8fa3",
+      fontSize: "var(--oc-text-base)", color: isRunning ? "#818cf8" : "#8b8fa3",
       transition: "all 0.3s ease",
       position: "relative", overflow: "hidden",
     }}>
@@ -80,7 +80,7 @@ function GatewayToolInline({ tc }: { tc: ToolCallEntry }) {
         }} />
       )}
       <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>{meta.icon}</span>
-      <span style={{ fontWeight: 500 }}>
+      <span style={{ fontWeight: "var(--oc-weight-medium)" }}>
         {isRunning ? `正在${meta.label}` : meta.label}
       </span>
       {isRunning ? (
@@ -95,7 +95,7 @@ function GatewayToolInline({ tc }: { tc: ToolCallEntry }) {
         </svg>
       )}
       {elapsedSec > 0 && (
-        <span style={{ fontSize: 11, opacity: 0.6, marginLeft: "auto" }}>{elapsedSec}s</span>
+        <span style={{ fontSize: "var(--oc-text-xs)", opacity: 0.6, marginLeft: "auto" }}>{elapsedSec}s</span>
       )}
       <style>{`
         @keyframes gw-shimmer {
@@ -148,7 +148,7 @@ function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; fileP
         title="在沙箱中运行"
         style={{
           display: "inline-flex", alignItems: "center", gap: 3,
-          padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 500,
+          padding: "2px 8px", borderRadius: "var(--oc-radius-sm)", fontSize: "var(--oc-text-xs)", fontWeight: "var(--oc-weight-medium)",
           color: state === "running" ? "#9ca3af" : "#34d399",
           background: state === "running" ? "rgba(156,163,175,0.08)" : "rgba(52,211,153,0.10)",
           border: `1px solid ${state === "running" ? "rgba(156,163,175,0.2)" : "rgba(52,211,153,0.25)"}`,
@@ -173,7 +173,7 @@ function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; fileP
           <div
             style={{
               width: "min(640px, 92vw)", maxHeight: "80vh", background: "var(--oc-panel, #1a1a2e)",
-              border: "1px solid var(--oc-border, #333)", borderRadius: 12,
+              border: "1px solid var(--oc-border, #333)", borderRadius: "var(--oc-radius-lg)",
               display: "flex", flexDirection: "column", overflow: "hidden",
             }}
             onClick={(e) => e.stopPropagation()}
@@ -182,10 +182,10 @@ function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; fileP
               padding: "12px 16px", borderBottom: "1px solid var(--oc-border, #333)",
               display: "flex", alignItems: "center", justifyContent: "space-between",
             }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--oc-text-primary, #e5e5e5)" }}>
+              <div style={{ fontSize: "var(--oc-text-base)", fontWeight: "var(--oc-weight-semibold)", color: "var(--oc-text-primary, #e5e5e5)" }}>
                 运行结果 · {fileName}
                 <span style={{
-                  marginLeft: 8, fontSize: 11, padding: "1px 6px", borderRadius: 4,
+                  marginLeft: 8, fontSize: "var(--oc-text-xs)", padding: "1px 6px", borderRadius: 4,
                   background: result.exitCode === 0 ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
                   color: result.exitCode === 0 ? "#4ade80" : "#f87171",
                 }}>
@@ -200,10 +200,10 @@ function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; fileP
             <div style={{ padding: 16, overflow: "auto", flex: 1 }}>
               {result.stdout && (
                 <div style={{ marginBottom: result.stderr ? 12 : 0 }}>
-                  <div style={{ fontSize: 11, color: "var(--oc-text-secondary)", marginBottom: 4 }}>stdout</div>
+                  <div style={{ fontSize: "var(--oc-text-xs)", color: "var(--oc-text-secondary)", marginBottom: 4 }}>stdout</div>
                   <pre style={{
-                    fontSize: 12, lineHeight: 1.5, color: "var(--oc-text-primary, #e5e5e5)",
-                    background: "rgba(0,0,0,0.2)", borderRadius: 8, padding: 12,
+                    fontSize: "var(--oc-text-sm)", lineHeight: 1.5, color: "var(--oc-text-primary, #e5e5e5)",
+                    background: "rgba(0,0,0,0.2)", borderRadius: "var(--oc-radius-md)", padding: 12,
                     whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 400, overflow: "auto",
                     margin: 0,
                   }}>{result.stdout}</pre>
@@ -211,17 +211,17 @@ function RunFileButton({ adoptId, filePath, fileName }: { adoptId: string; fileP
               )}
               {result.stderr && (
                 <div>
-                  <div style={{ fontSize: 11, color: "#f87171", marginBottom: 4 }}>stderr</div>
+                  <div style={{ fontSize: "var(--oc-text-xs)", color: "var(--oc-danger)", marginBottom: 4 }}>stderr</div>
                   <pre style={{
-                    fontSize: 12, lineHeight: 1.5, color: "#fca5a5",
-                    background: "rgba(239,68,68,0.06)", borderRadius: 8, padding: 12,
+                    fontSize: "var(--oc-text-sm)", lineHeight: 1.5, color: "#fca5a5",
+                    background: "rgba(239,68,68,0.06)", borderRadius: "var(--oc-radius-md)", padding: 12,
                     whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 200, overflow: "auto",
                     margin: 0,
                   }}>{result.stderr}</pre>
                 </div>
               )}
               {!result.stdout && !result.stderr && (
-                <div style={{ fontSize: 13, color: "var(--oc-text-secondary)", textAlign: "center", padding: 24 }}>
+                <div style={{ fontSize: "var(--oc-text-base)", color: "var(--oc-text-secondary)", textAlign: "center", padding: 24 }}>
                   (无输出)
                 </div>
               )}
@@ -374,7 +374,7 @@ function ToolCallCard({ tc }: { tc: ToolCallEntry }) {
                         title="在新标签页预览"
                         style={{
                           display: "inline-flex", alignItems: "center", gap: 3,
-                          padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 500,
+                          padding: "2px 8px", borderRadius: "var(--oc-radius-sm)", fontSize: "var(--oc-text-xs)", fontWeight: "var(--oc-weight-medium)",
                           color: "#a78bfa", background: "rgba(124,58,237,0.10)",
                           border: "1px solid rgba(124,58,237,0.25)", cursor: "pointer",
                           whiteSpace: "nowrap", flexShrink: 0,
@@ -420,7 +420,7 @@ function ChatMessageInner({
           <div className="rounded-2xl rounded-tr-sm px-4 py-3 text-sm whitespace-pre-wrap lingxia-user-msg-text lingxia-bubble-user">
             {text}
           </div>
-          <p className="text-[10px] mt-1 px-1 text-right" style={{ color: "#697086" }}>You · {timeLabel}</p>
+          <p className="text-[10px] mt-1 px-1 text-right" style={{ color: "var(--oc-text-tertiary)" }}>You · {timeLabel}</p>
         </div>
         <div
           className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center"
@@ -452,7 +452,7 @@ function ChatMessageInner({
               )}
             </div>
           )}
-          <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-2 lingxia-bubble-ai" style={{ color: "#697086" }}>
+          <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-2 lingxia-bubble-ai" style={{ color: "var(--oc-text-tertiary)" }}>
             <span className="animate-pulse">●</span>
             <span className="animate-pulse" style={{ animationDelay: "0.2s" }}>●</span>
             <span className="animate-pulse" style={{ animationDelay: "0.4s" }}>●</span>
@@ -509,11 +509,11 @@ function ChatMessageInner({
               </div>
             )}
             <ChatMarkdown content={text} />
-            {isLast && streaming && <span className="animate-pulse ml-0.5" style={{ color: "#697086" }}>▌</span>}
+            {isLast && streaming && <span className="animate-pulse ml-0.5" style={{ color: "var(--oc-text-tertiary)" }}>▌</span>}
           </div>
         </div>
         {/* 时间戳行 + 朗读/删除 */}
-        <p className="text-[10px] mt-1 px-1 font-mono flex items-center gap-1.5 flex-wrap" style={{ color: "#5f667b" }}>
+        <p className="text-[10px] mt-1 px-1 font-mono flex items-center gap-1.5 flex-wrap" style={{ color: "var(--oc-text-tertiary)" }}>
           <span>
             {displayName} · {prettyModelName(modelId)} · {timeLabel}
             {usage && usage.input + usage.output > 0 && (
@@ -560,7 +560,7 @@ function ChatMessageInner({
                   onClick={onDelete}
                   type="button"
                   title="删除此消息"
-                  style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "#5f667b", lineHeight: 1 }}
+                  style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "var(--oc-text-tertiary)", lineHeight: 1 }}
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="3 6 5 6 21 6"/>

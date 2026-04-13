@@ -977,7 +977,7 @@ export default function Home() {
       <span style={{ fontSize: 14 }}>{sk.emoji}</span>
       <div className="flex-1 min-w-0">
         <p className="text-sm truncate" style={{ color: sk.active ? "var(--oc-text-primary)" : "#70788e" }}>{sk.label}</p>
-        <p className="text-xs truncate" style={{ color: "#5f667b" }}>{sk.desc}</p>
+        <p className="text-xs truncate" style={{ color: "var(--oc-text-tertiary)" }}>{sk.desc}</p>
       </div>
       <button onClick={onToggle} disabled={pending}
         className="shrink-0 relative rounded-full transition-colors"
@@ -988,7 +988,7 @@ export default function Home() {
     </div>
   );
 
-  const lingxiaExpiryInfo = useMemo(() => ({ text: "长期持有", color: "#22c55e" }), []);
+  const lingxiaExpiryInfo = useMemo(() => ({ text: "长期持有", color: "var(--oc-success)" }), []);
 
   const navLabel = (key: string) => LINGXIA_SIDEBAR_NAV.find((i) => i.key === key)?.label || key;
   const NavIcon = ({ navKey }: { navKey: keyof typeof sidebarIconMap }) => {
@@ -1023,7 +1023,7 @@ export default function Home() {
               <div className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center lingxia-avatar-ai"><BrandIcon size={26} animate={true} /></div>
               <div className="min-w-0" style={{ display: sidebarCollapsed ? "none" : "block" }}>
                 <p className="text-sm font-medium truncate" style={{ color: "var(--oc-text-primary)" }}>{lingxiaDisplayName || brand.name}</p>
-                <p className="text-[11px] font-mono truncate" style={{ color: "#697086" }} title={resolvedAdoptId}>{resolvedAdoptId}</p>
+                <p className="text-[11px] font-mono truncate" style={{ color: "var(--oc-text-tertiary)" }} title={resolvedAdoptId}>{resolvedAdoptId}</p>
                 {clawByAdoptId && (
                   <p className="text-[11px] flex items-center gap-1" style={{ color: clawByAdoptId.status === "active" ? "#34d399" : "#fbbf24" }}>
                     <span className={clawByAdoptId.status === "active" ? "animate-pulse" : ""}>●</span>
@@ -1088,13 +1088,13 @@ export default function Home() {
                       height: 30,
                       paddingLeft: 12,
                       paddingRight: 10,
-                      background: "rgba(255,255,255,0.06)",
+                      background: "var(--oc-bg-active)",
                       border: "1px solid var(--oc-border)",
                       color: "var(--oc-text-primary)",
-                      fontSize: 12,
+                      fontSize: "var(--oc-text-sm)",
                       fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", "Consolas", ui-monospace, monospace',
-                      fontWeight: 500,
-                      borderRadius: 8,
+                      fontWeight: "var(--oc-weight-medium)",
+                      borderRadius: "var(--oc-radius-md)",
                       minWidth: 220,
                     }}
                   >
@@ -1120,9 +1120,9 @@ export default function Home() {
                           value={m.id}
                           className="lingxia-model-item"
                           style={{
-                            fontSize: 12,
+                            fontSize: "var(--oc-text-sm)",
                             fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", "Consolas", ui-monospace, monospace',
-                            fontWeight: 500,
+                            fontWeight: "var(--oc-weight-medium)",
                             borderRadius: 6,
                             padding: "7px 10px",
                             cursor: "pointer",
@@ -1130,11 +1130,11 @@ export default function Home() {
                         >
                           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             {m.isDefault && (
-                              <span style={{ color: "var(--oc-accent)", fontSize: 10, flexShrink: 0 }}>★</span>
+                              <span style={{ color: "var(--oc-accent)", fontSize: "var(--oc-text-2xs)", flexShrink: 0 }}>★</span>
                             )}
                             <span style={{ color: "var(--oc-text-primary)" }}>{modelName}</span>
                             {provider && (
-                              <span style={{ color: "var(--oc-text-secondary)", fontSize: 11, opacity: 0.6 }}>
+                              <span style={{ color: "var(--oc-text-secondary)", fontSize: "var(--oc-text-xs)", opacity: 0.6 }}>
                                 · {provider}
                               </span>
                             )}
@@ -1148,7 +1148,7 @@ export default function Home() {
                   onClick={resetLingxiaSession}
                   disabled={lingxiaStreaming}
                   className="lingxia-topbar-btn"
-                  style={{ height: 30, padding: "0 12px", borderRadius: 8, fontSize: 12, whiteSpace: "nowrap" }}
+                  style={{ height: 30, padding: "0 12px", borderRadius: "var(--oc-radius-md)", fontSize: "var(--oc-text-sm)", whiteSpace: "nowrap" }}
                 >
                   重置会话
                 </button>
@@ -1165,7 +1165,7 @@ export default function Home() {
                   setCollabOpen(true);
                 }}
                 className={`lingxia-topbar-btn ${collabOpen ? "is-active" : ""}`}
-                style={{ height: 30, padding: "0 12px", display: "flex", alignItems: "center", gap: 6, borderRadius: 8, fontSize: 12, whiteSpace: "nowrap" }}
+                style={{ height: 30, padding: "0 12px", display: "flex", alignItems: "center", gap: 6, borderRadius: "var(--oc-radius-md)", fontSize: "var(--oc-text-sm)", whiteSpace: "nowrap" }}
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
@@ -1187,7 +1187,7 @@ export default function Home() {
             >
 
 
-              {clawByAdoptLoading && <p className="text-sm" style={{ color: "#697086" }}>加载中…</p>}
+              {clawByAdoptLoading && <p className="text-sm" style={{ color: "var(--oc-text-tertiary)" }}>加载中…</p>}
 
               {!clawByAdoptLoading && !clawByAdoptId && (
                 <div className="max-w-4xl rounded-xl p-4 text-sm" style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)", color: "#d4a030" }}>
@@ -1201,9 +1201,9 @@ export default function Home() {
                   <div className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center lingxia-avatar-ai" style={{ marginTop: 2 }}><BrandIcon size={22} animate={false} /></div>
                   <div>
                     <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed" style={{ background: "color-mix(in oklab, var(--oc-card) 65%, transparent)", color: "var(--oc-text-primary)" }}>
-                      你好，我是 <span style={{ color: "var(--oc-accent, #7c3aed)", fontWeight: 600 }}>{lingxiaDisplayName || brand.name}</span>，有什么想聊的？
+                      你好，我是 <span style={{ color: "var(--oc-accent, #7c3aed)", fontWeight: "var(--oc-weight-semibold)" }}>{lingxiaDisplayName || brand.name}</span>，有什么想聊的？
                     </div>
-                    <p className="text-[10px] mt-1 px-1 font-mono" style={{ color: "#5f667b" }}>{lingxiaDisplayName || brand.name} · {prettyLingxiaModelName(lingxiaModelId || "default")}</p>
+                    <p className="text-[10px] mt-1 px-1 font-mono" style={{ color: "var(--oc-text-tertiary)" }}>{lingxiaDisplayName || brand.name} · {prettyLingxiaModelName(lingxiaModelId || "default")}</p>
                   </div>
                 </div>
               )}
@@ -1249,7 +1249,7 @@ export default function Home() {
                       </button>
                       <button
                         className="px-4 py-2 rounded-lg text-sm transition-all"
-                        style={{ background: "rgba(255,255,255,0.06)", color: "var(--oc-text-secondary)", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer" }}
+                        style={{ background: "var(--oc-bg-active)", color: "var(--oc-text-secondary)", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer" }}
                         onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.1)"; }}
                         onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
                         onClick={() => {
@@ -1276,7 +1276,7 @@ export default function Home() {
               <div className="pointer-events-none absolute right-8 bottom-24 z-20">
                 <button
                   className="pointer-events-auto text-xs px-3 py-1.5 rounded-full shadow-md"
-                  style={{ background: "rgba(24,28,45,0.92)", border: "1px solid rgba(255,255,255,0.12)", color: "#d7dcef" }}
+                  style={{ background: "var(--oc-bg-surface)", border: "1px solid var(--oc-border-strong)", color: "var(--oc-text-primary)" }}
                   onClick={() => { setLingxiaNearBottom(true); scrollLingxiaToBottom("smooth"); }}
                 >
                   回到底部

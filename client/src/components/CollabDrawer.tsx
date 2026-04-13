@@ -35,7 +35,7 @@ function agentIcon(id: string, size = 16) {
   if (id === "task-finance") return <TrendingUp size={size} style={style} />;
   if (id === "task-hermes") return <Dna size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-trace") return <Bot size={size} style={{ color: "#be1e2d" }} />;
-  if (id === "task-stock") return <BarChart3 size={size} style={{ color: "#ef4444" }} />;
+  if (id === "task-stock") return <BarChart3 size={size} style={{ color: "var(--oc-danger)" }} />;
   if (id === "task-claim-ev") return <Battery size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-my-wealth") return <TrendingUp size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-bond") return <BarChart3 size={size} style={{ color: "#be1e2d" }} />;
@@ -200,7 +200,7 @@ function RequestModal({ agent, requesterAdoptId, onClose, onSuccess }: { agent: 
   const allowedTypes = agent.allowedTaskTypes?.length > 0 ? Object.entries(TASK_TYPE_LABELS).filter(([v]) => agent.allowedTaskTypes.includes(v)) : Object.entries(TASK_TYPE_LABELS);
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 360, background: "var(--oc-bg)", borderRadius: 12, border: "1px solid var(--oc-border)", padding: "20px", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 360, background: "var(--oc-bg)", borderRadius: "var(--oc-radius-lg)", border: "1px solid var(--oc-border)", padding: "20px", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>
         <div className="flex items-center justify-between mb-4">
           <div>
             <div className="text-sm font-semibold" style={{ color: "var(--oc-text-primary)" }}>向「{agent.displayName}」发起协作</div>
@@ -221,11 +221,11 @@ function RequestModal({ agent, requesterAdoptId, onClose, onSuccess }: { agent: 
             <label className="text-xs mb-1 block" style={{ color: "var(--oc-text-secondary)" }}>任务描述</label>
             <textarea value={summary} onChange={e => setSummary(e.target.value)} placeholder="描述你需要对方帮忙做什么（不要包含隐私数据）" rows={3} className="w-full text-xs rounded-lg px-3 py-2 resize-none focus:outline-none" style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
           </div>
-          <div className="text-[10px] rounded-lg px-3 py-2" style={{ background: "rgba(255,255,255,0.03)", color: "var(--oc-text-secondary)", border: "1px solid var(--oc-border)" }}>🔒 平台保证：对方无法访问你的聊天记录或私有记忆</div>
+          <div className="text-[10px] rounded-lg px-3 py-2" style={{ background: "var(--oc-input-bg)", color: "var(--oc-text-secondary)", border: "1px solid var(--oc-border)" }}>🔒 平台保证：对方无法访问你的聊天记录或私有记忆</div>
         </div>
         <div className="flex gap-2 mt-4">
           <button onClick={onClose} className="flex-1 text-xs py-2 rounded-lg" style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)", cursor: "pointer" }}>取消</button>
-          <button onClick={() => sendRequest.mutate({ requesterAdoptId, targetAdoptId: agent.adoptId, taskType, taskSummary: summary })} disabled={!summary.trim() || sendRequest.isPending} className="flex-1 text-xs py-2 rounded-lg disabled:opacity-40" style={{ background: "var(--oc-accent)", color: "#fff", border: "none", cursor: "pointer" }}>
+          <button onClick={() => sendRequest.mutate({ requesterAdoptId, targetAdoptId: agent.adoptId, taskType, taskSummary: summary })} disabled={!summary.trim() || sendRequest.isPending} className="flex-1 text-xs py-2 rounded-lg disabled:opacity-40" style={{ background: "var(--oc-accent)", color: "var(--oc-text-on-accent)", border: "none", cursor: "pointer" }}>
             {sendRequest.isPending ? "发送中..." : "发起申请"}
           </button>
         </div>
@@ -320,7 +320,7 @@ function CollabExecPanel({ req, adoptId, onBack, onDone }: { req: any; adoptId: 
       {/* 任务内容 */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
         {/* 原始任务 */}
-        <div className="rounded-xl px-3 py-2.5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)" }}>
+        <div className="rounded-xl px-3 py-2.5" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)" }}>
           <p className="text-[10px] mb-1 font-semibold" style={{ color: "var(--oc-text-secondary)" }}>任务请求</p>
           <p className="text-sm" style={{ color: "var(--oc-text-primary)" }}>{req.taskSummary}</p>
         </div>
@@ -328,12 +328,12 @@ function CollabExecPanel({ req, adoptId, onBack, onDone }: { req: any; adoptId: 
         {/* 待批准 */}
         {req.status === "pending" && execStatus === "pending" && (
           <div className="space-y-2">
-            <div className="text-xs px-3 py-2.5 rounded-lg" style={{ background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.25)", color: "#f59e0b" }}>
+            <div className="text-xs px-3 py-2.5 rounded-lg" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,.25)", color: "var(--oc-warning)" }}>
               批准后你的助手将自动处理这个任务
             </div>
             <div className="flex gap-2">
-              <button onClick={() => reviewRequest.mutate({ adoptId, requestId: req.id, action: "reject" })} disabled={reviewRequest.isPending} className="flex-1 text-xs py-2.5 rounded-lg disabled:opacity-40" style={{ background: "rgba(239,68,68,.1)", border: "1px solid rgba(239,68,68,.3)", color: "#ef4444", cursor: "pointer" }}>拒绝</button>
-              <button onClick={() => reviewRequest.mutate({ adoptId, requestId: req.id, action: "approve" })} disabled={reviewRequest.isPending} className="flex-1 text-xs py-2.5 rounded-lg disabled:opacity-40 font-medium" style={{ background: "var(--oc-accent)", border: "none", color: "#fff", cursor: "pointer" }}>{reviewRequest.isPending ? "处理中..." : "✅ 批准执行"}</button>
+              <button onClick={() => reviewRequest.mutate({ adoptId, requestId: req.id, action: "reject" })} disabled={reviewRequest.isPending} className="flex-1 text-xs py-2.5 rounded-lg disabled:opacity-40" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,.3)", color: "var(--oc-danger)", cursor: "pointer" }}>拒绝</button>
+              <button onClick={() => reviewRequest.mutate({ adoptId, requestId: req.id, action: "approve" })} disabled={reviewRequest.isPending} className="flex-1 text-xs py-2.5 rounded-lg disabled:opacity-40 font-medium" style={{ background: "var(--oc-accent)", border: "none", color: "var(--oc-text-on-accent)", cursor: "pointer" }}>{reviewRequest.isPending ? "处理中..." : "✅ 批准执行"}</button>
             </div>
           </div>
         )}
@@ -342,11 +342,11 @@ function CollabExecPanel({ req, adoptId, onBack, onDone }: { req: any; adoptId: 
         {(execStatus === "running" || execStatus === "approved") && !execDone && (
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <Loader2 size={12} className="animate-spin" style={{ color: "#60a5fa" }} />
-              <p className="text-[10px] font-semibold" style={{ color: "#60a5fa" }}>我的助手正在处理...</p>
+              <Loader2 size={12} className="animate-spin" style={{ color: "var(--oc-info)" }} />
+              <p className="text-[10px] font-semibold" style={{ color: "var(--oc-info)" }}>我的助手正在处理...</p>
             </div>
             {streamText ? (
-              <div className="rounded-xl px-3 py-2.5 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)", whiteSpace: "pre-wrap" }}>
+              <div className="rounded-xl px-3 py-2.5 text-xs" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)", whiteSpace: "pre-wrap" }}>
                 <ChatMarkdown content={streamText} />
               </div>
             ) : (
@@ -362,7 +362,7 @@ function CollabExecPanel({ req, adoptId, onBack, onDone }: { req: any; adoptId: 
           <div className="space-y-3">
             <div>
               <p className="text-[10px] font-semibold mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>执行结果（仅你可见）</p>
-              <div className="rounded-xl px-3 py-2.5 text-xs" style={{ background: "rgba(34,197,94,.06)", border: "1px solid rgba(34,197,94,.2)", color: "var(--oc-text-primary)", maxHeight: 140, overflowY: "auto" }}>
+              <div className="rounded-xl px-3 py-2.5 text-xs" style={{ background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,.2)", color: "var(--oc-text-primary)", maxHeight: 140, overflowY: "auto" }}>
                 <ChatMarkdown content={resultText} />
               </div>
             </div>
@@ -385,12 +385,12 @@ function CollabExecPanel({ req, adoptId, onBack, onDone }: { req: any; adoptId: 
 
         {/* 已拒绝 */}
         {execStatus === "rejected" && (
-          <div className="text-xs px-3 py-2.5 rounded-lg" style={{ background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.2)", color: "#ef4444" }}>已拒绝该请求</div>
+          <div className="text-xs px-3 py-2.5 rounded-lg" style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,.2)", color: "var(--oc-danger)" }}>已拒绝该请求</div>
         )}
 
         {/* 已交付完成 */}
         {alreadyDelivered && (
-          <div className="text-xs px-3 py-2.5 rounded-lg" style={{ background: "rgba(34,197,94,.06)", border: "1px solid rgba(34,197,94,.2)", color: "#22c55e" }}>
+          <div className="text-xs px-3 py-2.5 rounded-lg" style={{ background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,.2)", color: "var(--oc-success)" }}>
             已回复对方（{meta.deliverMode === "full" ? "完整结果" : meta.deliverMode === "summary" ? "摘要" : "不回复"}）
           </div>
         )}
@@ -405,7 +405,7 @@ function CollabExecPanel({ req, adoptId, onBack, onDone }: { req: any; adoptId: 
             onClick={() => deliverResult.mutate({ adoptId, requestId: req.id, deliverMode, customSummary: deliverMode === "summary" ? customSummary : undefined })}
             disabled={deliverResult.isPending || (deliverMode === "summary" && !customSummary.trim())}
             className="w-full text-sm py-2.5 rounded-xl font-medium disabled:opacity-40 transition-all active:scale-[0.99]"
-            style={{ background: "var(--oc-accent)", color: "#fff", border: "none", cursor: "pointer" }}
+            style={{ background: "var(--oc-accent)", color: "var(--oc-text-on-accent)", border: "none", cursor: "pointer" }}
           >
             {deliverResult.isPending ? "发送中..." : deliverMode === "none" ? "确认不回复" : "确认发送"}
           </button>
@@ -522,8 +522,8 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
           <div className="text-sm font-semibold truncate" style={{ color: "var(--oc-text-primary)" }}>{agent.name}</div>
           <div className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{agent.id === "task-hermes" ? "灵枢 · 共享空间" : agent.id === "task-stock" ? "灵犀 · 11策略" : agent.id === "task-trace" ? "灵枢 · 深度求索" : agent.id === "task-claim-ev" ? "灵犀 · EV 理赔决策" : agent.id === "task-my-wealth" ? "灵犀 · 个人理财" : agent.id === "task-bond" ? "灵犀 · 债券投研" : agent.id === "task-credit-risk" ? "灵犀 · 智贷决策" : "per-session · 独立沙箱"}</div>
         </div>
-        {countdown !== null && <span className="text-[10px] px-1.5 py-0.5 rounded animate-pulse" style={{ background: "rgba(239,68,68,.15)", color: "#ef4444", border: "1px solid rgba(239,68,68,.3)" }}>{Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")} 后超时</span>}
-        {sessionKey && !countdown && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(34,197,94,.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,.25)" }}>进行中</span>}
+        {countdown !== null && <span className="text-[10px] px-1.5 py-0.5 rounded animate-pulse" style={{ background: "rgba(239,68,68,0.15)", color: "var(--oc-danger)", border: "1px solid rgba(239,68,68,.3)" }}>{Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, "0")} 后超时</span>}
+        {sessionKey && !countdown && <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ background: "rgba(34,197,94,0.12)", color: "var(--oc-success)", border: "1px solid rgba(34,197,94,.25)" }}>进行中</span>}
         <button
           onClick={() => { setFileHistoryOpen(prev => { if (!prev) fetchFiles(); return !prev; }); }}
           title={fileHistoryOpen ? "关闭文件面板" : `历史文件 (${files.length})`}
@@ -538,7 +538,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
           {files.length > 0 && <span className="font-mono" style={{ color: "#c7000b" }}>{files.length}</span>}
         </button>
       </div>
-      {sessionExpired && <div className="mx-4 mt-3 rounded-lg px-3 py-2.5 text-xs" style={{ background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.25)", color: "#ef4444" }}><div className="font-semibold">⏰ 会话已超时</div><button onClick={renewSession} className="mt-1.5 px-2.5 py-1 rounded text-[11px] font-medium" style={{ background: "rgba(239,68,68,.2)", border: "1px solid rgba(239,68,68,.35)", color: "#ef4444", cursor: "pointer" }}>开启新会话</button></div>}
+      {sessionExpired && <div className="mx-4 mt-3 rounded-lg px-3 py-2.5 text-xs" style={{ background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.25)", color: "var(--oc-danger)" }}><div className="font-semibold">⏰ 会话已超时</div><button onClick={renewSession} className="mt-1.5 px-2.5 py-1 rounded text-[11px] font-medium" style={{ background: "rgba(239,68,68,.2)", border: "1px solid rgba(239,68,68,.35)", color: "var(--oc-danger)", cursor: "pointer" }}>开启新会话</button></div>}
       <div className="flex-1 min-h-0 flex" style={{ overflow: "hidden" }}>
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 min-h-0">
         {agent.id === "task-hermes" && msgs.length > 0 && (
@@ -576,19 +576,19 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
                   ].map((n, i) => (
                     <div key={i} style={{
                       position: "absolute", left: n.x, top: n.y,
-                      width: 44, height: 28, borderRadius: 6,
+                      width: 44, height: 28, borderRadius: "var(--oc-radius-sm)",
                       background: "rgba(201,100,66,0.08)", border: "1px solid rgba(201,100,66,0.2)",
                       display: "flex", alignItems: "center", justifyContent: "center", gap: 2,
-                      fontSize: 10, color: "var(--oc-text-secondary)",
+                      fontSize: "var(--oc-text-2xs)", color: "var(--oc-text-secondary)",
                       animation: `fadeInUp 0.5s ease-out ${n.delay} both`,
                     }}>
-                      <span style={{ fontSize: 11 }}>{n.emoji}</span>
+                      <span style={{ fontSize: "var(--oc-text-xs)" }}>{n.emoji}</span>
                       <span>{n.label}</span>
                     </div>
                   ))}
                   <div style={{
                     position: "absolute", left: 62, top: 18,
-                    width: 56, height: 44, borderRadius: 10,
+                    width: 56, height: 44, borderRadius: "var(--oc-radius-md)",
                     background: "rgba(201,100,66,0.15)", border: "1px solid rgba(201,100,66,0.35)",
                     display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                     animation: "fadeInUp 0.5s ease-out 1.2s both",
@@ -637,7 +637,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
               </div>
               <div className="mt-3 flex flex-wrap justify-center gap-1.5">
                 {["多头趋势", "均线金叉", "缩量回踩", "放量突破", "缠论", "波浪理论", "龙头策略", "情绪周期"].map(s => (
-                  <span key={s} className="px-2 py-0.5 rounded-full text-[10px]" style={{ background: "rgba(34,197,94,0.08)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.15)" }}>{s}</span>
+                  <span key={s} className="px-2 py-0.5 rounded-full text-[10px]" style={{ background: "rgba(34,197,94,0.08)", color: "var(--oc-success)", border: "1px solid rgba(34,197,94,0.15)" }}>{s}</span>
                 ))}
               </div>
               <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>支持多轮对话 · DeepSeek 驱动</p>
@@ -852,7 +852,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
         {msgs.map((m, i) => {
           const isLast = i === msgs.length - 1; const isPlaceholder = isLast && m.role === "assistant" && !m.text && streaming;
           if (m.role === "user") return <div key={i} className="flex justify-end"><div className="max-w-[80%] rounded-2xl rounded-tr-sm px-3 py-2 text-sm lingxia-bubble-user lingxia-user-msg-text">{m.text}</div></div>;
-          if (isPlaceholder) return <div key={i} className="flex items-start gap-2 lingxia-msg-fade"><span className="shrink-0 mt-1 flex items-center">{agentIcon(agent.id, 16)}</span><div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-2 lingxia-bubble-ai" style={{ color: "#697086" }}><span className="animate-pulse">●</span><span className="animate-pulse" style={{ animationDelay: "0.2s" }}>●</span><span className="animate-pulse" style={{ animationDelay: "0.4s" }}>●</span>{m.status && <span className="text-xs ml-1" style={{ opacity: 0.8 }}>{m.status}</span>}</div></div>;
+          if (isPlaceholder) return <div key={i} className="flex items-start gap-2 lingxia-msg-fade"><span className="shrink-0 mt-1 flex items-center">{agentIcon(agent.id, 16)}</span><div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-2 lingxia-bubble-ai" style={{ color: "var(--oc-text-tertiary)" }}><span className="animate-pulse">●</span><span className="animate-pulse" style={{ animationDelay: "0.2s" }}>●</span><span className="animate-pulse" style={{ animationDelay: "0.4s" }}>●</span>{m.status && <span className="text-xs ml-1" style={{ opacity: 0.8 }}>{m.status}</span>}</div></div>;
           {
             // Parse __files marker from remote agent output
             const filesMatch = m.text.match(/<!-- __files:(\[.*?\]) -->/);
@@ -860,24 +860,24 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
             const cleanText = m.text.replace(/\n*<!-- __files:.*? -->/g, "").trim();
             return <div key={i} className="flex items-start gap-2"><span className="shrink-0 mt-1 flex items-center">{agentIcon(agent.id, 16)}</span><div className="rounded-2xl rounded-tl-sm px-3 py-2 text-sm min-w-0 lingxia-bubble-ai" style={{ maxWidth: "85%" }}>
               {/* Hermes reasoning — 仅当内容与正文不同且足够长时折叠显示 */}
-              {m.reasoning && m.reasoning.length > 20 && !m.text.includes(m.reasoning.slice(0, 30)) && <details className="mb-2" style={{ fontSize: 12 }}><summary style={{ color: "var(--oc-text-secondary)", cursor: "pointer", userSelect: "none" }}>💭 思考过程</summary><pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--oc-text-secondary)", opacity: 0.7, fontSize: 11, marginTop: 4, maxHeight: 200, overflow: "auto" }}>{m.reasoning}</pre></details>}
+              {m.reasoning && m.reasoning.length > 20 && !m.text.includes(m.reasoning.slice(0, 30)) && <details className="mb-2" style={{ fontSize: 12 }}><summary style={{ color: "var(--oc-text-secondary)", cursor: "pointer", userSelect: "none" }}>💭 思考过程</summary><pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--oc-text-secondary)", opacity: 0.7, fontSize: "var(--oc-text-xs)", marginTop: 4, maxHeight: 200, overflow: "auto" }}>{m.reasoning}</pre></details>}
               {/* Hermes tool calls */}
               {m.toolCalls && m.toolCalls.length > 0 && <div className="mb-2 space-y-1">{m.toolCalls.map((tc) => {
                 const TOOL_ICONS: Record<string, string> = { web_search: "🔍", browser_navigate: "🌐", terminal: "💻", file_read: "📄", file_write: "📝", web_fetch: "🌐", memory_search: "🧠" };
                 const icon = TOOL_ICONS[tc.name] || "⚙️";
                 const isRunning = tc.status === "running";
                 const elapsed = tc.durationMs ? `${(tc.durationMs / 1000).toFixed(1)}s` : isRunning ? `${Math.round((Date.now() - tc.ts) / 1000)}s` : "";
-                return <div key={tc.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 8, background: isRunning ? "rgba(99,102,241,0.06)" : "rgba(120,120,140,0.04)", border: `1px solid ${isRunning ? "rgba(99,102,241,0.15)" : "rgba(120,120,140,0.1)"}`, fontSize: 12, color: isRunning ? "#818cf8" : "#8b8fa3", position: "relative", overflow: "hidden" }}>
+                return <div key={tc.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: "var(--oc-radius-md)", background: isRunning ? "rgba(99,102,241,0.06)" : "rgba(120,120,140,0.04)", border: `1px solid ${isRunning ? "rgba(99,102,241,0.15)" : "rgba(120,120,140,0.1)"}`, fontSize: "var(--oc-text-sm)", color: isRunning ? "#818cf8" : "#8b8fa3", position: "relative", overflow: "hidden" }}>
                   {isRunning && <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,transparent,rgba(99,102,241,.4),transparent)", backgroundSize: "200% 100%", animation: "hermes-shimmer 1.8s ease-in-out infinite" }} />}
                   <span style={{ fontSize: 13 }}>{icon}</span>
-                  <span style={{ fontWeight: 500 }}>{tc.name}</span>
-                  {tc.preview && <span style={{ opacity: 0.6, fontSize: 11, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tc.preview}</span>}
-                  {isRunning ? <Loader2 size={11} className="animate-spin" style={{ flexShrink: 0 }} /> : <span style={{ color: tc.status === "error" ? "#ef4444" : "#22c55e", fontSize: 11 }}>✓</span>}
-                  {elapsed && <span style={{ fontSize: 10, opacity: 0.5 }}>{elapsed}</span>}
+                  <span style={{ fontWeight: "var(--oc-weight-medium)" }}>{tc.name}</span>
+                  {tc.preview && <span style={{ opacity: 0.6, fontSize: "var(--oc-text-xs)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tc.preview}</span>}
+                  {isRunning ? <Loader2 size={11} className="animate-spin" style={{ flexShrink: 0 }} /> : <span style={{ color: tc.status === "error" ? "#ef4444" : "#22c55e", fontSize: "var(--oc-text-xs)" }}>✓</span>}
+                  {elapsed && <span style={{ fontSize: "var(--oc-text-2xs)", opacity: 0.5 }}>{elapsed}</span>}
                 </div>;
               })}</div>}
               {cleanText && <ChatMarkdown content={cleanText} />}
-              {isLast && streaming && cleanText && <span className="animate-pulse ml-0.5" style={{ color: "#697086" }}>▌</span>}
+              {isLast && streaming && cleanText && <span className="animate-pulse ml-0.5" style={{ color: "var(--oc-text-tertiary)" }}>▌</span>}
               {isLast && streaming && m.status && !cleanText && <div className="flex items-center gap-1.5 mt-1 text-xs" style={{ color: "var(--oc-text-secondary)", opacity: 0.7 }}><span className="animate-pulse">●</span><span>{m.status}</span></div>}
               {remoteFiles.length > 0 && (() => {
                 // 把同一个 base name 的 preview.html 和 pptx 合并成一张卡片
@@ -913,7 +913,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
                               title={displayName}
                             />
                             {/* 浮动标题条 - 左上 */}
-                            <div className="absolute top-2 left-2 px-2 py-1 rounded-md flex items-center gap-1.5 text-[11px] font-medium" style={{ background: "rgba(0,0,0,0.6)", color: "#fff", backdropFilter: "blur(8px)", maxWidth: "60%", zIndex: 50 }}>
+                            <div className="absolute top-2 left-2 px-2 py-1 rounded-md flex items-center gap-1.5 text-[11px] font-medium" style={{ background: "rgba(0,0,0,0.6)", color: "var(--oc-text-on-accent)", backdropFilter: "blur(8px)", maxWidth: "60%", zIndex: 50 }}>
                               <Presentation className="w-3 h-3 shrink-0" style={{ color: "#ff6b6b" }} />
                               <span className="truncate">{displayName}</span>
                             </div>
@@ -923,7 +923,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
                                 onClick={(e) => { e.stopPropagation(); openFullscreen(); }}
                                 title="全屏预览"
                                 className="w-7 h-7 rounded-md flex items-center justify-center transition-all hover:scale-110"
-                                style={{ background: "rgba(0,0,0,0.65)", color: "#fff", border: "1px solid rgba(255,255,255,0.15)", backdropFilter: "blur(8px)" }}
+                                style={{ background: "rgba(0,0,0,0.65)", color: "var(--oc-text-on-accent)", border: "1px solid rgba(255,255,255,0.15)", backdropFilter: "blur(8px)" }}
                               >
                                 <Maximize2 className="w-3 h-3" />
                               </button>
@@ -933,7 +933,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
                                 onClick={(e) => e.stopPropagation()}
                                 title="下载 PPTX"
                                 className="w-7 h-7 rounded-md flex items-center justify-center transition-all hover:scale-110"
-                                style={{ background: "rgba(199,0,11,0.9)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)", textDecoration: "none" }}
+                                style={{ background: "rgba(199,0,11,0.9)", color: "var(--oc-text-on-accent)", border: "1px solid rgba(255,255,255,0.2)", backdropFilter: "blur(8px)", textDecoration: "none" }}
                               >
                                 <Download className="w-3 h-3" />
                               </a>
@@ -948,7 +948,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
                         <div key={"orph-" + oi} className="rounded-xl px-3 py-2 flex items-center gap-2" style={{ border: "1px solid rgba(199,0,11,0.3)", background: "rgba(199,0,11,0.04)" }}>
                           <Presentation className="w-4 h-4 shrink-0" style={{ color: "#c7000b" }} />
                           <span className="text-xs truncate flex-1" style={{ color: "var(--oc-text-primary)" }}>{rf.name}</span>
-                          <a href={dlUrl} download={rf.name} className="px-2 py-1 rounded-md text-[10px] font-medium flex items-center gap-1" style={{ color: "#fff", background: "#c7000b", textDecoration: "none" }}><Download className="w-3 h-3" />下载</a>
+                          <a href={dlUrl} download={rf.name} className="px-2 py-1 rounded-md text-[10px] font-medium flex items-center gap-1" style={{ color: "var(--oc-text-on-accent)", background: "#c7000b", textDecoration: "none" }}><Download className="w-3 h-3" />下载</a>
                         </div>
                       );
                     })}
@@ -1012,7 +1012,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
                       onClick={() => deleteFile(f.name)}
                       className="p-1 rounded"
                       title="删除"
-                      style={{ color: "#ef4444", background: "none", border: "none", cursor: "pointer" }}
+                      style={{ color: "var(--oc-danger)", background: "none", border: "none", cursor: "pointer" }}
                     >
                       <Trash2 size={10} />
                     </button>
@@ -1026,7 +1026,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
               <button
                 onClick={clearFiles}
                 className="w-full py-1 rounded text-[10px] transition-colors"
-                style={{ color: "#ef4444", border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.04)", cursor: "pointer" }}
+                style={{ color: "var(--oc-danger)", border: "1px solid rgba(239,68,68,0.25)", background: "rgba(239,68,68,0.04)", cursor: "pointer" }}
               >
                 清空全部
               </button>
@@ -1037,7 +1037,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
       </div>
       {agent.id === "task-stock" && !streaming && msgs.length > 0 && (
         <div className="px-4 py-2 border-t shrink-0 flex items-center justify-center" style={{ borderColor: "var(--oc-border)" }}>
-          <a href="/api/claw/stock-webui/" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80" style={{ color: "#22c55e", background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)", textDecoration: "none" }}>
+          <a href="/api/claw/stock-webui/" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80" style={{ color: "var(--oc-success)", background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)", textDecoration: "none" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
             打开完整面板（回测 · 持仓 · 历史）
           </a>
@@ -1082,12 +1082,12 @@ function CollabGroup({
       <button
         onClick={() => setCollapsed(p => ({ ...p, [id]: !p[id] }))}
         className="w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors hover:opacity-90"
-        style={{ background: "rgba(255,255,255,0.03)", border: "none", cursor: "pointer" }}
+        style={{ background: "var(--oc-input-bg)", border: "none", cursor: "pointer" }}
       >
         <span style={{ color: "var(--oc-text-secondary)", display: "flex", alignItems: "center" }}>{icon}</span>
         <span className="text-xs font-semibold flex-1" style={{ color: "var(--oc-text-primary)" }}>{title}</span>
         {badge && (
-          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold leading-none" style={{ background: badge.color, color: "#fff", minWidth: 16, textAlign: "center" }}>{badge.count}</span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold leading-none" style={{ background: badge.color, color: "var(--oc-text-on-accent)", minWidth: 16, textAlign: "center" }}>{badge.count}</span>
         )}
         <span className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{count > 0 ? count : ""}</span>
         <span className="text-[10px] ml-0.5" style={{ color: "var(--oc-text-secondary)", transform: isCollapsed ? "none" : "rotate(90deg)", display: "inline-block", transition: "transform 0.15s" }}>▶</span>
@@ -1205,7 +1205,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                       <span className="flex items-center justify-center gap-1.5">
                         我的协作
                         {(actionableCount + pendingCount) > 0 && (
-                          <span className="text-[9px] px-1 py-0.5 rounded-full font-bold leading-none" style={{ background: "#ef4444", color: "#fff", minWidth: 14, textAlign: "center" }}>{actionableCount + pendingCount}</span>
+                          <span className="text-[9px] px-1 py-0.5 rounded-full font-bold leading-none" style={{ background: "#ef4444", color: "var(--oc-text-on-accent)", minWidth: 14, textAlign: "center" }}>{actionableCount + pendingCount}</span>
                         )}
                       </span>
                     )}
@@ -1224,7 +1224,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                         {/* 灵枢 · 核心引擎 */}
                         {(() => { const items = bizAgents.filter(a => ["task-hermes","task-trace","task-evolve"].includes(a.id)); return items.length > 0 ? (
                           <CollabGroup id="lingshu" title="灵枢 · 核心引擎" icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#be1e2d" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
-                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
+                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
                               <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
@@ -1235,7 +1235,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                         {/* 灵匠 · 创作工具 */}
                         {(() => { const items = bizAgents.filter(a => ["task-ppt","task-code","task-slides"].includes(a.id)); return items.length > 0 ? (
                           <CollabGroup id="lingjiang" title="灵匠 · 创作工具" icon={<Code2 size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
-                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
+                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
                               <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
@@ -1246,7 +1246,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                         {/* 灵犀 · 分析研判 */}
                         {(() => { const items = bizAgents.filter(a => ["task-stock","task-trading","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"].includes(a.id)); return items.length > 0 ? (
                           <CollabGroup id="lingxi" title="灵犀 · 分析研判" icon={<TrendingUp size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
-                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
+                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
                               <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
@@ -1257,7 +1257,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                         {/* 未分类 */}
                         {(() => { const categorized = new Set(["task-hermes","task-trace","task-evolve","task-ppt","task-code","task-slides","task-stock","task-trading","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"]); const items = bizAgents.filter(a => !categorized.has(a.id)); return items.length > 0 ? (
                           <CollabGroup id="other" title="其他" icon={<Bot size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
-                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
+                            <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
                               <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
@@ -1280,7 +1280,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                       : directoryQ.isLoading ? <div className="flex items-center gap-2 py-2"><Loader2 size={12} className="animate-spin" style={{ color: "var(--oc-text-secondary)" }} /></div>
                       : colleagues.length === 0 ? <p className="text-[10px] py-2 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.5 }}>暂无开放的同事智能体</p>
                       : <div className="space-y-1.5">{colleagues.map((a: any) => (
-                          <div key={a.adoptId} className="rounded-lg px-3 py-2.5 flex items-center justify-between" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)" }}>
+                          <div key={a.adoptId} className="rounded-lg px-3 py-2.5 flex items-center justify-between" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)" }}>
                             <div className="min-w-0 flex-1"><div className="text-xs font-medium truncate" style={{ color: "var(--oc-text-primary)" }}>{a.displayName}</div>{a.headline && <div className="text-[10px] truncate" style={{ color: "var(--oc-text-secondary)" }}>{a.headline}</div>}</div>
                             <div className="ml-2 flex flex-col items-end gap-1 shrink-0">
                               <span className="text-[9px]" style={{ color: a.acceptTask === "auto" ? "#22c55e" : "#f59e0b" }}>{a.acceptTask === "auto" ? "自动通过" : "需审批"}</span>
@@ -1298,7 +1298,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                       title="收到的请求"
                       icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h9"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/><path d="M16 19h6"/><path d="M19 16v6"/></svg>}
                       count={(incomingQ.data || []).length}
-                      badge={actionableCount > 0 ? { count: actionableCount, color: "#ef4444" } : undefined}
+                      badge={actionableCount > 0 ? { count: actionableCount, color: "var(--oc-danger)" } : undefined}
                       collapsed={collapsed}
                       setCollapsed={setCollapsed}
                     >
@@ -1310,13 +1310,13 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                           const alreadyDelivered = !!meta.deliveredAt;
                           const isActionable = r.status === "pending" || (["completed","partial_success"].includes(r.status) && !alreadyDelivered);
                           return (
-                            <div key={r.id} onClick={() => setActiveCollab(r)} className="rounded-lg px-3 py-2 cursor-pointer transition-all hover:opacity-80" style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${isActionable ? "rgba(245,158,11,.4)" : "var(--oc-border)"}` }}>
+                            <div key={r.id} onClick={() => setActiveCollab(r)} className="rounded-lg px-3 py-2 cursor-pointer transition-all hover:opacity-80" style={{ background: "var(--oc-bg-hover)", border: `1px solid ${isActionable ? "rgba(245,158,11,.4)" : "var(--oc-border)"}` }}>
                               <div className="flex items-center justify-between mb-0.5">
                                 <span className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{r.requesterDisplayName || r.requesterAdoptId?.slice(0, 10)}</span>
                                 <span className="text-[9px] font-medium" style={{ color: statusColor(r.status) }}>{statusLabel(r.status)}</span>
                               </div>
                               <div className="text-xs truncate" style={{ color: "var(--oc-text-primary)" }}>{r.taskSummary}</div>
-                              {isActionable && <div className="text-[10px] mt-0.5 font-medium" style={{ color: "#f59e0b" }}>{r.status === "pending" ? "点击批准" : "点击回复"}</div>}
+                              {isActionable && <div className="text-[10px] mt-0.5 font-medium" style={{ color: "var(--oc-warning)" }}>{r.status === "pending" ? "点击批准" : "点击回复"}</div>}
                             </div>
                           );
                         })}</div>}
@@ -1328,14 +1328,14 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                       title="我发出的请求"
                       icon={<Clock size={12} />}
                       count={(outgoingQ.data || []).length}
-                      badge={pendingCount > 0 ? { count: pendingCount, color: "#f59e0b" } : undefined}
+                      badge={pendingCount > 0 ? { count: pendingCount, color: "var(--oc-warning)" } : undefined}
                       collapsed={collapsed}
                       setCollapsed={setCollapsed}
                     >
                       {!hasAdoptId ? <p className="text-[10px] py-2 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.6 }}>需要 Plus 档</p>
                       : (outgoingQ.data || []).length === 0 ? <p className="text-[10px] py-2 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.5 }}>暂无发出的请求</p>
                       : <div className="space-y-1.5">{(outgoingQ.data as any[]).slice(0, 10).map((r: any) => (
-                          <div key={r.id} className="rounded-lg px-3 py-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--oc-border)" }}>
+                          <div key={r.id} className="rounded-lg px-3 py-2" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)" }}>
                             <div className="flex items-center justify-between mb-0.5">
                               <span className="text-[10px] truncate flex-1 mr-2" style={{ color: "var(--oc-text-primary)" }}>{r.taskSummary?.slice(0, 28)}...</span>
                               <span className="text-[9px] shrink-0 font-medium" style={{ color: statusColor(r.status) }}>{statusLabel(r.status)}</span>

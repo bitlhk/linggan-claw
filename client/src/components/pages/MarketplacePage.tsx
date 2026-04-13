@@ -106,7 +106,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
             className="text-lg"
             style={{
               color: "var(--oc-text-primary)",
-              fontWeight: 700,
+              fontWeight: "var(--oc-weight-bold)",
               display: "flex",
               alignItems: "center",
               gap: 8,
@@ -139,7 +139,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
           >
             <Search
               size={14}
-              style={{ color: "var(--muted)", flexShrink: 0 }}
+              style={{ color: "var(--oc-text-secondary)", flexShrink: 0 }}
             />
             <input
               value={q}
@@ -166,7 +166,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                     alignItems: "center",
                     gap: 4,
                     padding: "6px 14px",
-                    fontSize: 13,
+                    fontSize: "var(--oc-text-base)",
                     fontWeight: active ? 600 : 400,
                     borderRadius: 999,
                     border: "1px solid",
@@ -186,7 +186,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                   {meta.emoji} {meta.label}
                   <span
                     style={{
-                      fontSize: 11,
+                      fontSize: "var(--oc-text-xs)",
                       opacity: 0.7,
                       marginLeft: 2,
                     }}
@@ -205,7 +205,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
             style={{
               textAlign: "center",
               padding: 48,
-              color: "var(--muted)",
+              color: "var(--oc-text-secondary)",
             }}
           >
             <Loader2
@@ -226,7 +226,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
             <div style={{ fontSize: 40, marginBottom: 12 }}>🏪</div>
             <div
               className="text-sm"
-              style={{ color: "var(--muted)" }}
+              style={{ color: "var(--oc-text-secondary)" }}
             >
               {items.length === 0
                 ? "技能市场暂无技能"
@@ -276,7 +276,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                         className="text-sm"
                         style={{
                           color: "var(--oc-text-primary)",
-                          fontWeight: 600,
+                          fontWeight: "var(--oc-weight-semibold)",
                           lineHeight: 1.4,
                         }}
                       >
@@ -294,13 +294,13 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                     </div>
                     <span
                       style={{
-                        fontSize: 11,
+                        fontSize: "var(--oc-text-xs)",
                         padding: "2px 8px",
                         borderRadius: 999,
                         background:
                           "var(--oc-accent-subtle, rgba(59,130,246,0.08))",
                         color: "var(--oc-accent)",
-                        fontWeight: 500,
+                        fontWeight: "var(--oc-weight-medium)",
                         whiteSpace: "nowrap",
                         flexShrink: 0,
                       }}
@@ -335,7 +335,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                   >
                     <span
                       className="text-xs"
-                      style={{ color: "var(--muted)" }}
+                      style={{ color: "var(--oc-text-secondary)" }}
                     >
                       <Download
                         size={12}
@@ -350,9 +350,9 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
                     <button
                       className="btn-primary-soft"
                       style={{
-                        fontSize: 12,
+                        fontSize: "var(--oc-text-sm)",
                         padding: "5px 14px",
-                        borderRadius: 6,
+                        borderRadius: "var(--oc-radius-sm)",
                         display: "inline-flex",
                         alignItems: "center",
                         gap: 4,

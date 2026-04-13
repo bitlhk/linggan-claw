@@ -176,7 +176,7 @@ export function ChatInput({
             </div>
           ) : transcribing ? (
             <div className="flex items-center gap-2" style={{ minHeight: 22, color: "var(--oc-text-secondary)" }}>
-              <span className="animate-spin" style={{ fontSize: 12 }}>◌</span>
+              <span className="animate-spin" style={{ fontSize: "var(--oc-text-sm)" }}>◌</span>
               <span className="text-sm">识别中…</span>
             </div>
           ) : (

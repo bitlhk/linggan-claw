@@ -37,8 +37,8 @@ export function SidebarFooter({
           >
             <span
               style={{
-                fontSize: 11,
-                color: "var(--muted)",
+                fontSize: "var(--oc-text-xs)",
+                color: "var(--oc-text-secondary)",
                 letterSpacing: "0.1px",
               }}
             >
@@ -46,8 +46,8 @@ export function SidebarFooter({
             </span>
             <span
               style={{
-                fontSize: 11,
-                color: "var(--muted)",
+                fontSize: "var(--oc-text-xs)",
+                color: "var(--oc-text-secondary)",
                 display: "flex",
                 alignItems: "center",
                 gap: 5,
@@ -76,8 +76,8 @@ export function SidebarFooter({
           >
             <span
               style={{
-                fontSize: 11,
-                color: "var(--muted)",
+                fontSize: "var(--oc-text-xs)",
+                color: "var(--oc-text-secondary)",
                 letterSpacing: "0.1px",
               }}
             >
@@ -85,9 +85,9 @@ export function SidebarFooter({
             </span>
             <span
               style={{
-                fontSize: 11,
+                fontSize: "var(--oc-text-xs)",
                 color: expiryColor,
-                fontWeight: 500,
+                fontWeight: "var(--oc-weight-medium)",
               }}
             >
               {expiryText}

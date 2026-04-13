@@ -65,17 +65,17 @@ export function WeixinPage({ adoptId }: { adoptId?: string }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
             <MessageCircle size={20} style={{ color: "var(--oc-accent)" }} />
             <div>
-              <h1 className="text-lg" style={{ fontWeight: 700, color: "var(--oc-text-primary)" }}>微信连接</h1>
+              <h1 className="text-lg" style={{ fontWeight: "var(--oc-weight-bold)", color: "var(--oc-text-primary)" }}>微信连接</h1>
               <p className="text-xs" style={{ color: "var(--oc-text-secondary)", marginTop: 2 }}>绑定个人微信，直接在微信里与你的虾对话。每只虾独立绑定，互不影响</p>
             </div>
           </div>
 
           {status === "bound" ? (
             <div className="settings-card" style={{ padding: 24, textAlign: "center" }}>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(34,197,94,0.1)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-                <MessageCircle size={24} style={{ color: "#22c55e" }} />
+              <div style={{ width: 48, height: 48, borderRadius: "var(--oc-radius-lg)", background: "rgba(34,197,94,0.1)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <MessageCircle size={24} style={{ color: "var(--oc-success)" }} />
               </div>
-              <div className="text-sm" style={{ fontWeight: 600, color: "var(--oc-text-primary)", marginBottom: 4 }}>微信已连接</div>
+              <div className="text-sm" style={{ fontWeight: "var(--oc-weight-semibold)", color: "var(--oc-text-primary)", marginBottom: 4 }}>微信已连接</div>
               <div className="text-xs" style={{ color: "var(--oc-text-secondary)", marginBottom: 20 }}>
                 你可以直接在微信里发消息给灵虾，也会收到定时任务等通知推送
               </div>
@@ -83,23 +83,23 @@ export function WeixinPage({ adoptId }: { adoptId?: string }) {
                 <button className="btn-primary-soft" onClick={testSend} disabled={testing} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <Send size={13} />{testing ? "发送中..." : "测试发送"}
                 </button>
-                <button className="skills-btn" onClick={unbind} style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#ef4444" }}>
+                <button className="skills-btn" onClick={unbind} style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--oc-danger)" }}>
                   <Unlink size={13} />解绑
                 </button>
               </div>
             </div>
           ) : status === "scanning" ? (
             <div className="settings-card" style={{ padding: 24, textAlign: "center" }}>
-              <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: 500, marginBottom: 12 }}>请用微信扫描二维码</div>
-              {qrcodeUrl && <img src={"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(qrcodeUrl)} alt="WeChat QR" style={{ width: 200, height: 200, margin: "0 auto", borderRadius: 8, background: "#fff" }} />}
+              <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: "var(--oc-weight-medium)", marginBottom: 12 }}>请用微信扫描二维码</div>
+              {qrcodeUrl && <img src={"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(qrcodeUrl)} alt="WeChat QR" style={{ width: 200, height: 200, margin: "0 auto", borderRadius: "var(--oc-radius-md)", background: "#fff" }} />}
               <div className="text-xs" style={{ color: "var(--oc-text-secondary)", marginTop: 12 }}>扫码后请在微信中确认授权</div>
             </div>
           ) : (
             <div className="settings-card" style={{ padding: 24, textAlign: "center" }}>
-              <div style={{ width: 48, height: 48, borderRadius: 12, background: "var(--accent-subtle, rgba(255,92,92,0.08))", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+              <div style={{ width: 48, height: 48, borderRadius: "var(--oc-radius-lg)", background: "var(--accent-subtle, rgba(255,92,92,0.08))", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
                 <QrCode size={24} style={{ color: "var(--oc-accent)" }} />
               </div>
-              <div className="text-sm" style={{ fontWeight: 600, color: "var(--oc-text-primary)", marginBottom: 4 }}>连接你的微信</div>
+              <div className="text-sm" style={{ fontWeight: "var(--oc-weight-semibold)", color: "var(--oc-text-primary)", marginBottom: 4 }}>连接你的微信</div>
               <div className="text-xs" style={{ color: "var(--oc-text-secondary)", marginBottom: 20, lineHeight: 1.6 }}>
                 绑定后你可以：<br/>
                 在微信里直接与灵虾对话<br/>

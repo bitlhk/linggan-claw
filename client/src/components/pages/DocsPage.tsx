@@ -146,7 +146,7 @@ export function DocsPage() {
                 border: activeId === item.id ? "1px solid color-mix(in oklab, var(--oc-accent) 25%, transparent)" : "1px solid transparent"
               }}
             >
-              <span style={{ color: activeId === item.id ? "var(--oc-accent)" : "var(--oc-text-secondary)", marginRight: 6, fontVariantNumeric: "tabular-nums", fontSize: 12 }}>
+              <span style={{ color: activeId === item.id ? "var(--oc-accent)" : "var(--oc-text-secondary)", marginRight: 6, fontVariantNumeric: "tabular-nums", fontSize: "var(--oc-text-sm)" }}>
                 {item.num}
               </span>
               {item.text}

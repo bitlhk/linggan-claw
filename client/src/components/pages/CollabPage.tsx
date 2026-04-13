@@ -79,9 +79,9 @@ function BizCapabilities() {
           ⚡ 以下是平台提供的业务智能体。点击"使用"可在智能体广场浮窗中直接对话。
         </div>
       </div>
-      {listQ.isLoading && <div className="settings-card text-xs" style={{ color: "var(--muted)" }}>加载中…</div>}
+      {listQ.isLoading && <div className="settings-card text-xs" style={{ color: "var(--oc-text-secondary)" }}>加载中…</div>}
       {agents.length === 0 && !listQ.isLoading && (
-        <div className="settings-card text-xs" style={{ color: "var(--muted)" }}>暂无配置业务 Agent，请联系管理员在后台添加。</div>
+        <div className="settings-card text-xs" style={{ color: "var(--oc-text-secondary)" }}>暂无配置业务 Agent，请联系管理员在后台添加。</div>
       )}
       <div className="grid gap-2">
         {agents.map((a: any) => (
@@ -96,10 +96,10 @@ function BizCapabilities() {
                     {a.kind === "remote" ? "远端" : "本地"}
                   </span>
                 </div>
-                {a.description && <div className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>{a.description}</div>}
+                {a.description && <div className="text-xs mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{a.description}</div>}
               </div>
               <span className="text-xs px-2 py-1 rounded-lg font-medium shrink-0"
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)" }}>
+                style={{ background: "var(--oc-bg-active)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)" }}>
                 在智能体广场浮窗中使用
               </span>
             </div>
@@ -373,7 +373,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                 );
               })}
             </div>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>auto 模式下仅接受列表内任务类型，外部请求会被拒绝。</div>
+            <div className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>auto 模式下仅接受列表内任务类型，外部请求会被拒绝。</div>
           </div>
           <div className="settings-card">
             <div className="text-sm font-semibold mb-2" style={{ color: "var(--oc-text-primary)" }}>数据共享策略</div>
@@ -383,7 +383,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
               <option value="none">🔒 不共享任何数据（最安全）</option>
               <option value="result-only">📋 仅共享任务结果摘要</option>
             </select>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>⚠️ 聊天记录、私有记忆、使用明细是平台铁律，永远不会被任何协作任务访问。</div>
+            <div className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>⚠️ 聊天记录、私有记忆、使用明细是平台铁律，永远不会被任何协作任务访问。</div>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={handleSettingsSave} disabled={updateSettings.isLoading} className="btn-primary-soft">
@@ -404,16 +404,16 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
           </div>
           <div className="settings-card">
             <div className="text-sm font-semibold mb-2" style={{ color: "var(--oc-text-primary)" }}>可协作 Agent</div>
-            <div className="text-xs mb-3" style={{ color: "var(--muted)" }}>以下是当前可接受协作的 Agent，可向他们发起任务请求。</div>
-            {directoryQ.isLoading && <div className="text-xs" style={{ color: "var(--muted)" }}>加载中…</div>}
-            {directoryQ.data?.length === 0 && <div className="text-xs" style={{ color: "var(--muted)" }}>暂无其他 Agent 公开协作。告诉你的伙伴在设置里把可见性改成"组织内"。</div>}
+            <div className="text-xs mb-3" style={{ color: "var(--oc-text-secondary)" }}>以下是当前可接受协作的 Agent，可向他们发起任务请求。</div>
+            {directoryQ.isLoading && <div className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>加载中…</div>}
+            {directoryQ.data?.length === 0 && <div className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>暂无其他 Agent 公开协作。告诉你的伙伴在设置里把可见性改成"组织内"。</div>}
             <div className="grid gap-3">
               {(directoryQ.data || []).map((agent: any) => (
                 <div key={agent.adoptId} className="settings-card" style={{ padding: "10px 14px" }}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="text-sm font-semibold" style={{ color: "var(--oc-text-primary)" }}>{agent.displayName}</div>
-                      {agent.headline && <div className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>{agent.headline}</div>}
+                      {agent.headline && <div className="text-xs mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agent.headline}</div>}
                       <div className="flex flex-wrap gap-1 mt-1.5">
                         {(agent.allowedTaskTypes || []).map((t: string) => {
                           const label = TASK_TYPE_OPTIONS.find(o => o.value === t)?.label || t;
@@ -421,7 +421,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                         })}
                       </div>
                     </div>
-                    <div className="text-xs shrink-0" style={{ color: "var(--muted)" }}>
+                    <div className="text-xs shrink-0" style={{ color: "var(--oc-text-secondary)" }}>
                       <div>{agent.acceptTask === "auto" ? "✅ 自动接受" : agent.acceptTask === "approval" ? "🔍 需审批" : "❌ 不接受任务"}</div>
                     </div>
                   </div>
@@ -439,9 +439,9 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                           value={sendTarget === agent.adoptId ? sendSummary : ""}
                           onChange={e => { setSendTarget(agent.adoptId); setSendSummary(e.target.value); }}
                           className="settings-input px-2 py-1 text-xs rounded flex-1" />
-                        <button onClick={handleSendRequest} className="btn-primary-soft shrink-0" style={{ padding: "0 12px", height: 28, fontSize: 12 }}>发起</button>
+                        <button onClick={handleSendRequest} className="btn-primary-soft shrink-0" style={{ padding: "0 12px", height: 28, fontSize: "var(--oc-text-sm)" }}>发起</button>
                       </div>
-                      {sendTarget === agent.adoptId && sendStatus && <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>{sendStatus}</div>}
+                      {sendTarget === agent.adoptId && sendStatus && <div className="text-xs mt-1" style={{ color: "var(--oc-text-secondary)" }}>{sendStatus}</div>}
                     </div>
                   )}
                 </div>
@@ -459,12 +459,12 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
               其他 Agent 向你发起的协作请求。你的聊天记录和记忆不会被对方访问——这是平台铁律。
             </div>
           </div>
-          {incomingQ.isLoading && <div className="settings-card text-xs" style={{ color: "var(--muted)" }}>加载中…</div>}
-          {incomingQ.data?.length === 0 && <div className="settings-card text-xs" style={{ color: "var(--muted)" }}>暂无收到的协作请求。</div>}
+          {incomingQ.isLoading && <div className="settings-card text-xs" style={{ color: "var(--oc-text-secondary)" }}>加载中…</div>}
+          {incomingQ.data?.length === 0 && <div className="settings-card text-xs" style={{ color: "var(--oc-text-secondary)" }}>暂无收到的协作请求。</div>}
           {(incomingQ.data || []).map((req: any) => (
             <div key={req.id} className="settings-card">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs" style={{ color: "var(--muted)" }}>来自 {req.requesterDisplayName || req.requesterAdoptId}</span>
+                <span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>来自 {req.requesterDisplayName || req.requesterAdoptId}</span>
                 <div className="flex items-center gap-1.5">
                   {riskBadge(req.riskLevel)}
                   {autoBadge(req.approvalMode)}
@@ -472,14 +472,14 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                 </div>
               </div>
               <div className="text-sm font-medium mb-0.5" style={{ color: "var(--oc-text-primary)" }}>{req.taskSummary}</div>
-              <div className="text-xs" style={{ color: "var(--muted)" }}>类型：{TASK_TYPE_OPTIONS.find(o => o.value === req.taskType)?.label || req.taskType}</div>
+              <div className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>类型：{TASK_TYPE_OPTIONS.find(o => o.value === req.taskType)?.label || req.taskType}</div>
 
               {req.status === "pending" && (
                 <div className="flex gap-2 mt-2">
                   <button onClick={async () => { await reviewRequest.mutateAsync({ adoptId, requestId: req.id, action: "approve" }); incomingQ.refetch(); }}
-                    className="btn-primary-soft" style={{ height: 28, fontSize: 12, padding: "0 12px" }}>批准</button>
+                    className="btn-primary-soft" style={{ height: 28, fontSize: "var(--oc-text-sm)", padding: "0 12px" }}>批准</button>
                   <button onClick={async () => { await reviewRequest.mutateAsync({ adoptId, requestId: req.id, action: "reject" }); incomingQ.refetch(); }}
-                    className="skills-btn" style={{ height: 28, fontSize: 12 }}>拒绝</button>
+                    className="skills-btn" style={{ height: 28, fontSize: "var(--oc-text-sm)" }}>拒绝</button>
                 </div>
               )}
 
@@ -499,7 +499,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                 <div className="mt-2 settings-card grid gap-2">
                   <div className="text-xs font-medium" style={{ color: "var(--oc-text-secondary)" }}>📤 提交执行结果（结构化 Result Envelope）</div>
                   <div className="flex gap-2 items-center">
-                    <span className="text-xs shrink-0" style={{ color: "var(--muted)" }}>状态</span>
+                    <span className="text-xs shrink-0" style={{ color: "var(--oc-text-secondary)" }}>状态</span>
                     <select value={envelopeStatus[req.id] || "success"}
                       onChange={e => setEnvelopeStatus(s => ({ ...s, [req.id]: e.target.value }))}
                       className="settings-input px-2 py-1 text-xs rounded">
@@ -522,11 +522,11 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                       status: dbStatus,
                     } as any);
                     incomingQ.refetch();
-                  }} className="btn-primary-soft" style={{ height: 28, fontSize: 12, padding: "0 12px", width: "fit-content" }}>提交结果</button>
+                  }} className="btn-primary-soft" style={{ height: 28, fontSize: "var(--oc-text-sm)", padding: "0 12px", width: "fit-content" }}>提交结果</button>
                 </div>
               )}
 
-              {req.resultSummary && <div className="text-xs mt-1.5" style={{ color: "var(--muted)", fontStyle: "italic" }}>结果：{req.resultSummary}</div>}
+              {req.resultSummary && <div className="text-xs mt-1.5" style={{ color: "var(--oc-text-secondary)", fontStyle: "italic" }}>结果：{req.resultSummary}</div>}
             </div>
           ))}
         </div>
@@ -540,12 +540,12 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
               你向其他 Agent 发起的协作任务记录。执行完成后将自动推送结果，无需手动刷新。
             </div>
           </div>
-          {outgoingQ.isLoading && <div className="settings-card text-xs" style={{ color: "var(--muted)" }}>加载中…</div>}
-          {outgoingQ.data?.length === 0 && <div className="settings-card text-xs" style={{ color: "var(--muted)" }}>暂未发起任何协作请求。</div>}
+          {outgoingQ.isLoading && <div className="settings-card text-xs" style={{ color: "var(--oc-text-secondary)" }}>加载中…</div>}
+          {outgoingQ.data?.length === 0 && <div className="settings-card text-xs" style={{ color: "var(--oc-text-secondary)" }}>暂未发起任何协作请求。</div>}
           {(outgoingQ.data || []).map((req: any) => (
             <div key={req.id} className="settings-card">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs" style={{ color: "var(--muted)" }}>发给 {req.targetDisplayName || req.targetAdoptId}</span>
+                <span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>发给 {req.targetDisplayName || req.targetAdoptId}</span>
                 <div className="flex items-center gap-1.5">
                   {riskBadge(req.riskLevel)}
                   {autoBadge(req.approvalMode)}
@@ -553,7 +553,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                 </div>
               </div>
               <div className="text-sm mb-0.5" style={{ color: "var(--oc-text-primary)" }}>{req.taskSummary}</div>
-              <div className="text-xs" style={{ color: "var(--muted)" }}>类型：{TASK_TYPE_OPTIONS.find(o => o.value === req.taskType)?.label || req.taskType}</div>
+              <div className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>类型：{TASK_TYPE_OPTIONS.find(o => o.value === req.taskType)?.label || req.taskType}</div>
 
               {/* SSE 等待中提示 */}
               {(req.status === "running" || req.status === "approved") && !req.resultSummary && watchingReqId === req.id && (
@@ -562,7 +562,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                 </div>
               )}
               {req.status === "pending" && (
-                <div className="flex items-center gap-1.5 mt-1.5 text-xs" style={{ color: "var(--muted)" }}>
+                <div className="flex items-center gap-1.5 mt-1.5 text-xs" style={{ color: "var(--oc-text-secondary)" }}>
                   ⏳ 等待对方确认
                 </div>
               )}
@@ -595,12 +595,12 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                           <span className="badge badge-muted">{a.mime_type || "file"}</span>
                           <a href={a.preview_uri || a.storage_uri} target="_blank" rel="noopener noreferrer"
                             className="underline" style={{ color: "var(--oc-accent)" }}>{a.name}</a>
-                          {a.size && <span style={{ color: "var(--muted)" }}>({Math.round(a.size/1024)}KB)</span>}
+                          {a.size && <span style={{ color: "var(--oc-text-secondary)" }}>({Math.round(a.size/1024)}KB)</span>}
                         </div>
                       ))}
                       {req.resultEnvelope.structured_outputs && Object.keys(req.resultEnvelope.structured_outputs).filter(k=>k!=="raw_text").length > 0 && (
                         <details className="text-xs mt-1">
-                          <summary style={{ color: "var(--muted)", cursor: "pointer" }}>结构化结果字段</summary>
+                          <summary style={{ color: "var(--oc-text-secondary)", cursor: "pointer" }}>结构化结果字段</summary>
                           <pre className="mt-1 p-2 rounded text-xs overflow-auto" style={{ background: "rgba(0,0,0,0.2)", color: "var(--oc-text-secondary)", maxHeight: 120 }}>
                             {JSON.stringify(req.resultEnvelope.structured_outputs, null, 2)}
                           </pre>
@@ -611,7 +611,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                   {/* 建议下一步 */}
                   {req.resultEnvelope.next_actions?.length > 0 && (
                     <div className="text-xs">
-                      <span style={{ color: "var(--muted)" }}>建议下一步：</span>
+                      <span style={{ color: "var(--oc-text-secondary)" }}>建议下一步：</span>
                       {req.resultEnvelope.next_actions.map((a: string, i: number) => (
                         <span key={i} className="ml-1 badge badge-muted">→ {a}</span>
                       ))}
@@ -624,7 +624,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
                       <div className="flex gap-2">
                         <input type="text" placeholder="补充说明或参数…"
                           className="settings-input px-2 py-1 text-xs rounded flex-1" />
-                        <button className="btn-primary-soft shrink-0" style={{ height: 28, fontSize: 12, padding: "0 12px" }}>发送</button>
+                        <button className="btn-primary-soft shrink-0" style={{ height: 28, fontSize: "var(--oc-text-sm)", padding: "0 12px" }}>发送</button>
                       </div>
                     </div>
                   )}

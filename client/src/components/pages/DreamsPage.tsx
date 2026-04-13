@@ -44,7 +44,7 @@ export function DreamsPage({ adoptId }: { adoptId: string }) {
         {/* 状态卡片 */}
         <div className="settings-card" style={{ padding: 16 }}>
           <div className="flex items-center gap-3 mb-3">
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+            <div style={{ width: 36, height: 36, borderRadius: "var(--oc-radius-md)", background: "linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
               🌙
             </div>
             <div>
@@ -75,7 +75,7 @@ export function DreamsPage({ adoptId }: { adoptId: string }) {
           </div>
 
           <div className="text-[11px] mt-2" style={{ color: "var(--oc-text-secondary)" }}>
-            💡 你也可以在聊天中输入 <code style={{ background: "rgba(255,255,255,0.08)", padding: "1px 5px", borderRadius: 3, fontSize: 10 }}>/dreaming status</code> 查看实时状态
+            💡 你也可以在聊天中输入 <code style={{ background: "var(--oc-bg-active)", padding: "1px 5px", borderRadius: 3, fontSize: "var(--oc-text-2xs)" }}>/dreaming status</code> 查看实时状态
           </div>
         </div>
 
@@ -86,19 +86,19 @@ export function DreamsPage({ adoptId }: { adoptId: string }) {
               Dream Diary
               <span className="text-[11px] font-normal ml-2" style={{ color: "var(--oc-text-secondary)" }}>DREAMS.md</span>
             </div>
-            <button className="skills-btn" onClick={loadDreams} style={{ fontSize: 11 }}>刷新</button>
+            <button className="skills-btn" onClick={loadDreams} style={{ fontSize: "var(--oc-text-xs)" }}>刷新</button>
           </div>
 
           {loading ? (
-            <div className="text-xs" style={{ color: "var(--muted)", padding: "20px 0", textAlign: "center" }}>加载中...</div>
+            <div className="text-xs" style={{ color: "var(--oc-text-secondary)", padding: "20px 0", textAlign: "center" }}>加载中...</div>
           ) : hasDreams ? (
-            <div className="sidebar-markdown" style={{ maxHeight: "60vh", overflow: "auto", padding: 12, borderRadius: 8, border: "1px solid var(--oc-border)", background: "rgba(0,0,0,0.15)" }}>
+            <div className="sidebar-markdown" style={{ maxHeight: "60vh", overflow: "auto", padding: 12, borderRadius: "var(--oc-radius-md)", border: "1px solid var(--oc-border)", background: "rgba(0,0,0,0.15)" }}>
               <ChatMarkdown content={dreamsContent} />
             </div>
           ) : (
             <div style={{ textAlign: "center", padding: "40px 20px" }}>
               <div style={{ fontSize: 40, marginBottom: 12 }}>🌙</div>
-              <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: 500 }}>还没有梦境记录</div>
+              <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: "var(--oc-weight-medium)" }}>还没有梦境记录</div>
               <div className="text-xs mt-2" style={{ color: "var(--oc-text-secondary)", lineHeight: 1.6 }}>
                 Dreaming 系统会在每天凌晨 3:00 自动运行。<br />
                 它会分析你的对话历史，将有价值的信息提炼为长期记忆。<br />

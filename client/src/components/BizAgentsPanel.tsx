@@ -30,7 +30,7 @@ function AgentForm({ initial, onSave, onCancel }: {
   const isEdit = !!initial.id;
 
   return (
-    <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "var(--oc-border)", background: "rgba(255,255,255,0.03)" }}>
+    <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "var(--oc-border)", background: "var(--oc-input-bg)" }}>
       <div className="text-xs font-semibold" style={{ color: "var(--oc-text-primary)" }}>
         {isEdit ? "编辑业务 Agent" : "新增业务 Agent"}
       </div>
@@ -141,12 +141,12 @@ function AgentForm({ initial, onSave, onCancel }: {
         <button onClick={() => onSave(v)}
           disabled={!v.id || !v.name}
           className="px-4 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
-          style={{ background: "var(--oc-accent)", color: "#fff", border: "none", cursor: "pointer" }}>
+          style={{ background: "var(--oc-accent)", color: "var(--oc-text-primary)", border: "none", cursor: "pointer" }}>
           保存
         </button>
         <button onClick={onCancel}
           className="px-4 py-1.5 rounded-lg text-xs"
-          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)", cursor: "pointer" }}>
+          style={{ background: "var(--oc-bg-active)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)", cursor: "pointer" }}>
           取消
         </button>
       </div>
@@ -183,12 +183,12 @@ export function BizAgentsPanel() {
             <button onClick={() => healthCheckAllMutation.mutate()}
               disabled={healthCheckAllMutation.isPending}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
-              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)", cursor: "pointer" }}>
+              style={{ background: "var(--oc-bg-active)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)", cursor: "pointer" }}>
               {healthCheckAllMutation.isPending ? "检查中…" : "🏥 健康检查"}
             </button>
             <button onClick={() => setAdding(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
-              style={{ background: "var(--oc-accent)", color: "#fff", border: "none", cursor: "pointer" }}>
+              style={{ background: "var(--oc-accent)", color: "var(--oc-text-primary)", border: "none", cursor: "pointer" }}>
               <Plus size={12} /> 新增
             </button>
           </div>
@@ -213,7 +213,7 @@ export function BizAgentsPanel() {
               <AgentForm initial={editing} onSave={(v) => upsert.mutate(v)} onCancel={() => setEditing(null)} />
             ) : (
               <div className="rounded-xl border px-4 py-3 flex items-center gap-3"
-                style={{ borderColor: "var(--oc-border)", background: "rgba(255,255,255,0.03)", opacity: a.enabled ? 1 : 0.5 }}>
+                style={{ borderColor: "var(--oc-border)", background: "var(--oc-input-bg)", opacity: a.enabled ? 1 : 0.5 }}>
                 <div className="relative">
                   <span style={{ fontSize: 22 }}>{a.icon || "🤖"}</span>
                   <span style={{ position: "absolute", bottom: -2, right: -2, width: 8, height: 8, borderRadius: "50%", border: "1.5px solid var(--oc-card)", background: a.healthStatus === "healthy" ? "#22c55e" : a.healthStatus === "degraded" ? "#f59e0b" : a.healthStatus === "offline" ? "#ef4444" : "#9ca3af" }} />
@@ -252,7 +252,7 @@ export function BizAgentsPanel() {
                     <Pencil size={14} />
                   </button>
                   <button onClick={() => { if (confirm(`确定删除「${a.name}」？`)) del.mutate({ id: a.id }); }}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", padding: 4 }}>
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--oc-danger)", padding: 4 }}>
                     <Trash2 size={14} />
                   </button>
                 </div>

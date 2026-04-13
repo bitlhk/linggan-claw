@@ -65,8 +65,8 @@ const BtnGhost = ({ children, onClick, disabled, title }: {
   children: React.ReactNode; onClick?: () => void; disabled?: boolean; title?: string;
 }) => (
   <button onClick={onClick} disabled={disabled} title={title} style={{
-    height: 24, padding: "0 8px", borderRadius: 6, border: "1px solid var(--oc-border)",
-    background: "transparent", color: "var(--oc-text-secondary)", fontSize: 11,
+    height: 24, padding: "0 8px", borderRadius: "var(--oc-radius-sm)", border: "1px solid var(--oc-border)",
+    background: "transparent", color: "var(--oc-text-secondary)", fontSize: "var(--oc-text-xs)",
     cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1,
     whiteSpace: "nowrap", display: "inline-flex", alignItems: "center",
   }}>{children}</button>
@@ -76,8 +76,8 @@ const BtnDanger = ({ children, onClick, disabled }: {
   children: React.ReactNode; onClick?: () => void; disabled?: boolean;
 }) => (
   <button onClick={onClick} disabled={disabled} style={{
-    height: 24, padding: "0 8px", borderRadius: 6, border: "1px solid #7f1d1d",
-    background: "transparent", color: "#f87171", fontSize: 11,
+    height: 24, padding: "0 8px", borderRadius: "var(--oc-radius-sm)", border: "1px solid #7f1d1d",
+    background: "transparent", color: "#f87171", fontSize: "var(--oc-text-xs)",
     cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1,
     whiteSpace: "nowrap", display: "inline-flex", alignItems: "center",
   }}>{children}</button>
@@ -87,14 +87,14 @@ const BtnPrimary = ({ children, onClick, disabled }: {
   children: React.ReactNode; onClick?: () => void; disabled?: boolean;
 }) => (
   <button onClick={onClick} disabled={disabled} className="btn-primary-soft"
-    style={{ height: 28, minWidth: 0, padding: "0 14px", fontSize: 12 }}>
+    style={{ height: 28, minWidth: 0, padding: "0 14px", fontSize: "var(--oc-text-sm)" }}>
     {children}
   </button>
 );
 
 const FieldRow = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-    <span style={{ fontSize: 11, color: "var(--muted)" }}>{label}</span>
+    <span style={{ fontSize: "var(--oc-text-xs)", color: "var(--oc-text-secondary)" }}>{label}</span>
     {children}
   </div>
 );
@@ -123,9 +123,9 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
   const rLimit = 20;
 
   const inputStyle: React.CSSProperties = {
-    height: 28, padding: "0 8px", borderRadius: 6, border: "1px solid var(--oc-border)",
-    background: "rgba(255,255,255,0.04)", color: "var(--oc-text-primary)",
-    fontSize: 12, width: "100%", boxSizing: "border-box",
+    height: 28, padding: "0 8px", borderRadius: "var(--oc-radius-sm)", border: "1px solid var(--oc-border)",
+    background: "var(--oc-bg-hover)", color: "var(--oc-text-primary)",
+    fontSize: "var(--oc-text-sm)", width: "100%", boxSizing: "border-box",
   };
   const selectStyle: React.CSSProperties = {
     ...inputStyle, cursor: "pointer", background: "var(--oc-card)", colorScheme: "auto",
@@ -254,7 +254,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
         <BtnGhost onClick={load} disabled={loading}>{loading ? "刷新中…" : "刷新"}</BtnGhost>
       </div>
       {!aid && (
-        <div className="settings-card" style={{ fontSize: 12, color: "var(--muted)" }}>
+        <div className="settings-card" style={{ fontSize: "var(--oc-text-sm)", color: "var(--oc-text-secondary)" }}>
           缺少 adoptId，无法加载。
         </div>
       )}
@@ -268,8 +268,8 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
           ["调度器", status.enabled ? "运行中" : "已停止"],
         ] as [string, string | number][]).map(([k, v]) => (
           <div key={k} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <span style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{k}</span>
-            <span style={{ fontSize: 13, fontWeight: 500, color: "var(--oc-text-primary)" }}>{v}</span>
+            <span style={{ fontSize: "var(--oc-text-2xs)", color: "var(--oc-text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{k}</span>
+            <span style={{ fontSize: "var(--oc-text-base)", fontWeight: "var(--oc-weight-medium)", color: "var(--oc-text-primary)" }}>{v}</span>
           </div>
         ))}
       </div>
@@ -303,7 +303,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
             </div>
 
             {jobs.length === 0 && (
-              <div style={{ padding: "20px 14px", fontSize: 12, color: "var(--muted)", textAlign: "center" }}>
+              <div style={{ padding: "20px 14px", fontSize: "var(--oc-text-sm)", color: "var(--oc-text-secondary)", textAlign: "center" }}>
                 {loading ? "加载中…" : "暂无任务，在右侧新建一个吧"}
               </div>
             )}
@@ -314,19 +314,19 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
                 padding: "8px 12px", borderBottom: "1px solid var(--oc-border)", gap: 8,
               }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, color: "var(--oc-text-primary)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{ fontSize: "var(--oc-text-sm)", fontWeight: "var(--oc-weight-medium)", color: "var(--oc-text-primary)", display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{
                       display: "inline-block", width: 6, height: 6, borderRadius: "50%",
                       background: j.enabled ? "#22c55e" : "var(--muted)", flexShrink: 0,
                     }} />
                     {j.name}
                     {j.state?.lastStatus && (
-                      <span style={{ fontSize: 10, color: statusColor(j.state.lastStatus) }}>
+                      <span style={{ fontSize: "var(--oc-text-2xs)", color: statusColor(j.state.lastStatus) }}>
                         · {j.state.lastStatus}
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                  <div style={{ fontSize: "var(--oc-text-xs)", color: "var(--oc-text-secondary)", marginTop: 2 }}>
                     {scheduleText(j)}
                     {j.state?.nextRunAtMs && (
                       <span style={{ marginLeft: 8 }}>下次: {fmt(j.state.nextRunAtMs)}</span>
@@ -346,7 +346,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
             {jobTotal > jLimit && (
               <div style={{ display: "flex", gap: 6, padding: "8px 12px", justifyContent: "flex-end" }}>
                 <BtnGhost disabled={jobOffset <= 0} onClick={() => setJobOffset(Math.max(0, jobOffset - jLimit))}>上一页</BtnGhost>
-                <span style={{ fontSize: 11, color: "var(--muted)", alignSelf: "center" }}>
+                <span style={{ fontSize: "var(--oc-text-xs)", color: "var(--oc-text-secondary)", alignSelf: "center" }}>
                   {Math.floor(jobOffset / jLimit) + 1} / {Math.ceil(jobTotal / jLimit)}
                 </span>
                 <BtnGhost disabled={jobOffset + jLimit >= jobTotal} onClick={() => setJobOffset(jobOffset + jLimit)}>下一页</BtnGhost>
@@ -357,7 +357,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
           {/* Runs */}
           <div className="settings-card" style={{ padding: 0, overflow: "hidden" }}>
             <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--oc-border)", display: "flex", gap: 8, alignItems: "center" }}>
-              <span style={{ fontSize: 11, fontWeight: 500, color: "var(--oc-text-primary)", flexShrink: 0 }}>运行记录</span>
+              <span style={{ fontSize: "var(--oc-text-xs)", fontWeight: "var(--oc-weight-medium)", color: "var(--oc-text-primary)", flexShrink: 0 }}>运行记录</span>
               <select style={{ ...selectStyle, flex: 1 }} value={selectedJobId} onChange={e => { setRunOffset(0); setSelectedJobId(e.target.value); }}>
                 <option value="">全部任务</option>
                 {jobs.map(j => <option key={j.id} value={j.id}>{j.name}</option>)}
@@ -368,7 +368,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
             </div>
 
             {runs.length === 0 && (
-              <div style={{ padding: "16px 14px", fontSize: 12, color: "var(--muted)", textAlign: "center" }}>
+              <div style={{ padding: "16px 14px", fontSize: "var(--oc-text-sm)", color: "var(--oc-text-secondary)", textAlign: "center" }}>
                 {loading ? "加载中…" : "暂无运行记录"}
               </div>
             )}
@@ -389,16 +389,16 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
                   >
                     <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{
-                        fontSize: 9, color: "var(--muted)",
+                        fontSize: "var(--oc-text-2xs)", color: "var(--oc-text-secondary)",
                         display: "inline-block", transition: "transform .15s",
                         transform: isExpanded ? "rotate(90deg)" : "none",
                       }}>▶</span>
-                      <span style={{ fontSize: 11, fontWeight: 500, color: "var(--oc-text-primary)" }}>
+                      <span style={{ fontSize: "var(--oc-text-xs)", fontWeight: "var(--oc-weight-medium)", color: "var(--oc-text-primary)" }}>
                         {r.jobName || r.jobId}
                       </span>
                       {!isExpanded && r.summary && (
                         <span style={{
-                          fontSize: 11, color: "var(--muted)", overflow: "hidden",
+                          fontSize: "var(--oc-text-xs)", color: "var(--oc-text-secondary)", overflow: "hidden",
                           textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180,
                         }}>
                           {r.summary.split("\n")[0].slice(0, 60)}
@@ -406,10 +406,10 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
                       )}
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-                      <span style={{ fontSize: 11, color: statusColor(r.status) }}>{r.status}</span>
-                      <span style={{ fontSize: 11, color: "var(--muted)" }}>{fmt(r.ts)}</span>
+                      <span style={{ fontSize: "var(--oc-text-xs)", color: statusColor(r.status) }}>{r.status}</span>
+                      <span style={{ fontSize: "var(--oc-text-xs)", color: "var(--oc-text-secondary)" }}>{fmt(r.ts)}</span>
                       {r.durationMs != null && (
-                        <span style={{ fontSize: 11, color: "var(--muted)" }}>{r.durationMs}ms</span>
+                        <span style={{ fontSize: "var(--oc-text-xs)", color: "var(--oc-text-secondary)" }}>{r.durationMs}ms</span>
                       )}
                     </div>
                   </div>
@@ -418,16 +418,16 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
                   {isExpanded && (
                     <div style={{
                       margin: "0 12px 10px", padding: "10px 12px",
-                      background: "rgba(255,255,255,0.025)", borderRadius: 6,
+                      background: "rgba(255,255,255,0.025)", borderRadius: "var(--oc-radius-sm)",
                       border: "1px solid var(--oc-border)",
                     }}>
                       {r.summary && (
                         <div style={{ marginBottom: r.error ? 10 : 0 }}>
-                          <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          <div style={{ fontSize: "var(--oc-text-2xs)", color: "var(--oc-text-secondary)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                             执行结果
                           </div>
                           <div style={{
-                            fontSize: 12, color: "var(--oc-text-primary)", lineHeight: 1.7,
+                            fontSize: "var(--oc-text-sm)", color: "var(--oc-text-primary)", lineHeight: 1.7,
                             whiteSpace: "pre-wrap", wordBreak: "break-word",
                           }}>
                             {r.summary}
@@ -436,25 +436,25 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
                       )}
                       {r.error && (
                         <div style={{ marginTop: r.summary ? 10 : 0 }}>
-                          <div style={{ fontSize: 10, color: "#f87171", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          <div style={{ fontSize: "var(--oc-text-2xs)", color: "#f87171", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                             错误信息
                           </div>
-                          <div style={{ fontSize: 11, color: "#f87171", whiteSpace: "pre-wrap" }}>
+                          <div style={{ fontSize: "var(--oc-text-xs)", color: "#f87171", whiteSpace: "pre-wrap" }}>
                             {r.error}
                           </div>
                         </div>
                       )}
                       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--oc-border)" }}>
-                        {r.model && <span style={{ fontSize: 10, color: "var(--muted)" }}>模型: {r.model}</span>}
+                        {r.model && <span style={{ fontSize: "var(--oc-text-2xs)", color: "var(--oc-text-secondary)" }}>模型: {r.model}</span>}
                         {r.usage?.total_tokens != null && (
-                          <span style={{ fontSize: 10, color: "var(--muted)" }}>
+                          <span style={{ fontSize: "var(--oc-text-2xs)", color: "var(--oc-text-secondary)" }}>
                             tokens: {r.usage.input_tokens ?? "?"} in / {r.usage.output_tokens ?? "?"} out
                           </span>
                         )}
                         {r.durationMs != null && (
-                          <span style={{ fontSize: 10, color: "var(--muted)" }}>耗时: {r.durationMs}ms</span>
+                          <span style={{ fontSize: "var(--oc-text-2xs)", color: "var(--oc-text-secondary)" }}>耗时: {r.durationMs}ms</span>
                         )}
-                        <span style={{ fontSize: 10, color: "var(--muted)" }}>
+                        <span style={{ fontSize: "var(--oc-text-2xs)", color: "var(--oc-text-secondary)" }}>
                           {new Date(r.ts).toLocaleString("zh-CN")}
                         </span>
                       </div>
@@ -467,7 +467,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
             {runTotal > rLimit && (
               <div style={{ display: "flex", gap: 6, padding: "8px 12px", justifyContent: "flex-end" }}>
                 <BtnGhost disabled={runOffset <= 0} onClick={() => setRunOffset(Math.max(0, runOffset - rLimit))}>上一页</BtnGhost>
-                <span style={{ fontSize: 11, color: "var(--muted)", alignSelf: "center" }}>
+                <span style={{ fontSize: "var(--oc-text-xs)", color: "var(--oc-text-secondary)", alignSelf: "center" }}>
                   {Math.floor(runOffset / rLimit) + 1} / {Math.ceil(runTotal / rLimit)}
                 </span>
                 <BtnGhost disabled={runOffset + rLimit >= runTotal} onClick={() => setRunOffset(runOffset + rLimit)}>下一页</BtnGhost>
@@ -478,7 +478,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
 
         {/* Right: New/Edit Form */}
         <div className="settings-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--oc-text-primary)" }}>
+          <div style={{ fontSize: "var(--oc-text-sm)", fontWeight: "var(--oc-weight-semibold)", color: "var(--oc-text-primary)" }}>
             {editing ? `编辑：${editing.name}` : "新建任务"}
           </div>
 
@@ -492,7 +492,7 @@ export function SchedulePage({ adoptId }: { adoptId?: string }) {
               value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
           </FieldRow>
 
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--oc-text-secondary)", cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--oc-text-sm)", color: "var(--oc-text-secondary)", cursor: "pointer" }}>
             <input type="checkbox" checked={form.enabled} onChange={e => setForm({ ...form, enabled: e.target.checked })} />
             启用
           </label>

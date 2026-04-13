@@ -51,10 +51,10 @@ function statusBadges(sk: SkillItem) {
 }
 
 function toneStyle(tone: "neutral" | "ok" | "warn" | "danger") {
-  if (tone === "ok") return { color: "#22c55e", borderColor: "rgba(34,197,94,0.35)", background: "rgba(34,197,94,0.1)" };
-  if (tone === "warn") return { color: "#f59e0b", borderColor: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.1)" };
-  if (tone === "danger") return { color: "#ef4444", borderColor: "rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.1)" };
-  return { color: "var(--muted)", borderColor: "var(--oc-border)", background: "rgba(255,255,255,0.04)" };
+  if (tone === "ok") return { color: "var(--oc-success)", borderColor: "rgba(34,197,94,0.35)", background: "rgba(34,197,94,0.1)" };
+  if (tone === "warn") return { color: "var(--oc-warning)", borderColor: "rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.1)" };
+  if (tone === "danger") return { color: "var(--oc-danger)", borderColor: "rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.1)" };
+  return { color: "var(--oc-text-secondary)", borderColor: "var(--oc-border)", background: "var(--oc-bg-hover)" };
 }
 
 function SkillsHeader({ onRefresh, onUpload, onMarket }: { onRefresh?: () => void; onUpload?: () => void; onMarket?: () => void; }) {
@@ -80,7 +80,7 @@ function SkillsToolbar({ q, setQ, status, setStatus }: { q: string; setQ: (v: st
   return (
     <div className="skills-toolbar">
       <div className="skills-search">
-        <Search size={14} style={{ color: "var(--muted)" }} />
+        <Search size={14} style={{ color: "var(--oc-text-secondary)" }} />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索技能名称/描述/来源" />
       </div>
       <div className="skills-tabs">
@@ -143,8 +143,8 @@ function SkillDetailDrawer({ skill, adoptId, onClose, onToggle, onDeletePrivate,
       <div className="skills-drawer" onClick={(e) => e.stopPropagation()}>
         <div className="skills-drawer-head">
           <div>
-            <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: 600 }}>{skill.name}</div>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>{skill.id} · {getGroupLabel(skill.source)}</div>
+            <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: "var(--oc-weight-semibold)" }}>{skill.name}</div>
+            <div className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>{skill.id} · {getGroupLabel(skill.source)}</div>
           </div>
           <button className="skills-btn" onClick={onClose}>关闭</button>
         </div>
@@ -168,7 +168,7 @@ function SkillDetailDrawer({ skill, adoptId, onClose, onToggle, onDeletePrivate,
 
             <div className="settings-row">
               <span className="settings-label">分类</span>
-              <span className="text-xs" style={{ color: "var(--muted)" }}>{skill.category || "未分类"}</span>
+              <span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>{skill.category || "未分类"}</span>
             </div>
 
             <div className="settings-row">
@@ -184,8 +184,8 @@ function SkillDetailDrawer({ skill, adoptId, onClose, onToggle, onDeletePrivate,
 
             <div className="space-y-1">
               <div className="settings-label">API Key（可保存）</div>
-              {loadingConfig && <div className="text-xs" style={{ color: "var(--muted)" }}>读取配置中…</div>}
-              {!!configError && <div className="text-xs" style={{ color: "#f59e0b" }}>{configError}</div>}
+              {loadingConfig && <div className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>读取配置中…</div>}
+              {!!configError && <div className="text-xs" style={{ color: "var(--oc-warning)" }}>{configError}</div>}
               <input className="settings-input w-full px-3" placeholder="输入 API Key" value={draftApiKey} onChange={(e) => setDraftApiKey(e.target.value)} />
             </div>
 
@@ -246,7 +246,7 @@ function SkillGroupSection({ title, skills, collapsed, setCollapsed, onBatch, on
       </div>
       {!collapsed && (
         <div className="mt-2 space-y-2">
-          {skills.length === 0 && <div className="text-xs px-2 py-2" style={{ color: "var(--muted)" }}>暂无技能</div>}
+          {skills.length === 0 && <div className="text-xs px-2 py-2" style={{ color: "var(--oc-text-secondary)" }}>暂无技能</div>}
           {skills.map((sk) => (
             <SkillRow key={sk.id} skill={sk} onToggle={(v) => onToggle(sk.id, v)} onOpen={() => onOpen(sk)} />
           ))}
@@ -362,8 +362,8 @@ function SkillMarketModal({ open, onClose, adoptId, myPackages }: {
       <div className="skills-drawer" style={{ maxWidth: 560, width: "90vw" }} onClick={e => e.stopPropagation()}>
         <div className="skills-drawer-head">
           <div>
-            <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: 600 }}>🏪 技能市场</div>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>
+            <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: "var(--oc-weight-semibold)" }}>🏪 技能市场</div>
+            <div className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>
               {tab === "browse" ? "浏览和安装社区技能" : "选择已验证的技能发布到市场"}
             </div>
           </div>
@@ -376,7 +376,7 @@ function SkillMarketModal({ open, onClose, adoptId, myPackages }: {
             <button
               key={key}
               className={`skills-tab ${tab === key ? "active" : ""}`}
-              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 100, height: 34, padding: "0 18px", fontSize: 13, fontWeight: 500, letterSpacing: 0.2, lineHeight: 1, borderRadius: 999, cursor: "pointer", transition: "all .15s ease" }}
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 100, height: 34, padding: "0 18px", fontSize: "var(--oc-text-base)", fontWeight: "var(--oc-weight-medium)", letterSpacing: 0.2, lineHeight: 1, borderRadius: 999, cursor: "pointer", transition: "all .15s ease" }}
               onClick={() => setTab(key)}
             >{label}</button>
           ))}
@@ -384,13 +384,13 @@ function SkillMarketModal({ open, onClose, adoptId, myPackages }: {
 
         <div style={{ padding: "12px 16px 8px" }}>
           <div className="skills-search">
-            <Search size={14} style={{ color: "var(--muted)" }} />
+            <Search size={14} style={{ color: "var(--oc-text-secondary)" }} />
             <input value={q} onChange={e => setQ(e.target.value)} placeholder={tab === "browse" ? "搜索市场技能..." : "搜索我的技能包..."} />
           </div>
         </div>
 
         <div className="skills-drawer-body" style={{ padding: "0 16px 16px", maxHeight: "60vh", overflowY: "auto" }}>
-          {loading && <div className="text-xs" style={{ color: "var(--muted)", padding: 16, textAlign: "center" }}>加载中...</div>}
+          {loading && <div className="text-xs" style={{ color: "var(--oc-text-secondary)", padding: 16, textAlign: "center" }}>加载中...</div>}
 
           {/* ── 浏览市场 Tab ── */}
           {tab === "browse" && !loading && (
@@ -398,7 +398,7 @@ function SkillMarketModal({ open, onClose, adoptId, myPackages }: {
               {filteredMarket.length === 0 && (
                 <div className="settings-card" style={{ textAlign: "center", padding: 32 }}>
                   <div style={{ fontSize: 32, marginBottom: 8 }}>🏪</div>
-                  <div className="text-sm" style={{ color: "var(--muted)" }}>
+                  <div className="text-sm" style={{ color: "var(--oc-text-secondary)" }}>
                     {items.length === 0 ? "技能市场暂无技能" : "没有匹配的技能"}
                   </div>
                   {items.length === 0 && (
@@ -413,14 +413,14 @@ function SkillMarketModal({ open, onClose, adoptId, myPackages }: {
                   <div key={item.id} className="settings-card" style={{ padding: "12px 14px" }}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: 600 }}>
+                        <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: "var(--oc-weight-semibold)" }}>
                           {item.title || item.filename || "未命名技能"}
                         </div>
                         <div className="text-xs mt-1" style={{ color: "var(--oc-text-secondary)", lineHeight: 1.5 }}>
                           {item.description || "暂无描述"}
                         </div>
                         <div className="flex items-center gap-3 mt-2">
-                          <span className="text-xs" style={{ color: "var(--muted)" }}>
+                          <span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>
                             v{item.version || "1.0"} · {item.installCount || 0} 次安装
                           </span>
                         </div>
@@ -446,16 +446,16 @@ function SkillMarketModal({ open, onClose, adoptId, myPackages }: {
               {publishable.length === 0 && (
                 <div className="settings-card" style={{ textAlign: "center", padding: 32 }}>
                   <div style={{ fontSize: 32, marginBottom: 8 }}>📦</div>
-                  <div className="text-sm" style={{ color: "var(--muted)" }}>
+                  <div className="text-sm" style={{ color: "var(--oc-text-secondary)" }}>
                     暂无已安装的技能包
                   </div>
-                  <div className="text-xs mt-2" style={{ color: "var(--muted)" }}>
+                  <div className="text-xs mt-2" style={{ color: "var(--oc-text-secondary)" }}>
                     请先上传并安装技能包，确认可用后再发布到市场
                   </div>
                 </div>
               )}
               {publishable.length > 0 && (
-                <div className="text-xs mb-2" style={{ color: "var(--muted)", padding: "4px 0" }}>
+                <div className="text-xs mb-2" style={{ color: "var(--oc-text-secondary)", padding: "4px 0" }}>
                   💡 只有已安装且验证通过的技能包才能发布，确保其他用户安装后可正常使用
                 </div>
               )}
@@ -464,15 +464,15 @@ function SkillMarketModal({ open, onClose, adoptId, myPackages }: {
                   <div key={pkg.filename} className="settings-card" style={{ padding: "12px 14px" }}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: 600 }}>
+                        <div className="text-sm" style={{ color: "var(--oc-text-primary)", fontWeight: "var(--oc-weight-semibold)" }}>
                           📦 {pkg.displayName || pkg.installedSkillId || pkg.filename}
                         </div>
                         <div className="text-xs mt-1" style={{ color: "var(--oc-text-secondary)", lineHeight: 1.5 }}>
                           {pkg.displayDescription || "暂无描述"}
                         </div>
                         <div className="flex items-center gap-2 mt-2">
-                          <span className="skills-chip" style={{ color: "#22c55e", borderColor: "rgba(34,197,94,0.35)", background: "rgba(34,197,94,0.1)" }}>已安装</span>
-                          <span className="text-xs" style={{ color: "var(--muted)" }}>{pkg.installedSkillId}</span>
+                          <span className="skills-chip" style={{ color: "var(--oc-success)", borderColor: "rgba(34,197,94,0.35)", background: "rgba(34,197,94,0.1)" }}>已安装</span>
+                          <span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>{pkg.installedSkillId}</span>
                         </div>
                       </div>
                       <button
@@ -876,12 +876,12 @@ export function SkillsPage({ skills, canEdit, pending, onToggle, adoptId }:
               .then(r => r.json()).then(d => setMyPackages(Array.isArray(d?.items) ? d.items : [])).catch(() => setMyPackages([]));
           }} />
           <SkillsToolbar q={q} setQ={setQ} status={status} setStatus={setStatus} />
-          <div className="skills-summary text-xs" style={{ color: "var(--muted)", marginTop: 10 }}>共 {filtered.length} 个匹配技能 {pending || bindingLoading || uploading || publishing ? "· 正在更新…" : ""}</div>
+          <div className="skills-summary text-xs" style={{ color: "var(--oc-text-secondary)", marginTop: 10 }}>共 {filtered.length} 个匹配技能 {pending || bindingLoading || uploading || publishing ? "· 正在更新…" : ""}</div>
           <div className="grid gap-3 mt-3">
             {groups.map(([g, arr]) => (
               <SkillGroupSection key={g} title={g} skills={arr} collapsed={!!collapsed[g]} setCollapsed={(v) => setCollapsed((p) => ({ ...p, [g]: v }))} onBatch={(v) => { if (pending) return; arr.forEach((sk) => onToggleAgent(sk, v)); }} onToggle={(id, v) => { const sk = arr.find((x) => x.id === id); if (sk) onToggleAgent(sk, v); }} onOpen={setDetail} />
             ))}
-            {filtered.length === 0 && <div className="settings-card text-sm" style={{ color: "var(--muted)" }}>暂无匹配技能</div>}
+            {filtered.length === 0 && <div className="settings-card text-sm" style={{ color: "var(--oc-text-secondary)" }}>暂无匹配技能</div>}
           </div>
           <SkillDetailDrawer skill={detail} adoptId={adoptId} onClose={() => setDetail(null)} onToggle={(v) => detail && onToggleAgent(detail, v)} onDeletePrivate={onDeletePrivatePackage} onInstallPrivate={onInstallPrivatePackage} />
         </>
