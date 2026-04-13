@@ -26,15 +26,33 @@ function fetchBrand(): Promise<BrandConfig> {
   return _promise;
 }
 
+/** 将品牌 accentColor 注入到 CSS 变量，实现企业定制 */
+function injectBrandTokens(brand: BrandConfig) {
+  const root = document.documentElement;
+  if (brand.accentColor && brand.accentColor !== DEFAULT_BRAND.accentColor) {
+    // 品牌色覆盖（企业定制时生效）
+    root.style.setProperty("--oc-accent", brand.accentColor);
+    root.style.setProperty("--accent", brand.accentColor);
+    // 自动派生 hover / subtle / glow
+    root.style.setProperty("--oc-accent-hover", brand.accentColor + "cc");
+    root.style.setProperty("--oc-accent-subtle", brand.accentColor + "1a");
+    root.style.setProperty("--oc-accent-glow", brand.accentColor + "33");
+  }
+}
+
 export function useBrand(): BrandConfig {
   const [brand, setBrand] = useState<BrandConfig>(_cache || DEFAULT_BRAND);
 
   useEffect(() => {
     if (_cache) {
       setBrand(_cache);
+      injectBrandTokens(_cache);
       return;
     }
-    fetchBrand().then(setBrand);
+    fetchBrand().then((b) => {
+      setBrand(b);
+      injectBrandTokens(b);
+    });
   }, []);
 
   return brand;

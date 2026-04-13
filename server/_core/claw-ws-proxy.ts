@@ -215,7 +215,7 @@ export function registerWSProxy(server: Server) {
 
           // ── item 事件：用于前端状态文字（不重复发 tool_call）──
           if (stream === "item" && data.phase === "update" && data.progressText) {
-            sendToClient({ __status: data.progressText });
+            sendToClient({ __status: data.progressText, _event: "agent_status", kind: "progress", label: data.progressText });
             return;
           }
           // item start/end 不再发 tool_call/tool_result（已由 tool stream 处理）
