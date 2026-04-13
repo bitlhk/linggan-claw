@@ -70,7 +70,7 @@ async function sendToWeixin(acct: any, chatId: string, text: string, contextToke
 // 调灵虾 chat-stream（internal key 绕过 auth）
 async function chatWithLingxia(adoptId: string, message: string): Promise<string> {
   try {
-    const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026"; // TODO: import from constants.ts
     const resp = await fetch("http://127.0.0.1:5180/api/claw/chat-stream", {
       method: "POST",
       headers: {
@@ -155,8 +155,9 @@ async function pollLoop(adoptId: string): Promise<void> {
 
   console.log(`[WEIXIN-BRIDGE] starting poll for ${adoptId}`);
   let syncBuf = acct.syncBuf || "";
+  let consecutiveErrors = 0;
 
-  while (true) {
+  while (activePolls.has(adoptId)) {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), POLL_TIMEOUT_MS + 5000);
@@ -202,6 +203,7 @@ async function pollLoop(adoptId: string): Promise<void> {
         acct.lastChatId = fromId;
         saveAccount(adoptId, acct);
 
+        consecutiveErrors = 0; // 收到消息说明连接正常
         console.log(`[WEIXIN-BRIDGE] ${adoptId} received: "${text.slice(0, 50)}"`);
 
         // 显示"正在输入"
@@ -255,19 +257,36 @@ async function pollLoop(adoptId: string): Promise<void> {
         }
       }
     } catch (e: any) {
-      // 超时是正常的（35s 无消息），其他错误等 5 秒重试
+      // 超时是正常的（35s 无消息），其他错误指数退避重试
       if (!String(e.message || e).includes("abort")) {
-        console.error(`[WEIXIN-BRIDGE] ${adoptId} poll error:`, e.message);
-        await new Promise(r => setTimeout(r, 5000));
+        consecutiveErrors++;
+        if (consecutiveErrors > 20) {
+          console.error(`[WEIXIN-BRIDGE] ${adoptId} too many consecutive errors (${consecutiveErrors}), stopping poll`);
+          break;
+        }
+        const backoff = Math.min(5000 * consecutiveErrors, 30000);
+        console.error(`[WEIXIN-BRIDGE] ${adoptId} poll error (${consecutiveErrors}x), retry in ${backoff}ms:`, e.message);
+        await new Promise(r => setTimeout(r, backoff));
+      } else {
+        consecutiveErrors = 0; // 超时是正常的，重置计数
       }
     }
   }
+  // 循环退出后清理
+  activePolls.delete(adoptId);
+  console.log(`[WEIXIN-BRIDGE] ${adoptId} poll loop exited`);
 }
 
 // 启动所有已绑定子虾的 polling
 /** 外部调用：给指定子虾的微信用户发消息（供 platform tool 使用） */
 // 跟踪已启动的 polling，防止重复启动
 const activePolls = new Set<string>();
+
+/** 停止某只虾的 polling（解绑时调用） */
+export function stopPollForAccount(adoptId: string): void {
+  activePolls.delete(adoptId);
+  console.log(`[WEIXIN-BRIDGE] stopped polling for ${adoptId}`);
+}
 
 /** 外部调用：为新绑定的子虾启动 polling（绑定成功时调用，无需重启服务） */
 export function startPollForAccount(adoptId: string): void {

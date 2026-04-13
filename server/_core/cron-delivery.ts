@@ -5,7 +5,7 @@
  * 灵虾轮询 cron runs，发现新完成的结果推送到用户指定渠道。
  */
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 
 const CONFIG_PATH = "/root/linggan-platform/data/cron-delivery-config.json";
 const POLL_INTERVAL_MS = 60_000;
@@ -46,7 +46,7 @@ async function pollAndDeliver() {
   // 一次性拉所有 cron jobs
   let allJobs: any[] = [];
   try {
-    const listOut = execSync("openclaw cron list --json 2>/dev/null", { timeout: 10000 }).toString();
+    const listOut = execFileSync("openclaw", ["cron", "list", "--json"], { timeout: 10000, stdio: ["pipe","pipe","pipe"] }).toString();
     const listData = JSON.parse(listOut);
     allJobs = Array.isArray(listData?.jobs) ? listData.jobs : [];
   } catch (e: any) {
@@ -63,8 +63,10 @@ async function pollAndDeliver() {
 
       // 拉最近一条 run
       let latestRun: any = null;
+      // 校验 job.id 格式（UUID），防止命令注入
+      if (!/^[a-f0-9-]{36}$/.test(job.id)) continue;
       try {
-        const runsOut = execSync(`openclaw cron runs --id ${job.id} --limit 1 2>/dev/null`, { timeout: 10000 }).toString();
+        const runsOut = execFileSync("openclaw", ["cron", "runs", "--id", job.id, "--limit", "1"], { timeout: 10000, stdio: ["pipe","pipe","pipe"] }).toString();
         const runsData = JSON.parse(runsOut);
         const entries = Array.isArray(runsData?.entries) ? runsData.entries : [];
         if (entries.length > 0) latestRun = entries[0];
@@ -91,7 +93,7 @@ async function pollAndDeliver() {
         }
       } else {
         try {
-          const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+          const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026"; // TODO: import from constants.ts
           await fetch("http://127.0.0.1:5180/api/claw/notify/test", {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-Internal-Key": INTERNAL_KEY },
@@ -108,8 +110,15 @@ async function pollAndDeliver() {
   }
 }
 
+let pollInterval: ReturnType<typeof setInterval> | null = null;
+
 export function startCronDeliveryPoller() {
+  if (pollInterval) return; // 防止重复启动
   console.log("[CRON-DELIVERY] poller started");
-  setInterval(pollAndDeliver, POLL_INTERVAL_MS);
+  pollInterval = setInterval(pollAndDeliver, POLL_INTERVAL_MS);
   setTimeout(pollAndDeliver, 5000);
+}
+
+export function stopCronDeliveryPoller() {
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
 }

@@ -7,7 +7,7 @@
 import type { StreamWriter } from "./stream-writer";
 
 const BASE = "http://127.0.0.1:5180";
-const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+import { INTERNAL_API_KEY as INTERNAL_KEY } from "./constants";
 
 async function getUserChannels(adoptId: string): Promise<string[]> {
   const channels: string[] = ["conversation"];

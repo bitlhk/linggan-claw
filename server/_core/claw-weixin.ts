@@ -200,6 +200,11 @@ export function registerWeixinRoutes(app: express.Express) {
   });
 
   app.post("/api/claw/weixin/unbind", async (req, res) => {
+    // 解绑时停止该虾的微信 polling
+    try {
+      const { stopPollForAccount } = await import("./claw-weixin-bridge");
+      stopPollForAccount(String(req.body?.adoptId || ""));
+    } catch {}
     try {
       const adoptId = String(req.body?.adoptId || "").trim();
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
