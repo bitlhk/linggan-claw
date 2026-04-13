@@ -351,10 +351,19 @@
 :root {
   --bg: #0a0c10;
   --panel: #0f1114;
+  --card: #181c24;
   --card-2: #181c24;
   --border: rgba(255, 255, 255, 0.08);
   --text: #e5e7eb;
+  --text-strong: #f0f1f3;
   --muted: #9ca3af;
+  --popover: #151820;
+  --popover-foreground: #e5e7eb;
+  --background: #0a0c10;
+  --foreground: #e5e7eb;
+  --card-foreground: #e5e7eb;
+  --secondary: #1e2230;
+  --secondary-foreground: #c0c4cc;
   --accent: #ff5c5c;
   --accent-hover: #ff7070;
   --accent-subtle: rgba(255, 92, 92, 0.10);
@@ -696,7 +705,7 @@
 
 
 .settings-card {
-  background: var(--card);
+  background: var(--oc-bg-surface);
   border: 1px solid var(--oc-border);
   border-radius: 12px;
   padding: 10px 14px;
@@ -1635,7 +1644,7 @@
 
 /* ② 浅色模式：侧边栏 / 卡片里写死的 rgba(255,255,255,0.0x) 背景换成变量 */
 :root[data-theme-mode="light"] .settings-card {
-  background: var(--card);
+  background: var(--oc-bg-surface);
   color: var(--text);
 }
 

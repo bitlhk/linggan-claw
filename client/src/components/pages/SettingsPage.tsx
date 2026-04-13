@@ -62,7 +62,7 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
         borderBottom: "1px solid var(--border)",
       }}
     >
-      <span style={{ fontSize: 13, color: "var(--text)", fontWeight: 450 }}>{label}</span>
+      <span style={{ fontSize: "var(--oc-text-base)", color: "var(--oc-text-primary)", fontWeight: "var(--oc-weight-medium)" }}>{label}</span>
       <div style={{ display: "flex", alignItems: "center" }}>{children}</div>
     </div>
   );
@@ -71,10 +71,10 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
 function SectionTitle({ emoji, label, desc }: { emoji: string; label: string; desc?: string }) {
   return (
     <div style={{ marginBottom: 20 }}>
-      <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", margin: 0 }}>
+      <h3 style={{ fontSize: "var(--oc-text-md)", fontWeight: "var(--oc-weight-semibold)", color: "var(--oc-text-primary)", margin: 0 }}>
         {emoji} {label}
       </h3>
-      {desc && <p style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 0" }}>{desc}</p>}
+      {desc && <p style={{ fontSize: "var(--oc-text-sm)", color: "var(--oc-text-secondary)", margin: "4px 0 0" }}>{desc}</p>}
     </div>
   );
 }
@@ -111,7 +111,7 @@ export function SettingsPage({
           width: 160,
           flexShrink: 0,
           borderRight: "1px solid var(--border)",
-          background: "var(--panel)",
+          background: "var(--oc-bg-elevated)",
           padding: "16px 8px",
           display: "flex",
           flexDirection: "column",
@@ -120,8 +120,8 @@ export function SettingsPage({
       >
         <div
           style={{
-            fontSize: 11,
-            fontWeight: 600,
+            fontSize: "var(--oc-text-xs)",
+            fontWeight: "var(--oc-weight-semibold)",
             color: "var(--faint)",
             textTransform: "uppercase",
             letterSpacing: "0.08em",
@@ -144,7 +144,7 @@ export function SettingsPage({
                 borderRadius: "var(--radius-md, 10px)",
                 border: "none",
                 cursor: "pointer",
-                fontSize: 13,
+                fontSize: "var(--oc-text-base)",
                 fontWeight: active ? 600 : 400,
                 background: active ? "var(--accent-subtle)" : "transparent",
                 color: active ? "var(--accent)" : "var(--muted)",
@@ -152,7 +152,7 @@ export function SettingsPage({
                 textAlign: "left",
               }}
             >
-              <span style={{ fontSize: 14 }}>{s.emoji}</span>
+              <span style={{ fontSize: "var(--oc-text-md)" }}>{s.emoji}</span>
               {s.label}
             </button>
           );
@@ -175,7 +175,7 @@ export function SettingsPage({
 
             {/* 主题色 */}
             <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: "var(--muted)", marginBottom: 12 }}>主题</div>
+              <div style={{ fontSize: "var(--oc-text-sm)", fontWeight: "var(--oc-weight-medium)", color: "var(--oc-text-secondary)", marginBottom: 12 }}>主题</div>
               <div style={{ display: "flex", gap: 12 }}>
                 {THEMES.map((t) => {
                   const active = uiSettings.theme === t.key;
@@ -190,8 +190,8 @@ export function SettingsPage({
                         alignItems: "flex-start",
                         padding: "14px 16px",
                         borderRadius: "var(--radius-lg, 12px)",
-                        border: active ? `1.5px solid ${t.color}` : "1.5px solid var(--border)",
-                        background: active ? `color-mix(in srgb, ${t.color} 8%, var(--card))` : "var(--card)",
+                        border: active ? `1.5px solid ${t.color}` : "1.5px solid var(--oc-border)",
+                        background: active ? `color-mix(in srgb, ${t.color} 8%, var(--oc-bg-surface))` : "var(--oc-bg-surface)",
                         cursor: "pointer",
                         transition: "border-color .15s, background .15s",
                         gap: 10,
@@ -200,12 +200,12 @@ export function SettingsPage({
                       {/* 色块预览：accent 圆点 + 两个固定灰色方块模拟背景层次 */}
                       <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
                         <span style={{ width: 18, height: 18, borderRadius: "50%", background: t.color, display: "block", flexShrink: 0, boxShadow: `0 0 6px ${t.color}55` }} />
-                        <span style={{ width: 10, height: 18, borderRadius: 4, background: "#161920", display: "block" }} />
-                        <span style={{ width: 10, height: 18, borderRadius: 4, background: "#111520", display: "block" }} />
+                        <span style={{ width: 10, height: 18, borderRadius: 4, background: "var(--oc-bg-active)", display: "block" }} />
+                        <span style={{ width: 10, height: 18, borderRadius: 4, background: "var(--oc-border)", display: "block" }} />
                       </div>
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: active ? t.color : "var(--text)" }}>{t.label}</div>
-                        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{t.desc}</div>
+                        <div style={{ fontSize: "var(--oc-text-base)", fontWeight: "var(--oc-weight-semibold)", color: active ? t.color : "var(--oc-text-primary)" }}>{t.label}</div>
+                        <div style={{ fontSize: "var(--oc-text-xs)", color: "var(--oc-text-secondary)", marginTop: 2 }}>{t.desc}</div>
                       </div>
                     </button>
                   );
@@ -219,8 +219,8 @@ export function SettingsPage({
                 style={{
                   display: "flex",
                   gap: 2,
-                  background: "var(--panel)",
-                  border: "1px solid var(--border)",
+                  background: "var(--oc-bg-elevated)",
+                  border: "1px solid var(--oc-border)",
                   borderRadius: "var(--radius-md, 10px)",
                   padding: 3,
                 }}
@@ -238,10 +238,10 @@ export function SettingsPage({
                       borderRadius: "calc(var(--radius-md, 10px) - 2px)",
                       border: "none",
                       cursor: "pointer",
-                      fontSize: 12,
-                      fontWeight: 500,
+                      fontSize: "var(--oc-text-sm)",
+                      fontWeight: "var(--oc-weight-medium)",
                       background: uiSettings.themeMode === m.key ? "var(--accent)" : "transparent",
-                      color: uiSettings.themeMode === m.key ? "#fff" : "var(--muted)",
+                      color: uiSettings.themeMode === m.key ? "var(--oc-text-on-accent)" : "var(--oc-text-secondary)",
                       transition: "background .15s, color .15s",
                       whiteSpace: "nowrap",
                     }}
@@ -262,7 +262,7 @@ export function SettingsPage({
                   step={25}
                   value={uiSettings.borderRadius}
                   onChange={(e) => applySettings({ borderRadius: Number(e.target.value) })}
-                  style={{ width: 140, accentColor: "var(--accent)" }}
+                  style={{ width: 140, accentColor: "var(--oc-accent)" }}
                 />
                 {/* 圆角预览方块 */}
                 <div
@@ -289,11 +289,11 @@ export function SettingsPage({
                 <SelectTrigger className="w-24 h-8 text-xs settings-select focus:ring-0 focus:ring-offset-0">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent style={{ minWidth: 96, background: "var(--panel)", border: "1px solid var(--border)" }}>
-                  <SelectItem value="yes" className="text-xs" style={{ color: "var(--muted)" }}>
+                <SelectContent style={{ minWidth: 96, background: "var(--oc-bg-elevated)", border: "1px solid var(--oc-border)" }}>
+                  <SelectItem value="yes" className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>
                     开启
                   </SelectItem>
-                  <SelectItem value="no" className="text-xs" style={{ color: "var(--muted)" }}>
+                  <SelectItem value="no" className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>
                     关闭
                   </SelectItem>
                 </SelectContent>
@@ -311,10 +311,10 @@ export function SettingsPage({
                   width: 72,
                   textAlign: "center",
                   background: "var(--input)",
-                  border: "1px solid var(--border)",
+                  border: "1px solid var(--oc-border)",
                   borderRadius: "var(--radius-md)",
-                  color: "var(--text)",
-                  fontSize: 13,
+                  color: "var(--oc-text-primary)",
+                  fontSize: "var(--oc-text-base)",
                   padding: "4px 8px",
                 }}
               />
@@ -334,9 +334,9 @@ export function SettingsPage({
               />
             </SettingRow>
 
-            <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--oc-border)" }}>
               {!canSave ? (
-                <p style={{ fontSize: 12, color: "var(--warning)" }}>登录后可保存设置</p>
+                <p style={{ fontSize: "var(--oc-text-sm)", color: "var(--oc-warning)" }}>登录后可保存设置</p>
               ) : (
                 <button
                   onClick={onSave}
@@ -348,8 +348,8 @@ export function SettingsPage({
                     border: "none",
                     borderRadius: "var(--radius-md)",
                     cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 500,
+                    fontSize: "var(--oc-text-base)",
+                    fontWeight: "var(--oc-weight-medium)",
                     opacity: saving ? 0.5 : 1,
                     transition: "opacity .15s",
                   }}
@@ -373,7 +373,7 @@ export function SettingsPage({
                 step={10}
                 value={uiSettings.navWidth}
                 onChange={(e) => applySettings({ navWidth: Number(e.target.value) })}
-                style={{ width: 140, accentColor: "var(--accent)" }}
+                style={{ width: 140, accentColor: "var(--oc-accent)" }}
               />
             </SettingRow>
           </div>
@@ -403,8 +403,8 @@ function NotifySettings({ adoptId }: { adoptId?: string }) {
   const onSave = async () => { if (!adoptId) return; setSaving(true); try { await fetch("/api/claw/notify/config", { method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({adoptId,type,corpId,agentId,secret,userId,webhook})}); toast.success("通知配置已保存"); } catch { toast.error("保存失败"); } finally { setSaving(false); } };
   const onTest = async () => { if (!adoptId) return; setTesting(true); try { const r = await fetch("/api/claw/notify/test", { method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify({adoptId})}); const d = await r.json(); if (d.ok) toast.success("测试消息已发送！"); else toast.error(d.error||"发送失败"); } catch { toast.error("发送失败"); } finally { setTesting(false); } };
 
-  const S: React.CSSProperties = { height:32, borderRadius:8, border:"1px solid var(--oc-border)", background:"var(--oc-card)", color:"var(--oc-text-primary)", padding:"0 10px", fontSize:12, width:"100%" };
-  const L: React.CSSProperties = { fontSize:12, color:"var(--muted)", marginBottom:4, display:"block" };
+  const S: React.CSSProperties = { height:32, borderRadius:8, border:"1px solid var(--oc-border)", background:"var(--oc-input-bg)", color:"var(--oc-text-primary)", padding:"0 10px", fontSize:12, width:"100%" };
+  const L: React.CSSProperties = { fontSize:12, color:"var(--oc-text-secondary)", marginBottom:4, display:"block" };
 
   return (<div className="space-y-4">
     <div className="settings-card" style={{padding:16}}><div style={L}>通知渠道</div>
@@ -485,18 +485,18 @@ function WeixinBind({ adoptId }: { adoptId?: string }) {
           <div className="flex items-center gap-2 mb-3">
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
             <span className="text-xs" style={{ color: "var(--oc-text-primary)" }}>已绑定</span>
-            <span className="text-xs" style={{ color: "var(--muted)" }}>{userId ? userId.split("@")[0].slice(0, 8) + "..." : ""}</span>
+            <span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>{userId ? userId.split("@")[0].slice(0, 8) + "..." : ""}</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn-primary-soft" onClick={testSend} disabled={testing} style={{ flex: 1 }}>{testing ? "发送中..." : "测试发送"}</button>
-            <button className="skills-btn" onClick={unbind} style={{ padding: "0 16px", color: "#ef4444" }}>解绑</button>
+            <button className="skills-btn" onClick={unbind} style={{ padding: "0 16px", color: "var(--oc-danger)" }}>解绑</button>
           </div>
         </div>
       ) : status === "scanning" ? (
         <div style={{ textAlign: "center" }}>
           <div className="text-xs mb-2" style={{ color: "var(--oc-text-secondary)" }}>请用微信扫描二维码</div>
-          {qrcodeUrl && <img src={"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(qrcodeUrl)} alt="WeChat QR" style={{ width: 200, height: 200, margin: "0 auto", borderRadius: 8, background: "#fff" }} />}
-          <div className="text-xs mt-2" style={{ color: "var(--muted)" }}>扫码后请在微信中确认</div>
+          {qrcodeUrl && <img src={"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" + encodeURIComponent(qrcodeUrl)} alt="WeChat QR" style={{ width: 200, height: 200, margin: "0 auto", borderRadius: "var(--oc-radius-md)", background: "#fff" }} />}
+          <div className="text-xs mt-2" style={{ color: "var(--oc-text-secondary)" }}>扫码后请在微信中确认</div>
         </div>
       ) : (
         <div>
