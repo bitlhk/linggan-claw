@@ -143,7 +143,7 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
     await updateSettings.mutateAsync({
       adoptId,
       ...form,
-      allowedTaskTypes: Array.isArray(form.allowedTaskTypes) ? JSON.stringify(form.allowedTaskTypes) : form.allowedTaskTypes,
+      allowedTaskTypes: Array.isArray(form.allowedTaskTypes) ? form.allowedTaskTypes : [],
     });
     setFormInit(false);
     settingsQ.refetch();

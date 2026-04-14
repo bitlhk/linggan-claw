@@ -309,6 +309,7 @@ const options = {
       port: gatewayPort,
       path: "/v1/chat/completions",
       method: "POST",
+      timeout: 0,
       headers: {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(body),

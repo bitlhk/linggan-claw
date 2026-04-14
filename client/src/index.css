@@ -1690,8 +1690,13 @@
 :root[data-theme-mode="light"] .settings-input,
 :root[data-theme-mode="light"] .settings-select {
   color: var(--text);
-  background: var(--input);
+  background: transparent;
   border-color: var(--border);
+}
+:root[data-theme-mode="light"] .settings-select option,
+:root[data-theme-mode="light"] select.settings-input option {
+  background: #ffffff;
+  color: #1D1D1A;
 }
 
 /* ⑨ 浅色：SelectContent 边框修正 */

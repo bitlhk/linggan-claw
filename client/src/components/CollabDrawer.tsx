@@ -156,21 +156,14 @@ function AgentHeroAnimation({ agentId }: { agentId: string }) {
     </div>
   );
 }
-function agentDesc(id: string) {
-  if (id === "task-ppt") return "多轮对话生成 PPT，完成后可下载";
-  if (id === "task-slides") return "用于创建令人惊叹的、动画丰富的 HTML 演示文稿";
-  if (id === "task-evolve") return "对话中创建和打磨 AI 技能，越用越聪明";
-  if (id === "task-code") return "在沙箱中执行代码，安全隔离";
-  if (id === "task-finance") return "DCF/LBO 建模、竞争分析、行业研究报告";
-  if (id === "task-hermes") return "共享智脑 · 融合八大金融框架（债券/理财/保险/信贷/抵押物/信保/银保合作），支持跨领域综合分析";
-  if (id === "task-trace") return "交付复杂任务，自动拆解规划、逐步推进";
-  if (id === "task-trading") return "多Agent辩论框架：基本面/技术面/情绪面/新闻面 → 多空辩论 → 交易决策";
-  if (id === "task-stock") return "AI 智能选股，11+ 交易策略，技术面+消息面+筹码分析";
-  if (id === "task-claim-ev") return "新能源车专属理赔决策助手 · 基于人保再保《动力电池保险创新白皮书》框架";
-  if (id === "task-my-wealth") return "您的专属 AI 理财顾问 · 中行《全球资产配置白皮书》+ 招行《私人财富报告》双框架";
-  if (id === "task-bond") return "债券投研助手 · 中央结算《中债估值方法论》+ 中诚信《违约预警 5 因子》框架";
-  if (id === "task-credit-risk") return "智贷决策助手 · 银保监《授信尽职指引》+ 工行《工银智涌/智贷通》框架";
-  return "业务智能体";
+function agentDesc(id: string, dbDescription?: string) {
+  if (dbDescription) {
+    const first = dbDescription.split(
+
+)[0];
+    return first || dbDescription;
+  }
+  return 业务智能体;
 }
 function fmtSize(bytes: number) {
   if (bytes < 1024) return `${bytes}B`;
@@ -552,10 +545,10 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
             <>
               <div className="flex items-center justify-center"><Dna size={40} style={{ color: "#be1e2d" }} /></div>
               <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵枢 · 共享智脑（Hermes Agent）</p>
-              <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>八大权威框架融合，一个入口解决跨领域金融问题</p>
+              <p className="text-xs mt-1.5 max-w-[260px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>融合信贷、债券、理财、保险四大专业能力，自动调用对应分析工具</p>
               <div className="mt-4 mx-auto max-w-[240px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(190,30,45,0.04)", border: "1px solid rgba(190,30,45,0.12)" }}>
                 <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
-                {["客户贷款500万买厂房，保险+抵押物方案怎么配？", "5000万国债组合，利率风险对冲+理财配比？", "新能源车贷款+保险+残值评估一体化方案", "企业授信尽调：信贷风险+保证保险+押品估值"].map((q) => (
+                {["综合方案：客户贷款3000万建厂，做信贷评估+厂房估值+设备保险", "用debt工具分析5年期国开债的久期和凸性", "用理财工具做一个50万的稳健型资产配置方案", "新能源车追尾事故，用EV理赔工具评估电池损伤"].map((q) => (
                   <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}>{q}</p>
                 ))}
               </div>
@@ -646,7 +639,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
             <>
               <AgentHeroAnimation agentId={agent.id} />
               <p className="text-sm mt-4 font-medium" style={{ color: "var(--oc-text-primary)" }}>{agent.name}</p>
-              <p className="text-xs mt-1" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(agent.id)}</p>
+              <p className="text-xs mt-1" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(agent.id, agent.description)}</p>
               <p className="text-[10px] mt-2" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>支持多轮对话 · 30分钟无操作自动终止</p>
             </>
           ) : agent.id === "task-code" ? (
@@ -844,7 +837,7 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
           ) : (
             <>
               <div className="flex items-center justify-center">{agentIcon(agent.id, 36)}</div>
-              <p className="text-sm mt-2" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(agent.id)}</p>
+              <p className="text-sm mt-2" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(agent.id, agent.description)}</p>
               <p className="text-xs mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.5 }}>支持多轮对话 · 30分钟无操作自动终止</p>
             </>
           )}
@@ -864,13 +857,30 @@ function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void
               {/* Hermes tool calls */}
               {m.toolCalls && m.toolCalls.length > 0 && <div className="mb-2 space-y-1">{m.toolCalls.map((tc) => {
                 const TOOL_ICONS: Record<string, string> = { web_search: "🔍", browser_navigate: "🌐", terminal: "💻", file_read: "📄", file_write: "📝", web_fetch: "🌐", memory_search: "🧠" };
-                const icon = TOOL_ICONS[tc.name] || "⚙️";
+                // 识别业务 Agent 调用（从 terminal preview 中的 skill 路径推断）
+                const AGENT_MAP: Record<string, [string, string]> = {
+                  "/finance/credit-risk/": ["💹", "灵犀·智贷决策"],
+                  "/finance/bond/": ["📊", "灵犀·债券投研"],
+                  "/personal/wealth/": ["💰", "灵犀·个人理财"],
+                  "/insurance/ev-claim/": ["🚗", "灵犀·EV理赔"],
+                };
+                let agentLabel = "";
+                let icon = TOOL_ICONS[tc.name] || "⚙️";
+                if (tc.name === "terminal" && tc.preview) {
+                  for (const [path, [agentIcon, agentName]] of Object.entries(AGENT_MAP)) {
+                    if (tc.preview.includes(path)) {
+                      icon = agentIcon;
+                      agentLabel = agentName;
+                      break;
+                    }
+                  }
+                }
                 const isRunning = tc.status === "running";
                 const elapsed = tc.durationMs ? `${(tc.durationMs / 1000).toFixed(1)}s` : isRunning ? `${Math.round((Date.now() - tc.ts) / 1000)}s` : "";
                 return <div key={tc.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: "var(--oc-radius-md)", background: isRunning ? "rgba(99,102,241,0.06)" : "rgba(120,120,140,0.04)", border: `1px solid ${isRunning ? "rgba(99,102,241,0.15)" : "rgba(120,120,140,0.1)"}`, fontSize: "var(--oc-text-sm)", color: isRunning ? "#818cf8" : "#8b8fa3", position: "relative", overflow: "hidden" }}>
                   {isRunning && <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 2, background: "linear-gradient(90deg,transparent,rgba(99,102,241,.4),transparent)", backgroundSize: "200% 100%", animation: "hermes-shimmer 1.8s ease-in-out infinite" }} />}
                   <span style={{ fontSize: 13 }}>{icon}</span>
-                  <span style={{ fontWeight: "var(--oc-weight-medium)" }}>{tc.name}</span>
+                  <span style={{ fontWeight: "var(--oc-weight-medium)" }}>{agentLabel || tc.name}</span>
                   {tc.preview && <span style={{ opacity: 0.6, fontSize: "var(--oc-text-xs)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tc.preview}</span>}
                   {isRunning ? <Loader2 size={11} className="animate-spin" style={{ flexShrink: 0 }} /> : <span style={{ color: tc.status === "error" ? "#ef4444" : "#22c55e", fontSize: "var(--oc-text-xs)" }}>✓</span>}
                   {elapsed && <span style={{ fontSize: "var(--oc-text-2xs)", opacity: 0.5 }}>{elapsed}</span>}
@@ -1226,7 +1236,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                           <CollabGroup id="lingshu" title="灵枢 · 核心引擎" icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#be1e2d" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
-                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
+                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id, a.description)}</div></div>
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
                             </button>))}</div>
                           </CollabGroup>
@@ -1237,7 +1247,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                           <CollabGroup id="lingjiang" title="灵匠 · 创作工具" icon={<Code2 size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
-                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
+                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id, a.description)}</div></div>
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
                             </button>))}</div>
                           </CollabGroup>
@@ -1248,7 +1258,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                           <CollabGroup id="lingxi" title="灵犀 · 分析研判" icon={<TrendingUp size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
-                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
+                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id, a.description)}</div></div>
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
                             </button>))}</div>
                           </CollabGroup>
@@ -1259,7 +1269,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                           <CollabGroup id="other" title="其他" icon={<Bot size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
-                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id)}</div></div>
+                              <div className="flex-1 min-w-0"><div className="text-xs font-medium" style={{ color: "var(--oc-text-primary)" }}>{a.name}</div><div className="text-[10px] mt-0.5" style={{ color: "var(--oc-text-secondary)" }}>{agentDesc(a.id, a.description)}</div></div>
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)" }}>用 →</span>
                             </button>))}</div>
                           </CollabGroup>
