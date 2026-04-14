@@ -158,18 +158,13 @@ export async function routeMessage(
   const score = scorePlatformIntent(message);
   if (score < SCORE_THRESHOLD) return false;
 
-  // L2: DeepSeek 分类
-  writer.writeText("🧠 正在理解你的需求...\n\n");
+  // L2: DeepSeek 分类（不提前写提示，等确认是平台意图后再写）
   const intent = await classifyIntent(message);
 
   // L2 失败或判定 passthrough
   if (!intent || intent.type === "passthrough") {
-    if (score >= SCORE_HIGH_CONFIDENCE) {
-      // L1 高分但 L2 失败（DeepSeek 挂了）→ 提示用户重试
-      writer.writeText("⚠️ 意图识别暂时不可用，请稍后重试或在侧边栏手动操作。\n");
-      writer.writeEnd();
-      return true;
-    }
+    // L1 高分但 L2 失败/passthrough → 回退给 Agent（不阻断用户对话）
+    // 之前的做法是 return true 阻断，但这会导致普通聊天被吃掉
     // L1 低分 + L2 passthrough → 不是平台操作，回退给 Agent
     // 关键：不能吃掉消息！返回 false 让调用方转发给 Agent
     return false;
@@ -189,7 +184,8 @@ export async function routeMessage(
     return true;
   }
 
-  // auto: 直接执行
+  // auto: 确认是平台意图后再提示
+  writer.writeText("🧠 正在理解你的需求...\n\n");
   const { executePlatformIntent } = await import("./intent-executor");
   await executePlatformIntent(adoptId, intent, writer);
   return true;

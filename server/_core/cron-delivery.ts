@@ -83,27 +83,41 @@ async function pollAndDeliver() {
 
       console.log(`[CRON-DELIVERY] delivering "${cfg.jobName}" to ${cfg.channel} for ${cfg.adoptId}`);
 
+      let deliveryOk = false;
       if (cfg.channel === "weixin") {
         try {
           const { sendMessageToWeixin } = await import("./claw-weixin-bridge");
           await sendMessageToWeixin(cfg.adoptId, `⏰ 定时任务「${cfg.jobName}」\n\n${summary}`);
           console.log(`[CRON-DELIVERY] weixin sent OK`);
+          deliveryOk = true;
         } catch (e: any) {
           console.error(`[CRON-DELIVERY] weixin send failed:`, e?.message);
         }
       } else {
         try {
           const INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026"; // TODO: import from constants.ts
-          await fetch("http://127.0.0.1:5180/api/claw/notify/test", {
+          const resp = await fetch("http://127.0.0.1:5180/api/claw/notify/test", {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-Internal-Key": INTERNAL_KEY },
             body: JSON.stringify({ adoptId: cfg.adoptId, channel: cfg.channel, message: `⏰ ${cfg.jobName}\n\n${summary}` }),
           });
-        } catch {}
+          if (resp.ok) {
+            const body = await resp.json() as any;
+            deliveryOk = body?.ok !== false;
+            if (!deliveryOk) console.error(`[CRON-DELIVERY] notify returned ok=false`);
+          } else {
+            console.error(`[CRON-DELIVERY] notify HTTP ${resp.status}`);
+          }
+        } catch (e: any) {
+          console.error(`[CRON-DELIVERY] notify send error:`, e?.message);
+        }
       }
 
-      cfg.lastDeliveredRunTs = runTs;
-      saveConfigs(configs);
+      // 只在投递成功时标记，失败则下次轮询会重试
+      if (deliveryOk) {
+        cfg.lastDeliveredRunTs = runTs;
+        saveConfigs(configs);
+      }
     } catch (e: any) {
       console.error(`[CRON-DELIVERY] error for ${cfg.adoptId}/${cfg.jobName}:`, e?.message);
     }

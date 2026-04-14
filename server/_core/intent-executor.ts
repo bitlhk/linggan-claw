@@ -20,9 +20,17 @@ async function getUserChannels(adoptId: string): Promise<string[]> {
     const nResp = await fetch(`${BASE}/api/claw/notify/config?adoptId=${encodeURIComponent(adoptId)}`, { headers: { "X-Internal-Key": INTERNAL_KEY } });
     const nData = await nResp.json() as any;
     const cfg = nData?.config || {};
-    if (cfg.wecom?.enabled) channels.push("wecom");
-    if (cfg.feishu?.enabled) channels.push("feishu");
-    if (cfg.webhook?.enabled) channels.push("webhook");
+    // config 是扁平结构: { type, corpId, agentId, secret, webhook }
+    // type="wecom" 且 corpId 非空 → 企业微信已配置
+    // type="feishu" 或 webhook 非空 → 飞书/Webhook 已配置
+    const cfgType = String(cfg.type || "none");
+    if ((cfgType === "wecom" || cfgType === "wechat_work") && cfg.corpId) channels.push("wecom");
+    if (cfgType === "feishu" && cfg.webhook) channels.push("feishu");
+    if (cfgType === "webhook" && cfg.webhook) channels.push("webhook");
+    // 兼容: 如果 type 不是 none 且有 webhook，也算可用
+    if (cfgType !== "none" && cfg.webhook && !channels.includes("webhook") && !channels.includes("feishu")) {
+      channels.push(cfgType as any);
+    }
   } catch {}
   return channels;
 }

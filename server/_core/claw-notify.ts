@@ -86,14 +86,18 @@ async function sendWebhook(config: any, text: string, title?: string): Promise<{
 }
 
 // 统一发送入口
-export async function sendNotification(adoptId: string, text: string, title?: string): Promise<{ ok: boolean; error?: string }> {
+export async function sendNotification(adoptId: string, text: string, title?: string, channel?: string): Promise<{ ok: boolean; error?: string }> {
   const configs = loadConfigs();
   const cfg = configs[adoptId];
-  if (!cfg || cfg.type === "none" || !cfg.type) return { ok: true }; // 没配置 = 静默成功
-  if (cfg.type === "wechat_work") return sendWechatWork(cfg, text, title);
-  if (cfg.type === "feishu") return sendFeishu(cfg, text, title);
-  if (cfg.type === "webhook") return sendWebhook(cfg, text, title);
-  return { ok: false, error: `未知通知类型: ${cfg.type}` };
+  if (!cfg || cfg.type === "none" || !cfg.type) return { ok: true };
+  // channel 参数可覆盖 cfg.type（内部调用指定渠道时使用）
+  const sendType = channel || cfg.type;
+  // 统一别名：wecom → wechat_work
+  const t = sendType === "wecom" ? "wechat_work" : sendType;
+  if (t === "wechat_work") return sendWechatWork(cfg, text, title);
+  if (t === "feishu") return sendFeishu(cfg, text, title);
+  if (t === "webhook") return sendWebhook(cfg, text, title);
+  return { ok: false, error: "unknown notify type: " + sendType };
 }
 
 export function registerNotifyRoutes(app: express.Express) {
@@ -149,14 +153,27 @@ export function registerNotifyRoutes(app: express.Express) {
     }
   });
 
-  // 测试发送
+  // 通知发送（支持测试 + 内部调用）
   app.post("/api/claw/notify/test", async (req, res) => {
     try {
       const adoptId = String(req.body?.adoptId || "").trim();
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
-      const claw = await requireClawOwner(req, res, adoptId);
-      if (!claw) return;
-      const result = await sendNotification(adoptId, "🦞 这是一条测试消息\n\n如果你看到了，说明灵虾通知配置成功！", "灵虾通知测试");
+
+      // 支持内部调用（X-Internal-Key）和用户调用（requireClawOwner）
+      const internalKey = req.headers["x-internal-key"] || "";
+      const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+      if (internalKey !== expectedKey) {
+        const claw = await requireClawOwner(req, res, adoptId);
+        if (!claw) return;
+      }
+
+      // 使用请求体中的 message，没有则用默认测试文案
+      const message = String(req.body?.message || "").trim()
+        || "\u{1F99E} \u8fd9\u662f\u4e00\u6761\u6d4b\u8bd5\u6d88\u606f\n\n\u5982\u679c\u4f60\u770b\u5230\u4e86\uff0c\u8bf4\u660e\u7075\u867e\u901a\u77e5\u914d\u7f6e\u6210\u529f\uff01";
+      const title = String(req.body?.title || "\u7075\u867e\u901a\u77e5").trim();
+      const channel = String(req.body?.channel || "").trim();
+
+      const result = await sendNotification(adoptId, message, title, channel || undefined);
       res.json(result);
     } catch (e: any) {
       res.status(500).json({ ok: false, error: e.message });

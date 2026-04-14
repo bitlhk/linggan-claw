@@ -218,6 +218,9 @@ export function registerBusinessRoutes(app: express.Express) {
     // ── 平台级记忆：创建响应缓冲器 ──
     const memAcc = new ResponseAccumulator(userId, String(agentId), msgStr);
 
+    // ── 合规缓冲（各 Hermes 分支共享）──
+    let creditReportBuffer = "";
+
     // ── 智贷决策助手专用分支：走 Hermes + 银保监+工银智涌 grounding ──
     if (bizAgentCfg?.kind === "remote" && agentId === "task-credit-risk") {
       const tenantCtx: TenantContext = await beginTenantSession(
@@ -226,8 +229,8 @@ export function registerBusinessRoutes(app: express.Express) {
       );
       const creditSessionKey = `task-credit-risk_user${userId}_${tenantCtx.sessionKey}`;
       console.log("[CREDIT-RISK] starting run", { agentId, session: creditSessionKey, tenant: tenantCtx.tenantShort });
-      // 合规验证器：缓冲报告文本，流结束后自动检查
-      let creditReportBuffer = "";
+      // 合规验证器：每次请求重置缓冲
+      creditReportBuffer = "";
       const creditUrl = new URL(bizAgentCfg.apiUrl || "http://127.0.0.1:8642");
       const creditToken = bizAgentCfg.apiToken || "";
 
