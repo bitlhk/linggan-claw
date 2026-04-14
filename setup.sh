@@ -10,109 +10,252 @@ echo "  ────────────────────────
 echo ""
 
 ENV_FILE=".env"
+SKIP_ENV=""
 
 if [[ -f "$ENV_FILE" ]]; then
   echo "⚠️  检测到已有 .env 文件。"
   read -rp "覆盖？(y/N) " overwrite
   if [[ "$overwrite" != "y" && "$overwrite" != "Y" ]]; then
-    echo "跳过配置，使用已有 .env"
-    exit 0
+    echo "跳过 .env 生成，继续后续步骤..."
+    SKIP_ENV=true
   fi
 fi
 
-# 生成随机密钥
 gen_secret() { openssl rand -base64 32 2>/dev/null || head -c 32 /dev/urandom | base64; }
+gen_hex() { openssl rand -hex "$1" 2>/dev/null || head -c "$1" /dev/urandom | xxd -p; }
 
-echo "📝 请输入以下配置（直接回车使用默认值）："
+# ── Step 1: 生成 .env ──────────────────────────────────────────────
+if [[ "$SKIP_ENV" != "true" ]]; then
+  echo "📝 Step 1/4: 配置环境变量"
+  echo ""
+
+  read -rp "  应用端口 [5180]: " PORT
+  PORT=${PORT:-5180}
+
+  echo ""
+  echo "  访问方式:"
+  echo "    1. 本机访问 (localhost)"
+  echo "    2. 内网 IP 访问"
+  echo "    3. 域名访问"
+  read -rp "  选择 [1]: " ACCESS_MODE
+  ACCESS_MODE=${ACCESS_MODE:-1}
+
+  case $ACCESS_MODE in
+    2)
+      read -rp "  内网 IP: " LAN_IP
+      FRONTEND_URL="http://${LAN_IP}:${PORT}"
+      CORS_ORIGIN="http://${LAN_IP}:${PORT}"
+      COOKIE_DOMAIN=""
+      DEMO_DOMAIN=""
+      ;;
+    3)
+      read -rp "  域名 (如 ai.company.com): " DOMAIN
+      FRONTEND_URL="https://${DOMAIN}"
+      CORS_ORIGIN="https://${DOMAIN}"
+      COOKIE_DOMAIN=".${DOMAIN}"
+      DEMO_DOMAIN="demo.${DOMAIN}"
+      ;;
+    *)
+      FRONTEND_URL="http://localhost:${PORT}"
+      CORS_ORIGIN="http://localhost:${PORT}"
+      COOKIE_DOMAIN=""
+      DEMO_DOMAIN=""
+      ;;
+  esac
+
+  echo ""
+  echo "  数据库:"
+  echo "    1. Docker Compose 自带 MySQL"
+  echo "    2. 使用已有的 MySQL"
+  read -rp "  选择 [1]: " DB_MODE
+  DB_MODE=${DB_MODE:-1}
+
+  MYSQL_ROOT_PASSWORD=""
+  if [[ "$DB_MODE" == "2" ]]; then
+    read -rp "  MySQL 地址 [localhost]: " DB_HOST
+    DB_HOST=${DB_HOST:-localhost}
+    read -rp "  MySQL 端口 [3306]: " DB_PORT
+    DB_PORT=${DB_PORT:-3306}
+    read -rp "  MySQL 用户 [linggan]: " DB_USER
+    DB_USER=${DB_USER:-linggan}
+    read -rsp "  MySQL 密码: " DB_PASS
+    echo ""
+    read -rp "  数据库名 [linggan]: " DB_NAME
+    DB_NAME=${DB_NAME:-linggan}
+    DATABASE_URL="mysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+  else
+    DEFAULT_PWD=$(gen_hex 12)
+    MYSQL_ROOT_PASSWORD="$DEFAULT_PWD"
+    DATABASE_URL="mysql://root:${DEFAULT_PWD}@db:3306/linggan"
+    echo "  MySQL 密码已自动生成"
+  fi
+
+  JWT_SECRET=$(gen_secret)
+  TENANT_SECRET=$(gen_hex 32)
+  GW_TOKEN=$(gen_hex 24)
+
+  {
+    echo "# ── LingganClaw 配置（由 setup.sh 生成）──"
+    echo "PORT=$PORT"
+    echo "NODE_ENV=production"
+    echo ""
+    echo "# 访问"
+    echo "FRONTEND_URL=$FRONTEND_URL"
+    echo "CORS_ORIGIN=$CORS_ORIGIN"
+    echo "COOKIE_DOMAIN=$COOKIE_DOMAIN"
+    echo ""
+    echo "# 数据库"
+    echo "DATABASE_URL=$DATABASE_URL"
+    [[ -n "$MYSQL_ROOT_PASSWORD" ]] && echo "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD"
+    echo ""
+    echo "# 认证与安全"
+    echo "JWT_SECRET=$JWT_SECRET"
+    echo "TENANT_SECRET=$TENANT_SECRET"
+    echo ""
+    echo "# OpenClaw"
+    echo "CLAW_PROVISION_MODE=local-script"
+    echo "CLAW_CHAT_MODE=local-openclaw"
+    echo "CLAW_OPENCLAW_HOME=\$HOME"
+    echo "CLAW_REMOTE_OPENCLAW_HOME=\$HOME"
+    echo "CLAW_GATEWAY_PORT=18789"
+    echo "CLAW_GATEWAY_TOKEN=$GW_TOKEN"
+    echo "CLAW_REMOTE_HOST=127.0.0.1"
+    echo ""
+    echo "# 灵虾路由"
+    [[ -n "$DEMO_DOMAIN" ]] && echo "LINGGAN_CLAW_BASE_DOMAIN=$DEMO_DOMAIN"
+    [[ -n "$DEMO_DOMAIN" ]] && echo "DEMO_ROUTE_DOMAIN=$DEMO_DOMAIN"
+    [[ -n "$COOKIE_DOMAIN" ]] && echo "LINGGAN_CLAW_ENTRY_SCHEME=https" || echo "LINGGAN_CLAW_ENTRY_SCHEME=http"
+    echo ""
+    echo "# 平台记忆（需要 DEEPSEEK_API_KEY）"
+    echo "MEMORY_ENABLED=true"
+    echo "MEMORY_EXTRACT_INTERVAL=5"
+    echo "# DEEPSEEK_API_KEY="
+    echo ""
+    echo "# 沙箱"
+    echo "SANDBOX_IMAGE=python:3.11-slim"
+    echo "SANDBOX_MEMORY=256m"
+    echo "SANDBOX_CPUS=0.5"
+    echo "SANDBOX_PIDS_LIMIT=50"
+    echo "SANDBOX_TMPFS_SIZE=50m"
+    echo "SANDBOX_EXEC_TIMEOUT_MS=10000"
+    echo "SANDBOX_MAX_OUTPUT_BYTES=65536"
+    echo "SANDBOX_MAX_GLOBAL=5"
+    echo "SANDBOX_MAX_PER_USER=2"
+  } > "$ENV_FILE"
+
+  echo ""
+  echo "  ✅ .env 已生成"
+fi
+
+# ── Step 2: 检测 OpenClaw ─────────────────────────────────────────
 echo ""
+echo "📝 Step 2/4: 检测 OpenClaw"
 
-read -rp "  应用端口 [5180]: " PORT
-PORT=${PORT:-5180}
+if command -v openclaw >/dev/null 2>&1; then
+  OC_VERSION=$(openclaw --version 2>/dev/null | head -1)
+  echo "  ✅ 检测到 OpenClaw: $OC_VERSION"
 
-DEFAULT_PWD=$(gen_secret | tr -dc "a-zA-Z0-9" | head -c 16)
-read -rp "  MySQL 密码 [自动生成]: " MYSQL_PWD
-MYSQL_PWD=${MYSQL_PWD:-$DEFAULT_PWD}
-echo "  → 使用密码: ${MYSQL_PWD:0:4}****"
+  GW_TOKEN=$(grep "^CLAW_GATEWAY_TOKEN=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "")
+  CORS_URL=$(grep "^FRONTEND_URL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "")
+  OC_HOME="${HOME}/.openclaw"
+  OC_CONFIG="$OC_HOME/openclaw.json"
 
-read -rp "  你的域名（留空则用 localhost）: " DOMAIN
-DOMAIN=${DOMAIN:-}
+  if [[ -f "$OC_CONFIG" && -n "$GW_TOKEN" ]]; then
+    echo "  正在同步灵虾配置到 OpenClaw..."
 
-JWT_SECRET=$(gen_secret)
+    python3 << PYEOF
+import json, sys
+try:
+    with open("$OC_CONFIG") as f:
+        cfg = json.load(f)
 
-if [[ -n "$DOMAIN" ]]; then
-  FRONTEND_URL="https://$DOMAIN"
-  CORS_ORIGIN="https://$DOMAIN,https://www.$DOMAIN"
-  COOKIE_DOMAIN=".$DOMAIN"
-  DEMO_DOMAIN="demo.$DOMAIN"
+    changed = False
+
+    # Token
+    gw = cfg.setdefault("gateway", {})
+    auth = gw.setdefault("auth", {})
+    if auth.get("token") != "$GW_TOKEN":
+        auth["token"] = "$GW_TOKEN"
+        auth["mode"] = "token"
+        changed = True
+        print("    - Gateway Token: 已同步")
+
+    # Bind
+    if gw.get("bind") != "lan":
+        gw["bind"] = "lan"
+        changed = True
+        print("    - bind: 已设为 lan")
+
+    # AllowedOrigins
+    origins = gw.setdefault("controlUi", {}).setdefault("allowedOrigins", [])
+    for url in ["$CORS_URL", "http://localhost:5180", "http://127.0.0.1:5180"]:
+        if url and url not in origins:
+            origins.append(url)
+            changed = True
+            print(f"    - allowedOrigins: 添加 {url}")
+
+    if changed:
+        with open("$OC_CONFIG", "w") as f:
+            json.dump(cfg, f, indent=2)
+        print("  ✅ OpenClaw 配置已更新")
+    else:
+        print("  ✅ OpenClaw 配置已是最新")
+except Exception as e:
+    print(f"  ⚠️  配置同步失败: {e}")
+PYEOF
+  elif [[ ! -f "$OC_CONFIG" ]]; then
+    echo "  未找到配置文件，请先运行: openclaw setup"
+    echo "  然后重新运行本脚本"
+  fi
 else
-  FRONTEND_URL="http://localhost:$PORT"
-  CORS_ORIGIN="http://localhost:$PORT"
-  COOKIE_DOMAIN=""
-  DEMO_DOMAIN=""
+  echo "  ❌ 未检测到 OpenClaw"
+  echo ""
+  echo "  灵虾的主聊天功能依赖 OpenClaw，请先安装:"
+  echo "    npm install -g openclaw"
+  echo "    openclaw setup"
+  echo ""
+  echo "  安装后重新运行本脚本，将自动配置。"
+  echo "  详见: docs/DEPLOY.md"
 fi
 
-read -rp "  OpenClaw Gateway Token（留空则自动生成）: " GW_TOKEN
-if [[ -z "$GW_TOKEN" ]]; then
-  GW_TOKEN=$(openssl rand -hex 24 2>/dev/null || head -c 24 /dev/urandom | xxd -p)
+# ── Step 3: 安装依赖 ──────────────────────────────────────────────
+echo ""
+echo "📝 Step 3/4: 安装依赖"
+
+if command -v pnpm >/dev/null 2>&1; then
+  pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+  echo "  ✅ 依赖已安装"
+else
+  echo "  ⚠️  未检测到 pnpm: npm install -g pnpm"
 fi
 
-cat > "$ENV_FILE" << ENVEOF
-# ── LingganClaw 配置（由 setup.sh 生成）──
-PORT=$PORT
-NODE_ENV=production
-
-# 域名
-FRONTEND_URL=$FRONTEND_URL
-CORS_ORIGIN=$CORS_ORIGIN
-COOKIE_DOMAIN=$COOKIE_DOMAIN
-
-# 数据库（Docker Compose 模式下自动连接容器内 MySQL）
-DATABASE_URL=mysql://root:$MYSQL_PWD@db:3306/linggan
-MYSQL_ROOT_PASSWORD=$MYSQL_PWD
-
-# 认证
-JWT_SECRET=$JWT_SECRET
-
-# OpenClaw
-CLAW_PROVISION_MODE=local-script
-CLAW_CHAT_MODE=local-openclaw
-CLAW_OPENCLAW_HOME=/root
-CLAW_REMOTE_OPENCLAW_HOME=/root
-CLAW_GATEWAY_PORT=18789
-CLAW_GATEWAY_TOKEN=$GW_TOKEN
-
-# 灵虾子域名
-LINGGAN_CLAW_BASE_DOMAIN=$DEMO_DOMAIN
-LINGGAN_CLAW_ENTRY_SCHEME=https
-DEMO_ROUTE_DOMAIN=$DEMO_DOMAIN
-
-# 沙箱
-SANDBOX_IMAGE=python:3.11-slim
-SANDBOX_MEMORY=256m
-SANDBOX_CPUS=0.5
-SANDBOX_PIDS_LIMIT=50
-SANDBOX_TMPFS_SIZE=50m
-SANDBOX_EXEC_TIMEOUT_MS=10000
-SANDBOX_MAX_OUTPUT_BYTES=65536
-SANDBOX_MAX_GLOBAL=5
-SANDBOX_MAX_PER_USER=2
-ENVEOF
-
+# ── Step 4: 数据库迁移 ────────────────────────────────────────────
 echo ""
-echo "✅ 配置已写入 .env"
+echo "📝 Step 4/4: 数据库迁移"
+
+DB_URL=$(grep "^DATABASE_URL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "")
+if [[ "$DB_URL" == *"@db:"* ]]; then
+  echo "  Docker Compose 数据库，请先: docker compose up -d db"
+  echo "  然后运行: pnpm db:push"
+else
+  if command -v pnpm >/dev/null 2>&1; then
+    if pnpm db:push 2>/dev/null; then
+      echo "  ✅ 数据库迁移完成"
+    else
+      echo "  ⚠️  迁移失败，请检查 DATABASE_URL"
+    fi
+  fi
+fi
+
+# ── 完成 ──────────────────────────────────────────────────────────
 echo ""
-echo "📋 下一步："
+echo "  ─────────────────────────────────"
+echo "  🦐 灵虾初始化完成！"
+echo "  ─────────────────────────────────"
 echo ""
-echo "  方式一：Docker Compose 一键启动（推荐）"
-echo "    docker compose up -d"
+echo "  启动方式："
+echo "    Docker:  docker compose up -d"
+echo "    手动:    pnpm build && pnpm start"
 echo ""
-echo "  方式二：手动启动（需自备 MySQL）"
-echo "    # 修改 .env 中的 DATABASE_URL 指向你的 MySQL"
-echo "    pnpm install"
-echo "    pnpm db:push"
-echo "    pnpm build"
-echo "    pnpm start"
-echo ""
-echo "  服务地址: $FRONTEND_URL"
-echo "  Gateway Token: $GW_TOKEN"
+echo "  访问: $(grep '^FRONTEND_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo 'http://localhost:5180')"
 echo ""

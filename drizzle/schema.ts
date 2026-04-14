@@ -451,6 +451,7 @@ export const businessAgents = mysqlTable("business_agents", {
   lastHealthCheck: timestamp("last_health_check"),
   allowedProfiles: varchar("allowed_profiles", { length: 128 }).default("plus,internal"),
   tags:          varchar("tags", { length: 256 }).default(""),
+  systemPrompt:  text("system_prompt"),
   createdAt:     timestamp("created_at").defaultNow().notNull(),
   updatedAt:     timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
@@ -493,3 +494,18 @@ export const skillMarketplace = mysqlTable("skill_marketplace", {
 
 export type SkillMarketItem = typeof skillMarketplace.$inferSelect;
 export type InsertSkillMarketItem = typeof skillMarketplace.$inferInsert;
+
+// ── 用户记忆 (平台级) ──
+export const userMemories = mysqlTable("user_memories", {
+  id:           int("id").autoincrement().primaryKey(),
+  userId:       int("user_id").notNull(),
+  adoptId:      varchar("adopt_id", { length: 64 }),
+  target:       varchar("target", { length: 16 }).notNull().default("memory"),
+  content:      text("content").notNull(),
+  sourceAgent:  varchar("source_agent", { length: 64 }),
+  createdAt:    timestamp("created_at").defaultNow().notNull(),
+  updatedAt:    timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+export type UserMemory = typeof userMemories.$inferSelect;
+export type InsertUserMemory = typeof userMemories.$inferInsert;

@@ -11,7 +11,6 @@ import { ResponseAccumulator, injectMemory } from "./response-accumulator";
 export function registerBusinessRoutes(app: express.Express) {
 
   // ── TIL 辅助：远端 file-service 代理 + tenantShort 计算 ────────────
-  const HERMES_SKILLS_ROOT = process.env.HERMES_SKILLS_ROOT || "/home/ubuntu/.hermes/skills";
   const TENANT_SECRET_LOCAL = process.env.TENANT_SECRET || "linggan-tenant-2026-default-change-me";
   const REMOTE_FILE_SERVICE_PORT = 19798;
   // file-service 自己的 auth token，跟 bizAgent.apiToken（agent backend token）不同
@@ -259,8 +258,8 @@ export function registerBusinessRoutes(app: express.Express) {
         "POST-LOAN: 贷后预警 → post_loan_monitor + risk_classification + guarantee_value",
         "COMPLIANCE: 合规自查 → compliance_check",
         "",
-        `【7 个工具】均位于 ${HERMES_SKILLS_ROOT}/finance/credit-risk/tools/，必须用 terminal 调用：`,
-        `echo \'{...}\' | python ${HERMES_SKILLS_ROOT}/finance/credit-risk/tools/<tool>.py`,
+        "【7 个工具】均位于 /home/ubuntu/.hermes/skills/finance/credit-risk/tools/，必须用 terminal 调用：",
+        "echo \'{...}\' | python /home/ubuntu/.hermes/skills/finance/credit-risk/tools/<tool>.py",
         "",
         "工具：credit_lookup / financial_statement / guarantee_value / risk_classification / pricing_recommend / post_loan_monitor / compliance_check",
         "",
@@ -281,7 +280,7 @@ export function registerBusinessRoutes(app: express.Express) {
 
       const runBody = JSON.stringify({
         input: msgStr,
-        instructions: await injectMemory(userId, (bizAgentCfg as any).systemPrompt || CREDIT_SYSTEM_PROMPT),
+        instructions: CREDIT_SYSTEM_PROMPT,
         session_id: creditSessionKey,
       });
 
@@ -378,7 +377,6 @@ export function registerBusinessRoutes(app: express.Express) {
                       res.write(`data: ${JSON.stringify({
                         choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
                       })}\n\n`);
-                      memAcc.appendDelta(deltaText);
                     } else if (evtType === "tool.started") {
                       // 🛡️ L2 安全护栏
                       if (evt.tool === "terminal") {
@@ -408,7 +406,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         name: friendlyName,
                         preview: friendlyPreview,
                       })}\n\n`);
-                      memAcc.addToolEvent(evt.tool || "tool", "started");
                     } else if (evtType === "tool.completed") {
                       const [friendlyName] = translateTool(evt.tool || "", evt.preview || "");
                       res.write(`data: ${JSON.stringify({
@@ -417,7 +414,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         is_error: Boolean(evt.error),
                         durationMs: Math.round((evt.duration || 0) * 1000),
                       })}\n\n`);
-                      memAcc.addToolEvent(evt.tool || "tool", "completed");
                     } else if (evtType === "reasoning.available") {
                       res.write(`data: ${JSON.stringify({ __reasoning: evt.text || "" })}\n\n`);
                     } else if (evtType === "run.completed") {
@@ -441,7 +437,6 @@ export function registerBusinessRoutes(app: express.Express) {
                 console.log("[CREDIT-RISK] events stream ended");
                 clearInterval(creditHeartbeat);
                 auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
-                memAcc.flush();
                 // ── 生成-验证者：合规自检（流结束后执行）──
                 if (creditReportBuffer.length > 100 && !res.writableEnded) {
                   try {
@@ -522,8 +517,8 @@ export function registerBusinessRoutes(app: express.Express) {
         "CREDIT: 信用风险分析 → bond_lookup + rating_lookup + credit_spread + default_warning",
         "MACRO: 利率宏观影响 → yield_curve + duration_analyzer 场景模拟",
         "",
-        `【6 个工具】均位于 ${HERMES_SKILLS_ROOT}/finance/bond/tools/，必须用 terminal 调用：`,
-        `echo \'{...}\' | python ${HERMES_SKILLS_ROOT}/finance/bond/tools/<tool>.py`,
+        "【6 个工具】均位于 /home/ubuntu/.hermes/skills/finance/bond/tools/，必须用 terminal 调用：",
+        "echo \'{...}\' | python /home/ubuntu/.hermes/skills/finance/bond/tools/<tool>.py",
         "",
         "工具：",
         "- yield_curve         拉中债收益率曲线（akshare 真实数据，国债/商业银行/中短票）",
@@ -545,7 +540,7 @@ export function registerBusinessRoutes(app: express.Express) {
 
       const runBody = JSON.stringify({
         input: msgStr,
-        instructions: await injectMemory(userId, (bizAgentCfg as any).systemPrompt || BOND_SYSTEM_PROMPT),
+        instructions: BOND_SYSTEM_PROMPT,
         session_id: bondSessionKey,
       });
 
@@ -640,7 +635,6 @@ export function registerBusinessRoutes(app: express.Express) {
                       res.write(`data: ${JSON.stringify({
                         choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
                       })}\n\n`);
-                      memAcc.appendDelta(deltaText);
                     } else if (evtType === "tool.started") {
                       // 🛡️ L2 安全护栏：terminal 沙箱区检查
                       if (evt.tool === "terminal") {
@@ -670,7 +664,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         name: friendlyName,
                         preview: friendlyPreview,
                       })}\n\n`);
-                      memAcc.addToolEvent(evt.tool || "tool", "started");
                     } else if (evtType === "tool.completed") {
                       const [friendlyName] = translateTool(evt.tool || "", evt.preview || "");
                       res.write(`data: ${JSON.stringify({
@@ -679,7 +672,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         is_error: Boolean(evt.error),
                         durationMs: Math.round((evt.duration || 0) * 1000),
                       })}\n\n`);
-                      memAcc.addToolEvent(evt.tool || "tool", "completed");
                     } else if (evtType === "reasoning.available") {
                       res.write(`data: ${JSON.stringify({ __reasoning: evt.text || "" })}\n\n`);
                     } else if (evtType === "run.completed") {
@@ -703,7 +695,6 @@ export function registerBusinessRoutes(app: express.Express) {
                 console.log("[BOND] events stream ended");
                 clearInterval(bondHeartbeat);
                 auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
-                memAcc.flush();
                 if (!res.writableEnded) {
                   res.write(`data: [DONE]\n\n`);
                   res.end();
@@ -769,8 +760,8 @@ export function registerBusinessRoutes(app: express.Express) {
         "DEEPDIVE: 深度研究单一资产 → stock_quote + fund_lookup + macro_indicator",
         "TAX: 税费估算 → tax_estimate",
         "",
-        `【7 个工具】均位于 ${HERMES_SKILLS_ROOT}/personal/wealth/tools/，必须用 terminal 工具调用：`,
-        `echo \'{...}\' | python ${HERMES_SKILLS_ROOT}/personal/wealth/tools/<tool>.py`,
+        "【7 个工具】均位于 /home/ubuntu/.hermes/skills/personal/wealth/tools/，必须用 terminal 工具调用：",
+        "echo \'{...}\' | python /home/ubuntu/.hermes/skills/personal/wealth/tools/<tool>.py",
         "",
         "工具列表：",
         "- holdings_read       读取本地 holdings.json（input: {}）",
@@ -799,7 +790,7 @@ export function registerBusinessRoutes(app: express.Express) {
       // Step 1: POST /v1/runs
       const runBody = JSON.stringify({
         input: msgStr,
-        instructions: await injectMemory(userId, (bizAgentCfg as any).systemPrompt || MY_WEALTH_SYSTEM_PROMPT),
+        instructions: MY_WEALTH_SYSTEM_PROMPT,
         session_id: wealthSessionKey,
       });
 
@@ -898,7 +889,6 @@ export function registerBusinessRoutes(app: express.Express) {
                       res.write(`data: ${JSON.stringify({
                         choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
                       })}\n\n`);
-                      memAcc.appendDelta(deltaText);
                     } else if (evtType === "tool.started") {
                       // 🛡️ L2 安全护栏：terminal 沙箱区检查
                       if (evt.tool === "terminal") {
@@ -928,7 +918,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         name: friendlyName,
                         preview: friendlyPreview,
                       })}\n\n`);
-                      memAcc.addToolEvent(evt.tool || "tool", "started");
                     } else if (evtType === "tool.completed") {
                       const [friendlyName] = translateTool(evt.tool || "", evt.preview || "");
                       res.write(`data: ${JSON.stringify({
@@ -937,7 +926,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         is_error: Boolean(evt.error),
                         durationMs: Math.round((evt.duration || 0) * 1000),
                       })}\n\n`);
-                      memAcc.addToolEvent(evt.tool || "tool", "completed");
                     } else if (evtType === "reasoning.available") {
                       res.write(`data: ${JSON.stringify({ __reasoning: evt.text || "" })}\n\n`);
                     } else if (evtType === "run.completed") {
@@ -961,7 +949,6 @@ export function registerBusinessRoutes(app: express.Express) {
                 console.log("[MY-WEALTH] events stream ended");
                 clearInterval(wealthHeartbeat);
                 auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
-                memAcc.flush();
                 if (!res.writableEnded) {
                   res.write(`data: [DONE]\n\n`);
                   res.end();
@@ -1036,8 +1023,8 @@ export function registerBusinessRoutes(app: express.Express) {
         "模式 B：SALVAGE（全损残值） — 触发：车辆全损 → 调 battery_residual → echelon_channels",
         "",
         "【工具调用规范】",
-        `5 个工具均位于 ${HERMES_SKILLS_ROOT}/insurance/ev-claim/tools/，必须用 terminal 工具调用，stdin 传 JSON，stdout 接 JSON。`,
-        `调用语法：echo \'{...}\' | python ${HERMES_SKILLS_ROOT}/insurance/ev-claim/tools/<tool>.py`,
+        "5 个工具均位于 /home/ubuntu/.hermes/skills/insurance/ev-claim/tools/，必须用 terminal 工具调用，stdin 传 JSON，stdout 接 JSON。",
+        "调用语法：echo \'{...}\' | python /home/ubuntu/.hermes/skills/insurance/ev-claim/tools/<tool>.py",
         "5 个工具：vehicle_lookup / collision_analysis / oem_repair_protocol / battery_residual / echelon_channels",
         "每个工具的输出 JSON 都有 whitepaper_ref 字段——你必须把它的内容自然嵌入最终回复。",
         "",
@@ -1055,7 +1042,7 @@ export function registerBusinessRoutes(app: express.Express) {
       // Step 1: POST /v1/runs → 获取 run_id
       const runBody = JSON.stringify({
         input: msgStr,
-        instructions: await injectMemory(userId, (bizAgentCfg as any).systemPrompt || EV_CLAIM_SYSTEM_PROMPT),
+        instructions: EV_CLAIM_SYSTEM_PROMPT,
         session_id: claimSessionKey,
       });
 
@@ -1152,7 +1139,6 @@ export function registerBusinessRoutes(app: express.Express) {
                       res.write(`data: ${JSON.stringify({
                         choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
                       })}\n\n`);
-                      memAcc.appendDelta(deltaText);
                     } else if (evtType === "tool.started") {
                       // 🛡️ L2 安全护栏：terminal 工具沙箱区检查
                       // 防御 prompt injection 让 agent 跑非授权命令（rm -rf / curl 攻击者 / cat 敏感文件等）
@@ -1196,7 +1182,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         name: friendlyName,
                         preview: friendlyPreview,
                       })}\n\n`);
-                      memAcc.addToolEvent(evt.tool || "tool", "started");
                     } else if (evtType === "tool.completed") {
                       const [friendlyName] = translateTool(evt.tool || "", evt.preview || "");
                       res.write(`data: ${JSON.stringify({
@@ -1205,7 +1190,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         is_error: Boolean(evt.error),
                         durationMs: Math.round((evt.duration || 0) * 1000),
                       })}\n\n`);
-                      memAcc.addToolEvent(evt.tool || "tool", "completed");
                     } else if (evtType === "reasoning.available") {
                       res.write(`data: ${JSON.stringify({ __reasoning: evt.text || "" })}\n\n`);
                     } else if (evtType === "run.completed") {
@@ -1229,7 +1213,6 @@ export function registerBusinessRoutes(app: express.Express) {
                 console.log("[CLAIM-EV] events stream ended");
                 clearInterval(claimHeartbeat);
                 auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
-                memAcc.flush();
                 if (!res.writableEnded) {
                   res.write(`data: [DONE]\n\n`);
                   res.end();
@@ -1285,7 +1268,7 @@ export function registerBusinessRoutes(app: express.Express) {
 
       // Step 1: POST /v1/runs → 获取 run_id
       const runBody = JSON.stringify({
-        input: HERMES_SAFETY_PREFIX + await injectMemory(userId, "") + "\n用户消息：" + msgStr,
+        input: HERMES_SAFETY_PREFIX + "\n用户消息：" + msgStr,
         session_id: hermesSessionKey,  // 使用 TIL 脱敏后的 sessionKey
       });
 
@@ -1357,7 +1340,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         res.write(`data: ${JSON.stringify({
                           choices: [{ index: 0, delta: { content: deltaText }, finish_reason: null }],
                         })}\n\n`);
-                        memAcc.appendDelta(deltaText);
                       }
                     } else if (evtType === "tool.started") {
                       // 工具开始 → 全部用 data: 行（避免 SSE event: 前缀的解析问题）
@@ -1368,7 +1350,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         name: evt.tool || "tool",
                         preview: evt.preview || "",
                       })}\n\n`);
-                      memAcc.addToolEvent(evt.tool || "tool", "started");
                     } else if (evtType === "tool.completed") {
                       // 工具完成
                       res.write(`data: ${JSON.stringify({
@@ -1377,7 +1358,6 @@ export function registerBusinessRoutes(app: express.Express) {
                         is_error: Boolean(evt.error),
                         durationMs: Math.round((evt.duration || 0) * 1000),
                       })}\n\n`);
-                      memAcc.addToolEvent(evt.tool || "tool", "completed");
                     } else if (evtType === "reasoning.available") {
                       // 推理过程
                       res.write(`data: ${JSON.stringify({ __reasoning: evt.text || "" })}\n\n`);
@@ -1402,7 +1382,6 @@ export function registerBusinessRoutes(app: express.Express) {
                 clearInterval(hermesHeartbeat);
                 // TIL: 记录 chat_done 审计
                 auditTenantAccess(tenantCtx, "chat_done", {}).catch(() => {});
-                memAcc.flush();
                 if (!res.writableEnded) {
                   res.write(`data: [DONE]\n\n`);
                   res.end();
@@ -1497,7 +1476,6 @@ export function registerBusinessRoutes(app: express.Express) {
 
             if (state === "completed" || state === "failed" || state === "cancelled") {
               auditTenantAccess(tenantCtxTrace, "chat_done", { final_state: state }).catch(() => {});
-              memAcc.flush();
               if (state !== "completed") {
                 sseDelta("\n---\n\n❌ " + (statusData.error || statusData.result || "任务失败"));
                 res.write(`data: [DONE]\n\n`);
@@ -1596,7 +1574,7 @@ export function registerBusinessRoutes(app: express.Express) {
       // 注入 Kronos 量化预测工具指引
       const KRONOS_KEY = process.env.KRONOS_API_KEY || "";
       const KRONOS_HINT = KRONOS_KEY ? ("\n\n[平台工具] 你可以调用 Kronos 量化预测 API 获取价格预测数据：" +
-        `\ncurl -s -X POST http://127.0.0.1:8190/api/v1/predict -H 'Content-Type: application/json' -H 'X-API-Key: ${KRONOS_KEY}' -d '{"symbol":"股票代码","horizon":5}'` +
+        `\ncurl -s -X POST http://3.16.70.167:8190/api/v1/predict -H 'Content-Type: application/json' -H 'X-API-Key: ${KRONOS_KEY}' -d '{"symbol":"股票代码","horizon":5}'` +
         "\n返回：current_price(当前价) + signal(BUY/SELL/HOLD) + predictions(未来N天预测+置信区间)" +
         "\nA股代码直接用6位数字（如601398），美股用代码（如AAPL）。" +
         "\n在分析报告中融入预测数据时，必须注明'基于 Kronos 模型的量化预测，仅供参考，不构成投资建议'。\n") : "";
@@ -1665,7 +1643,6 @@ export function registerBusinessRoutes(app: express.Express) {
           console.log("[STOCK] stream ended");
           clearInterval(stockHeartbeat);
           auditTenantAccess(tenantCtxStock, "chat_done", {}).catch(() => {});
-          memAcc.flush();
           if (!res.writableEnded) { res.write(`data: [DONE]\n\n`); res.end(); }
         });
       });
@@ -1761,7 +1738,6 @@ export function registerBusinessRoutes(app: express.Express) {
           console.log("[TRADING] stream ended");
           clearInterval(heartbeat);
           auditTenantAccess(tenantCtxTrading, "chat_done", {}).catch(() => {});
-          memAcc.flush();
           if (!res.writableEnded) { res.write("data: [DONE]\n\n"); res.end(); }
         });
       });
@@ -1787,10 +1763,10 @@ export function registerBusinessRoutes(app: express.Express) {
         agentId, url: bizAgentCfg.apiUrl, remoteAgentId: bizAgentCfg.remoteAgentId,
         session: remoteSessionKey, tenant: tenantCtxRemote.tenantShort,
       });
-      const remoteUrl = new URL(bizAgentCfg.apiUrl || `http://${process.env.CLAW_REMOTE_GATEWAY_HOST || "127.0.0.1"}:19789`);
+      const remoteUrl = new URL(bizAgentCfg.apiUrl || "http://3.16.70.167:19789");
       const remoteGatewayHost = remoteUrl.hostname;
       const remoteGatewayPort = parseInt(String(remoteUrl.port || "19789"), 10);
-      const remoteGatewayToken = bizAgentCfg.apiToken || process.env.REMOTE_GATEWAY_TOKEN || "";
+      const remoteGatewayToken = bizAgentCfg.apiToken || "public-skill-demo-2026";
       const remoteAgentId = bizAgentCfg.remoteAgentId || "main";
 
       // remote agents: inject system prompt to avoid blocking AskUserQuestion tool
@@ -1833,7 +1809,7 @@ export function registerBusinessRoutes(app: express.Express) {
           "例外：如果用户说「快」「直接生成」「不用问」或一开始就给了完整内容+明确风格，可以跳过 Phase 1/2 直接进 Phase 3。",
           "",
           "始终用中文回复。生成的 HTML 通过 frontend-slides 技能写到文件，不要把整段 HTML 贴在聊天消息里。",
-        ].join("\n") + await injectMemory(userId, "") });
+        ].join("\n") });
       } else if (agentId === "task-code") {
         // 复用本地模式的代码助手 system prompt + 远程模式约束
         remoteMessages.push({ role: "system", content: [
@@ -1843,7 +1819,7 @@ export function registerBusinessRoutes(app: express.Express) {
           "- 绝对不要使用 AskUserQuestion 工具，它会导致会话阻塞。",
           "- 如果需要用户确认或选择，直接把问题作为普通文本输出，用户会在下一条消息中回复。",
           "- 禁止生成 HTML 幻灯片或演示文稿（那是其他 Agent 的职责）。",
-        ].join("\n") + await injectMemory(userId, "") });
+        ].join("\n") });
       } else if (agentId === "task-ppt") {
         remoteMessages.push({ role: "system", content: [
           "你是 PPT 生成技能，通过 scripts/generate.js 从 content.json 生成 PPT 文件。",
@@ -1874,7 +1850,7 @@ export function registerBusinessRoutes(app: express.Express) {
           "其中两个 `xxx` 都要替换成你实际生成的文件名（不含路径，不含 output 目录前缀）。必须包含 .pptx 和同名的 -preview.html 两个条目。不要改动 JSON 格式，不要放在摘要中间，必须是回复的最后一行。",
           "",
           "始终用中文回复。",
-        ].join("\n") + await injectMemory(userId, "") });
+        ].join("\n") });
       }
       remoteMessages.push({ role: "user", content: msgStr });
 
@@ -1903,14 +1879,12 @@ export function registerBusinessRoutes(app: express.Express) {
         // Manual forwarding instead of pipe — ensures keepalive writes don't get buffered
         proxyRes.on("data", (chunk: Buffer) => {
           console.log("[BIZ-STREAM] data chunk", chunk.length, "bytes");
-          try { const lines = chunk.toString().split("\n"); for (const line of lines) { if (line.startsWith("data: ") && !line.includes("[DONE]")) { const d = JSON.parse(line.slice(6)); const c = d?.choices?.[0]?.delta?.content; if (c) memAcc.appendDelta(c); } } } catch {}
           if (!res.writableEnded) res.write(chunk);
         });
         proxyRes.on("end", () => {
           console.log("[BIZ-STREAM] proxyRes ended");
           clearInterval(bizHeartbeat);
           auditTenantAccess(tenantCtxRemote, "chat_done", {}).catch(() => {});
-          memAcc.flush();
           // TIL: 调远端 file-service 拿文件列表，推送 workspace_files 事件
           (async () => {
             try {
@@ -1988,7 +1962,7 @@ export function registerBusinessRoutes(app: express.Express) {
       model: "openclaw",
       stream: true,
       messages: [
-        { role: "system", content: await injectMemory(userId, (bizAgentCfg as any)?.systemPrompt || TASK_CODE_SYSTEM_PROMPT) },
+        { role: "system", content: TASK_CODE_SYSTEM_PROMPT },
         { role: "user", content: msgStr },
       ],
     });
@@ -2012,14 +1986,12 @@ export function registerBusinessRoutes(app: express.Express) {
     }, (proxyRes: any) => {
       proxyRes.on("data", (chunk: Buffer) => {
           console.log("[BIZ-STREAM] data chunk", chunk.length, "bytes");
-        try { const lines = chunk.toString().split("\n"); for (const line of lines) { if (line.startsWith("data: ") && !line.includes("[DONE]")) { const d = JSON.parse(line.slice(6)); const c = d?.choices?.[0]?.delta?.content; if (c) memAcc.appendDelta(c); } } } catch {}
         if (!res.writableEnded) res.write(chunk);
       });
       proxyRes.on("end", () => {
           console.log("[BIZ-STREAM] proxyRes ended (local)");
         clearInterval(localHeartbeat);
         auditTenantAccess(tenantCtxLocal, "chat_done", { agent: perTenantAgentId }).catch(() => {});
-        memAcc.flush();
         if (!res.writableEnded) {
           // ── 扫描 workspace/output/ 推送产出文件（与 sandbox 路由同逻辑）──
           try {

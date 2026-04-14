@@ -20,6 +20,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { createHash, generateKeyPairSync, sign, randomUUID } from "crypto";
 import { createContext } from "./context";
 import { readSessionEpoch } from "./helpers";
+import { ResponseAccumulator } from "./response-accumulator";
 
 // ── Ed25519 设备身份（进程级复用）──
 const ED25519_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -82,6 +83,7 @@ export function registerWSProxy(server: Server) {
     let sessionKey: string | null = null;
     let pending: string[] = [];
     let lastUserSendMs: number = 0;
+    let memAcc: ResponseAccumulator | null = null;
 
     // 追踪当前工具调用的命令输出（toolCallId → output buffer）
     const cmdOutputBuffers = new Map<string, string>();
@@ -159,6 +161,7 @@ export function registerWSProxy(server: Server) {
 
           // ── 流式文本 ──
           if (stream === "assistant" && data.delta) {
+            if (memAcc) { memAcc.appendDelta(data.delta); if (memAcc.getBuffer().length === data.delta.length) console.log('[MEMORY-DEBUG] first delta received'); }
             sendToClient({
               choices: [{ index: 0, delta: { content: data.delta }, finish_reason: null }],
             });
@@ -275,6 +278,7 @@ export function registerWSProxy(server: Server) {
 
         // ── chat final 事件 ──
         if (msg.type === "event" && msg.event === "chat" && msg.payload?.state === "final") {
+          if (memAcc) { console.log("[MEMORY-DEBUG] chat final, flushing memAcc, buffer len:", memAcc.getBuffer().length); memAcc.flush(); memAcc = null; }
           sendToClient({
             choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
           });
@@ -319,6 +323,9 @@ export function registerWSProxy(server: Server) {
         const msg = JSON.parse(raw.toString());
         if (msg.type === "chat" && sessionKey) {
           lastUserSendMs = Date.now();
+          // 每次用户发消息，创建新的记忆缓冲器
+          if (memAcc) memAcc.flush(); // flush 上一轮
+          memAcc = new ResponseAccumulator(meta.userId, "main-chat", String(msg.message || ""));
 
           // ── 平台意图路由（与 HTTP 路径共用 intent-agent）──
           try {

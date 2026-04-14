@@ -9,6 +9,7 @@ import {
   readSessionEpoch, bumpSessionEpoch, lookupSessionRegistry,
   upsertSessionRegistry, clearAgentSessionsCache, isPrivateUrl, APP_ROOT
 } from "./helpers";
+import { ResponseAccumulator } from "./response-accumulator";
 
 export function registerChatStreamRoutes(app: express.Express) {
 
@@ -277,6 +278,10 @@ export function registerChatStreamRoutes(app: express.Express) {
       res.flushHeaders();
     }
     res.write(`data: ${JSON.stringify({ __perf: { routeEnterMs, gatewayRequestStartMs } })}\n\n`);
+
+    // ── 平台级记忆：缓冲响应用于偏好提取 ──
+    const chatUserId = Number((claw as any).userId || 0);
+    const memAcc = new ResponseAccumulator(chatUserId, 'main-chat', msgStr);
 
     // 用 Node 原生 http 模块直接管道，零缓冲
     const httpMod = await import("http");
@@ -567,6 +572,7 @@ const options = {
                 lastAnyDeltaAt = Date.now();
               }
               if (content) {
+                memAcc.appendDelta(content);
                 lastContentDeltaAt = Date.now();
                 recentContentBuffer = (recentContentBuffer + content).slice(-200);
                 // 收到 content 说明 Gateway 工具执行完毕
@@ -583,6 +589,7 @@ const options = {
       });
 
       proxyRes.on("end", () => {
+        memAcc.flush();
           console.log("[BIZ-STREAM] proxyRes ended");
         stopToolHeartbeat(); // 清理心跳 interval
         stopGatewayGapDetection(); // 清理 Gateway 空白检测

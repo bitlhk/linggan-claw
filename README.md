@@ -1,6 +1,6 @@
 # LingganClaw 灵虾
 
-> 开源的 AI Agent 托管平台 —— 每个用户领养自己的 AI 灵虾，在安全沙箱中对话、编程、生成文件。
+> 开源的 AI Agent 编排平台 —— 多智能体协议路由 + 策展式记忆 + 安全沙箱，让每个用户拥有专属 AI 灵虾。
 
 <p align="center">
   <img src="client/public/images/lingxia.svg" width="120" alt="灵虾 Logo" />
@@ -10,12 +10,14 @@
 
 LingganClaw 是一个基于 [OpenClaw](https://github.com/nicepkg/openclaw) 的 **多用户 AI Agent 平台**。用户注册后可以「领养」一只专属灵虾（AI Agent），灵虾运行在隔离的 Docker 沙箱中，支持：
 
-- 自然语言对话（SSE 流式输出）
-- 在沙箱中执行代码（Python / Node.js）
-- 生成并下载文件（PPT、文档等）
-- 安装和管理「技能」扩展能力
-- 长期记忆（跨会话记忆积累）
-- 多灵虾协作（Plus 套餐）
+- 自然语言对话（WebSocket / SSE 流式输出）
+- 多智能体路由（支持 OpenClaw / Hermes / 自定义 HTTP 协议）
+- 在沙箱中执行代码（Docker 隔离, seccomp 加固）
+- 生成并下载文件（PPT、HTML 幻灯片、代码等）
+- 策展式记忆（Hermes 风格, 自动提取用户偏好, 跨 Agent 共享）
+- 技能市场（安装 / 管理 / 分享技能）
+- 多渠道通知（微信 / 企业微信 / 飞书 / Webhook）
+- 定时任务（Cron 调度 + 自动推送）
 
 ## 页面结构
 
@@ -33,13 +35,19 @@ LingganClaw 是一个基于 [OpenClaw](https://github.com/nicepkg/openclaw) 的 
 ```
 浏览器 ──HTTPS──▶ Nginx ──▶ LingganClaw (Node.js :5180)
                                 │
-                                ├── ClawHome / ClawAdmin / 子虾控制台 (React SPA)
-                                ├── 后端 API (Express + tRPC)
+                                ├── React SPA (主聊天 + 业务 Agent + 技能市场)
+                                ├── Agent Router (4 种协议路由)
+                                ├── 平台记忆 (Hermes 式策展记忆)
+                                ├── 租户隔离层 (TIL)
                                 │
-                                └──HTTP──▶ OpenClaw Gateway (:18789)
-                                               │
-                                               ├── 子虾 Agent (per-user workspace)
-                                               └── Docker 沙箱 (隔离执行)
+                                ├──WebSocket──▶ OpenClaw Gateway (:18789)
+                                │                  ├── per-user Agent
+                                │                  └── Docker 沙箱
+                                │
+                                └──HTTP──▶ 业务 Agent (可选)
+                                               ├── Hermes Agent (:8642)
+                                               ├── TradingAgents (:8189)
+                                               └── 自定义 Agent (任意 HTTP)
 ```
 
 ## 技术栈
@@ -302,3 +310,12 @@ linggan-claw/
 ## License
 
 [MIT](LICENSE)
+
+## 文档
+
+| 文档 | 说明 |
+|------|------|
+| [部署指南](docs/DEPLOY.md) | 从零部署灵虾（含 OpenClaw 配置） |
+| [智能体架构](docs/ARCHITECTURE-AGENTS.md) | 4 种协议、12 个 Agent、记忆体系 |
+| [OpenClaw 配置模板](configs/openclaw-lingxia.json.example) | 灵虾所需的 OpenClaw 最小配置 |
+
