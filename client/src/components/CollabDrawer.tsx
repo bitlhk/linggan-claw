@@ -158,12 +158,10 @@ function AgentHeroAnimation({ agentId }: { agentId: string }) {
 }
 function agentDesc(id: string, dbDescription?: string) {
   if (dbDescription) {
-    const first = dbDescription.split(
-
-)[0];
+    const first = dbDescription.split("\n")[0];
     return first || dbDescription;
   }
-  return 业务智能体;
+  return "业务智能体";
 }
 function fmtSize(bytes: number) {
   if (bytes < 1024) return `${bytes}B`;

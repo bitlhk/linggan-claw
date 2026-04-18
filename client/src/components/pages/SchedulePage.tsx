@@ -9,7 +9,7 @@ type CronJob = {
   schedule: { kind: "every" | "at" | "cron"; everyMs?: number; at?: string; expr?: string; tz?: string };
   payload: { kind: "agentTurn" | "systemEvent"; message?: string; text?: string; model?: string };
   sessionTarget: "main" | "isolated";
-  delivery?: { mode: "announce" | "none"; channel?: string };
+  delivery?: { mode: "announce" | "none"; channel?: string; to?: string; weixin?: boolean };
   state?: { lastRunAtMs?: number; nextRunAtMs?: number; lastStatus?: "ok" | "error" | "skipped" };
   agentId?: string;
 };

@@ -5,11 +5,13 @@ import { getDb } from "./connection";
 // ── Business Agents CRUD ────────────────────────────────────────────────
 export async function listBusinessAgents(): Promise<BusinessAgent[]> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   return db.select().from(businessAgents).orderBy(businessAgents.sortOrder);
 }
 
 export async function listEnabledBusinessAgents(): Promise<BusinessAgent[]> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   return db.select().from(businessAgents)
     .where(eq(businessAgents.enabled, 1))
     .orderBy(businessAgents.sortOrder);
@@ -17,12 +19,14 @@ export async function listEnabledBusinessAgents(): Promise<BusinessAgent[]> {
 
 export async function getBusinessAgent(id: string): Promise<BusinessAgent | undefined> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   const rows = await db.select().from(businessAgents).where(eq(businessAgents.id, id)).limit(1);
   return rows[0];
 }
 
 export async function upsertBusinessAgent(data: InsertBusinessAgent): Promise<void> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   await db.insert(businessAgents).values(data)
     .onDuplicateKeyUpdate({ set: {
       name: data.name,
@@ -41,11 +45,13 @@ export async function upsertBusinessAgent(data: InsertBusinessAgent): Promise<vo
 
 export async function deleteBusinessAgent(id: string): Promise<void> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   await db.delete(businessAgents).where(eq(businessAgents.id, id));
 }
 
 export async function updateBusinessAgentEnabled(id: string, enabled: number): Promise<void> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   await db.update(businessAgents).set({ enabled }).where(eq(businessAgents.id, id));
 }
 
@@ -53,6 +59,7 @@ export async function updateBusinessAgentEnabled(id: string, enabled: number): P
 // ── 技能市场 DB helpers ──
 export async function listSkillMarketItems(status?: string): Promise<any[]> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   if (status && status !== "all") {
     return db.select().from(skillMarketplace).where(eq(skillMarketplace.status, status as any)).orderBy(skillMarketplace.createdAt);
   }
@@ -61,33 +68,39 @@ export async function listSkillMarketItems(status?: string): Promise<any[]> {
 
 export async function listApprovedSkillMarketItems(): Promise<any[]> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   return db.select().from(skillMarketplace).where(eq(skillMarketplace.status, "approved")).orderBy(skillMarketplace.downloadCount);
 }
 
 export async function getSkillMarketItem(id: number): Promise<any | undefined> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   const rows = await db.select().from(skillMarketplace).where(eq(skillMarketplace.id, id)).limit(1);
   return rows[0];
 }
 
 export async function insertSkillMarketItem(data: any): Promise<number> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   const result = await db.insert(skillMarketplace).values(data);
   return Number(result[0].insertId);
 }
 
 export async function updateSkillMarketItem(id: number, data: Record<string, any>): Promise<void> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   await db.update(skillMarketplace).set(data).where(eq(skillMarketplace.id, id));
 }
 
 export async function deleteSkillMarketItem(id: number): Promise<void> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   await db.delete(skillMarketplace).where(eq(skillMarketplace.id, id));
 }
 
 export async function incrementSkillDownload(id: number): Promise<void> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   await db.execute(sql`UPDATE skill_marketplace SET download_count = download_count + 1 WHERE id = ${id}`);
 }
 
@@ -95,16 +108,19 @@ export async function incrementSkillDownload(id: number): Promise<void> {
 // ── Agent 调用日志 + 健康检查 DB helpers ──
 export async function insertCallLog(data: { agentId: string; userId?: number; adoptId?: string; status: "success" | "error" | "timeout"; durationMs: number; errorMessage?: string }): Promise<void> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   await db.insert(agentCallLogs).values(data as any);
 }
 
 export async function getCallLogs(agentId: string, limit = 50): Promise<any[]> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   return db.select().from(agentCallLogs).where(eq(agentCallLogs.agentId, agentId)).orderBy(desc(agentCallLogs.createdAt)).limit(limit);
 }
 
 export async function getCallStats(agentId: string): Promise<{ total: number; today: number; errors: number }> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const all = await db.select().from(agentCallLogs).where(eq(agentCallLogs.agentId, agentId));
@@ -115,11 +131,13 @@ export async function getCallStats(agentId: string): Promise<{ total: number; to
 
 export async function updateAgentHealth(id: string, healthStatus: string): Promise<void> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   await db.update(businessAgents).set({ healthStatus: healthStatus as any, lastHealthCheck: new Date() } as any).where(eq(businessAgents.id, id));
 }
 
 export async function updateAgentFields(id: string, fields: Record<string, any>): Promise<void> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   await db.update(businessAgents).set(fields).where(eq(businessAgents.id, id));
 }
 
@@ -169,6 +187,7 @@ export async function listBusinessAgentAudit(params: {
   limit?: number;
 }): Promise<TenantAuditRow[]> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   if (!db) return [];
   const limit = Math.min(Math.max(params.limit ?? 100, 1), 1000);
 
@@ -216,6 +235,7 @@ export type TenantReverseLookup = {
 
 export async function reverseTenantToken(tenantToken: string): Promise<TenantReverseLookup> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   const tokenShort = (tenantToken || "").slice(0, 16);
 
   if (!db || !tenantToken) {
@@ -292,6 +312,7 @@ export type TenantAuditStats = {
 
 export async function getTenantAuditStats(): Promise<TenantAuditStats> {
   const db = await getDb();
+  if (!db) throw new Error("DB not available");
   if (!db) {
     return {
       totalAudit: 0,

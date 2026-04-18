@@ -10,6 +10,9 @@ import {
   upsertSessionRegistry, clearAgentSessionsCache, isPrivateUrl, APP_ROOT
 } from "./helpers";
 import { ResponseAccumulator } from "./response-accumulator";
+// 2026-04-18: eager import 避免首次 HTTP 聊天冷启动挂死（配合 claw-ws-proxy 保持一致）
+import { SseStreamWriter } from "./stream-writer";
+import { routeMessage } from "./intent-agent";
 
 export function registerChatStreamRoutes(app: express.Express) {
 
@@ -220,8 +223,6 @@ export function registerChatStreamRoutes(app: express.Express) {
     const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
     // ── 平台意图路由：打分 → 分类 → 执行（统一 StreamWriter）──
     {
-      const { SseStreamWriter } = await import("./stream-writer");
-      const { routeMessage } = await import("./intent-agent");
       const sseWriter = new SseStreamWriter(res);
       sseWriter.init();
       const handled = await routeMessage(String(adoptId), msgStr, sseWriter);
@@ -551,7 +552,7 @@ const options = {
                   suppressedOriginalResult: true,
                   executor: "timeout",
                   policyDenyReason: isTimeout ? "tool_timeout" : "execution_error",
-                  requestId: ctx.adoptId,
+                  requestId: toolCtx.adoptId,
                 });
                 continue;
               }
@@ -566,7 +567,7 @@ const options = {
                 durationMs:               result.meta.durationMs,
                 suppressedOriginalResult: result.suppressedOriginalResult,
                 auditId:                  result.auditId,
-                requestId:                ctx.adoptId,
+                requestId:                toolCtx.adoptId,
                 executor:                 result.executor,
                 policyDenyReason:         result.policyDenyReason,
                 outputFiles:              result.outputFiles ?? [],
@@ -623,7 +624,7 @@ const options = {
           // 关键：技能/exec 写到根目录的 .html 等产物也要被发现，不只是 output/
           try {
             const wsDir = toolCtx.workspaceDir;
-            if (existsSync(wsDir)) {
+            if (wsDir && existsSync(wsDir)) {
               const allFiles: Array<{ name: string; size: number; path: string }> = [];
               // 跳过这些系统/缓存目录，避免扫描太深
               const SKIP_DIRS = new Set(["skills", "memory", "node_modules", ".git", ".dreams", "dist", "build", ".openclaw"]);

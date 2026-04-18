@@ -18,6 +18,9 @@ import { existsSync, readdirSync, statSync } from "fs";
 import { Server } from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import { createHash, generateKeyPairSync, sign, randomUUID } from "crypto";
+// 2026-04-18: eager import 避免首次 WS 聊天挂死（之前是动态 await import，冷启动加载 intent-agent 耗时 18s+ 导致前端心跳超时）
+import { WsStreamWriter } from "./stream-writer";
+import { routeMessage } from "./intent-agent";
 import { createContext } from "./context";
 import { readSessionEpoch } from "./helpers";
 import { ResponseAccumulator } from "./response-accumulator";
@@ -330,8 +333,6 @@ export function registerWSProxy(server: Server) {
           // ── 平台意图路由（与 HTTP 路径共用 intent-agent）──
             console.log("[WS-PM] entering intent routing for:", String(msg.message || "").slice(0, 30));
           try {
-            const { WsStreamWriter } = await import("./stream-writer");
-            const { routeMessage } = await import("./intent-agent");
             const wsWriter = new WsStreamWriter(client, WebSocket.OPEN);
             console.log("[PM-DEBUG] routeMessage called, msg:", String(msg.message || "").slice(0, 50)); const handled = await routeMessage(meta.adoptId, String(msg.message || ""), wsWriter);
             if (handled) return; // 平台已处理，不发 Gateway

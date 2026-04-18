@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { applySettings, getSettings, subscribeSettings } from "@/lib/settings";
 import type { UiSettings } from "@/types/settings";
+import { toast } from "sonner";
 
 type Section = "appearance" | "chat" | "layout" | "notify";
 

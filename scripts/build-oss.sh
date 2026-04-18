@@ -31,6 +31,8 @@ data
 logs
 *.bak
 *.bak-*
+*.bak.*
+*.before-*
 .tmp_*
 *.cjs
 nohup.out

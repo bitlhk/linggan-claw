@@ -475,7 +475,7 @@ export async function routeMessage(
             }
           }
         } catch (e) {
-          console.warn("[PM-DISPATCH] error:", e?.message?.slice(0, 60));
+          console.warn("[PM-DISPATCH] error:", (e as Error)?.message?.slice(0, 60));
         }
 
         // Send agent_complete. Single-agent: result already streamed into bubble, only send status+duration.
@@ -511,7 +511,7 @@ export async function routeMessage(
           if (st) writer.writeText("\n\n📋 **综合方案**\n\n" + st);
         }
       } catch (e) {
-        console.warn("[PM] summary failed:", e?.message?.slice(0, 60));
+        console.warn("[PM] summary failed:", (e as Error)?.message?.slice(0, 60));
       }
     } else if (results.length === 1 && results[0].result) {
       writer.writeText("\n\n" + results[0].result);

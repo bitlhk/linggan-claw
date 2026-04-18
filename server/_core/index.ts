@@ -100,6 +100,10 @@ async function startServer() {
     // 可以设置为具体的代理IP列表，用逗号分隔
     app.set("trust proxy", process.env.TRUST_PROXY.split(",").map(ip => ip.trim()));
     console.log(`[Server] Trust proxy enabled for: ${process.env.TRUST_PROXY}`);
+  } else {
+    // 2026-04-18: 生产默认信任 1 层反向代理（nginx），消除 express-rate-limit 的 X-Forwarded-For 告警
+    app.set("trust proxy", 1);
+    console.log("[Server] Trust proxy set to 1 (default: 1 reverse proxy hop)");
   }
   
   // ========== 性能优化 ==========

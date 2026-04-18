@@ -2422,14 +2422,17 @@ export function registerBusinessRoutes(app: express.Express) {
           res.removeHeader("X-Frame-Options");
           res.setHeader("Content-Security-Policy", "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors *");
         } else if (!ct?.includes("html")) {
-          streamFileDownload(res, filePath, fileName); return;
+          // 2026-04-18 fix: 原代码错误地调用了 streamFileDownload(res, filePath, ...)，
+          // 但此处是远端代理流（proxyRes），filePath 并不存在于作用域。
+          // 正确语义：非 HTML 视为附件下载，加 Content-Disposition 头后继续 pipe。
+          res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
         }
         proxyRes.pipe(res);
       }).on("error", (err) => {
         res.status(502).json({ error: "远端文件获取失败: " + err.message });
       });
     } catch (e) {
-      return res.status(500).json({ error: e.message });
+      return res.status(500).json({ error: (e as Error)?.message || String(e) });
     }
   });
 }

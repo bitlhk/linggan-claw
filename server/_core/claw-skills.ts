@@ -68,7 +68,7 @@ export function registerSkillRoutes(app: express.Express) {
           }
         }
         if (result.ok) {
-          const mdEntry = entries.find(e => e.entryName.toLowerCase().endsWith("skill.md"));
+          const mdEntry = entries.find((e: any) => e.entryName.toLowerCase().endsWith("skill.md"));
           if (mdEntry) {
             const txt = mdEntry.getData().toString("utf-8").slice(0, 8000);
             const mdLines = txt.split(/\r?\n/);
@@ -89,7 +89,7 @@ export function registerSkillRoutes(app: express.Express) {
               }
             }
           }
-          const mfEntry = entries.find(e => e.entryName.endsWith("manifest.json") || e.entryName.endsWith("skill.json"));
+          const mfEntry = entries.find((e: any) => e.entryName.endsWith("manifest.json") || e.entryName.endsWith("skill.json"));
           if (mfEntry) {
             try { result.manifest = JSON.parse(mfEntry.getData().toString("utf-8")); } catch {}
           }

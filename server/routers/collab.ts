@@ -88,7 +88,7 @@ export const collabRouter = router({
         targetAdoptId: z.string(),
         taskType: z.string().max(64).default("general"),
         taskSummary: z.string().max(1000),
-        inputPayload: z.record(z.unknown()).optional(),
+        inputPayload: z.record(z.string(), z.unknown()).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const { getClawByAdoptId } = await import("../db");
@@ -229,7 +229,7 @@ export const collabRouter = router({
         resultEnvelope: z.object({
           status: z.enum(["success", "failed", "partial", "needs_input"]),
           summary: z.string().max(2000),            // 给 Agent1 看的执行摘要
-          structured_outputs: z.record(z.unknown()).optional(), // 结构化结果字段
+          structured_outputs: z.record(z.string(), z.unknown()).optional(), // 结构化结果字段
           artifacts: z.array(z.object({             // 文件产物引用
             artifact_id: z.string().max(64),
             name: z.string().max(255),

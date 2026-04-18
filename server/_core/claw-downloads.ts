@@ -1,10 +1,12 @@
 import express from "express";
 import { parseAdoptId, parseFileName, parseRelPath, parseTtl, sendError, handleRouteError } from "./schemas";
-import { existsSync, statSync, readdirSync } from "fs";
+import { existsSync, statSync, readdirSync, createReadStream } from "fs";
+import { spawnSync } from "child_process";
 import {
   requireClawOwner, resolveRuntimeAgentId,
   generateFileToken,
   streamFileDownload,
+  sanitizeRelPath,
 } from "./helpers";
 
 export function registerDownloadRoutes(app: express.Express) {
@@ -84,7 +86,7 @@ export function registerDownloadRoutes(app: express.Express) {
         res.removeHeader("X-Frame-Options");
         res.setHeader("Content-Security-Policy", "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors *");
         const stream = createReadStream(filePath);
-        stream.on("error", (err) => {
+        stream.on("error", (_err: any) => {
           if (!res.headersSent) res.status(500).json({ error: "file read error" });
         });
         stream.pipe(res);
@@ -174,7 +176,7 @@ export function registerDownloadRoutes(app: express.Express) {
         res.removeHeader("X-Frame-Options");
         res.setHeader("Content-Security-Policy", "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors *");
         const stream = createReadStream(filePath);
-        stream.on("error", (err) => {
+        stream.on("error", (_err: any) => {
           if (!res.headersSent) res.status(500).json({ error: "file read error" });
         });
         stream.pipe(res);
