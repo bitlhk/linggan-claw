@@ -409,10 +409,18 @@ function CollabExecPanel({ req, adoptId, onBack, onDone }: { req: any; adoptId: 
 }
 
 // ── 业务 Agent 任务面板 ───────────────────────────────────────────────────
-function TaskPanel({ agent, onBack }: { agent: BusinessAgent; onBack: () => void }) {
+function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onBack: () => void; prefillPrompt?: string }) {
   // module-level store: state survives unmount, fetch keeps writing in background
   const { msgs, sessionKey, streaming } = useAgentState(agent.id);
   const [input, setInput] = useState("");
+
+  // 消费从主聊天传来的预填 prompt（只在挂载时触发一次）
+  useEffect(() => {
+    if (prefillPrompt && prefillPrompt.trim()) {
+      setInput(prefillPrompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [files, setFiles] = useState<TaskFile[]>([]);
   const [recording, setRecording] = useState(false);
@@ -1117,6 +1125,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
   const apiBase = (import.meta as any).env?.VITE_API_URL || "";
   const [bizLoading, setBizLoading] = useState(true);
   const [activeAgent, setActiveAgent] = useState<BusinessAgent | null>(null);
+  const [prefillPrompt, setPrefillPrompt] = useState<string>("");
   const [activeCollab, setActiveCollab] = useState<any | null>(null);
   const [visible, setVisible] = useState(false);
   const [requestModal, setRequestModal] = useState<any | null>(null);
@@ -1126,7 +1135,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
     try {
       const saved = localStorage.getItem("collab_drawer_width");
       const n = saved ? parseInt(saved, 10) : 380;
-      return Number.isFinite(n) ? Math.min(760, Math.max(320, n)) : 380;
+      return Number.isFinite(n) ? Math.min(1200, Math.max(320, n)) : 380;
     } catch { return 380; }
   });
   const [resizing, setResizing] = useState(false);
@@ -1146,7 +1155,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
 
     const onMove = (ev: MouseEvent) => {
       const delta = startX - ev.clientX;
-      const maxWidth = Math.min(760, Math.floor(window.innerWidth * 0.9));
+      const maxWidth = Math.min(1200, Math.floor(window.innerWidth * 0.85));
       const next = Math.min(maxWidth, Math.max(320, startWidth + delta));
       setDrawerWidth(next);
     };
@@ -1163,6 +1172,23 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
     fetch(`${apiBase}/api/claw/business-agents`, { credentials: "include" })
       .then(r => r.json()).then(d => setBizAgents(d.agents || [])).catch(() => {}).finally(() => setBizLoading(false));
   }, []);
+
+  // 消费主聊天推荐卡片写入的预填意图：自动跳到对应 agent 的 TaskPanel 并预填 prompt
+  useEffect(() => {
+    if (!bizAgents.length) return;
+    try {
+      const raw = sessionStorage.getItem("collab_prefill");
+      if (!raw) return;
+      sessionStorage.removeItem("collab_prefill");
+      const { agentId, prompt } = JSON.parse(raw) as { agentId?: string; prompt?: string };
+      if (!agentId) return;
+      const found = bizAgents.find((a) => a.id === agentId);
+      if (found) {
+        setActiveAgent(found);
+        setPrefillPrompt(prompt || "");
+      }
+    } catch {}
+  }, [bizAgents]);
 
   const hasAdoptId = !!adoptId;
   const directoryQ = trpc.collab.directory.useQuery({ adoptId: adoptId || "" }, { enabled: hasAdoptId, retry: false, refetchInterval: 60000 });
@@ -1199,34 +1225,18 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
 
         <div className="flex-1 overflow-hidden min-h-0">
           {activeAgent ? (
-            <TaskPanel key={activeAgent.id} agent={activeAgent} onBack={() => setActiveAgent(null)} />
+            <TaskPanel key={activeAgent.id} agent={activeAgent} prefillPrompt={prefillPrompt} onBack={() => { setActiveAgent(null); setPrefillPrompt(""); }} />
           ) : activeCollab && adoptId ? (
             <CollabExecPanel req={activeCollab} adoptId={adoptId} onBack={() => setActiveCollab(null)} onDone={() => { setActiveCollab(null); incomingQ.refetch(); }} />
           ) : (
             <div className="flex flex-col h-full overflow-hidden">
-              {/* 顶部两个主 Tab */}
-              <div className="flex shrink-0 border-b" style={{ borderColor: "var(--oc-border)" }}>
-                {(["market", "mine"] as const).map((t) => (
-                  <button key={t} onClick={() => setMainTab(t)}
-                    className="flex-1 py-2.5 text-xs font-semibold transition-colors relative"
-                    style={{ background: "transparent", border: "none", cursor: "pointer", color: mainTab === t ? "var(--oc-text-primary)" : "var(--oc-text-secondary)" }}
-                  >
-                    {t === "market" ? "智能体广场" : (
-                      <span className="flex items-center justify-center gap-1.5">
-                        我的协作
-                        {(actionableCount + pendingCount) > 0 && (
-                          <span className="text-[9px] px-1 py-0.5 rounded-full font-bold leading-none" style={{ background: "#ef4444", color: "var(--oc-text-on-accent)", minWidth: 14, textAlign: "center" }}>{actionableCount + pendingCount}</span>
-                        )}
-                      </span>
-                    )}
-                    {mainTab === t && <span style={{ position: "absolute", bottom: 0, left: "10%", right: "10%", height: 2, background: "var(--oc-accent)", borderRadius: 2 }} />}
-                  </button>
-                ))}
-              </div>
+              {/* 简化版（2026-04-17）：去掉「智能体广场 / 我的协作」mainTab 切换 + 同事智能体 + incoming/outgoing；
+                  「我的协作」入口已搬到主 Sidebar 单独页；这里只保留「单纯的 task-xxx 业务智能体」入口。
+                  旧 mainTab 切换条 + mine 分支 + 同事智能体折叠组的代码保留在 .bak-20260416-pre-simplify 备份里。 */}
 
               {/* 内容区 */}
               <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5">
-                {mainTab === "market" ? (
+                {(
                   <>
                     {/* ── 业务能力（折叠组） */}
                     {bizLoading ? <div className="flex items-center gap-2 py-3 justify-center"><Loader2 size={13} className="animate-spin" style={{ color: "var(--oc-text-secondary)" }} /><span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>加载中...</span></div> : (
@@ -1277,83 +1287,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                       </>
                     )}
 
-                    {/* ── 同事智能体（折叠组） */}
-                    <CollabGroup
-                      id="colleague"
-                      title="同事智能体"
-                      icon={<Users size={12} />}
-                      count={colleagues.length}
-                      collapsed={collapsed}
-                      setCollapsed={setCollapsed}
-                    >
-                      {!hasAdoptId ? <p className="text-[10px] py-2 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.6 }}>领养灵虾后可使用</p>
-                      : directoryQ.isLoading ? <div className="flex items-center gap-2 py-2"><Loader2 size={12} className="animate-spin" style={{ color: "var(--oc-text-secondary)" }} /></div>
-                      : colleagues.length === 0 ? <p className="text-[10px] py-2 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.5 }}>暂无开放的同事智能体</p>
-                      : <div className="space-y-1.5">{colleagues.map((a: any) => (
-                          <div key={a.adoptId} className="rounded-lg px-3 py-2.5 flex items-center justify-between" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)" }}>
-                            <div className="min-w-0 flex-1"><div className="text-xs font-medium truncate" style={{ color: "var(--oc-text-primary)" }}>{a.displayName}</div>{a.headline && <div className="text-[10px] truncate" style={{ color: "var(--oc-text-secondary)" }}>{a.headline}</div>}</div>
-                            <div className="ml-2 flex flex-col items-end gap-1 shrink-0">
-                              <span className="text-[9px]" style={{ color: a.acceptTask === "auto" ? "#22c55e" : "#f59e0b" }}>{a.acceptTask === "auto" ? "自动通过" : "需审批"}</span>
-                              <button onClick={() => setRequestModal(a)} className="text-[10px] px-2 py-0.5 rounded font-medium" style={{ background: "color-mix(in oklab, var(--oc-accent) 15%, transparent)", color: "var(--oc-accent)", border: "1px solid color-mix(in oklab, var(--oc-accent) 30%, transparent)", cursor: "pointer" }}>申请</button>
-                            </div>
-                          </div>
-                        ))}</div>}
-                    </CollabGroup>
-                  </>
-                ) : (
-                  <>
-                    {/* ── 收到的请求（折叠组） */}
-                    <CollabGroup
-                      id="incoming"
-                      title="收到的请求"
-                      icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h9"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/><path d="M16 19h6"/><path d="M19 16v6"/></svg>}
-                      count={(incomingQ.data || []).length}
-                      badge={actionableCount > 0 ? { count: actionableCount, color: "var(--oc-danger)" } : undefined}
-                      collapsed={collapsed}
-                      setCollapsed={setCollapsed}
-                    >
-                      {!hasAdoptId ? <p className="text-[10px] py-2 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.6 }}>需要 Plus 档</p>
-                      : incomingQ.isLoading ? <div className="flex items-center gap-2 py-2"><Loader2 size={12} className="animate-spin" style={{ color: "var(--oc-text-secondary)" }} /></div>
-                      : (incomingQ.data || []).length === 0 ? <p className="text-[10px] py-2 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.5 }}>暂无收到的请求</p>
-                      : <div className="space-y-1.5">{(incomingQ.data as any[]).slice(0, 10).map((r: any) => {
-                          const meta = r.resultEnvelope || {};
-                          const alreadyDelivered = !!meta.deliveredAt;
-                          const isActionable = r.status === "pending" || (["completed","partial_success"].includes(r.status) && !alreadyDelivered);
-                          return (
-                            <div key={r.id} onClick={() => setActiveCollab(r)} className="rounded-lg px-3 py-2 cursor-pointer transition-all hover:opacity-80" style={{ background: "var(--oc-bg-hover)", border: `1px solid ${isActionable ? "rgba(245,158,11,.4)" : "var(--oc-border)"}` }}>
-                              <div className="flex items-center justify-between mb-0.5">
-                                <span className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{r.requesterDisplayName || r.requesterAdoptId?.slice(0, 10)}</span>
-                                <span className="text-[9px] font-medium" style={{ color: statusColor(r.status) }}>{statusLabel(r.status)}</span>
-                              </div>
-                              <div className="text-xs truncate" style={{ color: "var(--oc-text-primary)" }}>{r.taskSummary}</div>
-                              {isActionable && <div className="text-[10px] mt-0.5 font-medium" style={{ color: "var(--oc-warning)" }}>{r.status === "pending" ? "点击批准" : "点击回复"}</div>}
-                            </div>
-                          );
-                        })}</div>}
-                    </CollabGroup>
-
-                    {/* ── 我发出的请求（折叠组） */}
-                    <CollabGroup
-                      id="outgoing"
-                      title="我发出的请求"
-                      icon={<Clock size={12} />}
-                      count={(outgoingQ.data || []).length}
-                      badge={pendingCount > 0 ? { count: pendingCount, color: "var(--oc-warning)" } : undefined}
-                      collapsed={collapsed}
-                      setCollapsed={setCollapsed}
-                    >
-                      {!hasAdoptId ? <p className="text-[10px] py-2 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.6 }}>需要 Plus 档</p>
-                      : (outgoingQ.data || []).length === 0 ? <p className="text-[10px] py-2 text-center" style={{ color: "var(--oc-text-secondary)", opacity: 0.5 }}>暂无发出的请求</p>
-                      : <div className="space-y-1.5">{(outgoingQ.data as any[]).slice(0, 10).map((r: any) => (
-                          <div key={r.id} className="rounded-lg px-3 py-2" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)" }}>
-                            <div className="flex items-center justify-between mb-0.5">
-                              <span className="text-[10px] truncate flex-1 mr-2" style={{ color: "var(--oc-text-primary)" }}>{r.taskSummary?.slice(0, 28)}...</span>
-                              <span className="text-[9px] shrink-0 font-medium" style={{ color: statusColor(r.status) }}>{statusLabel(r.status)}</span>
-                            </div>
-                            {r.resultSummary && <div className="text-[10px]" style={{ color: "var(--oc-text-secondary)" }}>{r.resultSummary.slice(0, 60)}</div>}
-                          </div>
-                        ))}</div>}
-                    </CollabGroup>
+                    {/* 同事智能体 / incoming / outgoing 已下线（迁到 Sidebar「我的协作」），见 .bak-pre-simplify */}
                   </>
                 )}
               </div>

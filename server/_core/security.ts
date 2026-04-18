@@ -338,7 +338,7 @@ export function detectSuspiciousActivity(req: Request, res: Response, next: Next
   const xssPatterns = [
     /<script[^>]*>.*?<\/script>/gi,
     /javascript:/gi,
-    /on\w+\s*=/gi,
+    /\bon\w+\s*=/gi,
     /<iframe/gi,
     /<object/gi,
     /<embed/gi,

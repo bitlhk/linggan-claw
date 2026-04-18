@@ -11,11 +11,12 @@ import { toast } from "sonner";
 import { useBrand } from "@/lib/useBrand";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { useRoute } from "wouter";
+import { useRoute, useLocation } from "wouter";
 import { SidebarFooter } from "@/components/SidebarFooter";
 import { CollabDrawer } from "@/components/CollabDrawer";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatMessage, type ToolCallEntry } from "@/components/ChatMessage";
+import { AgentTaskCard, type AgentTask } from "@/components/AgentTaskCard";
 import { BrandIcon } from "@/components/BrandIcon";
 import { Sidebar, type PageKey } from "@/components/console/Sidebar";
 import { TopBar } from "@/components/console/TopBar";
@@ -31,8 +32,10 @@ export default function Home() {
   const brand = useBrand();
   const [lingxiaInput, setLingxiaInput] = useState("");
   const [lingxiaMsgs, setLingxiaMsgs] = useState<Array<{ role: "user" | "assistant"; text: string; timeLabel: string; usage?: { input: number; output: number }; model?: string; contextWindow?: number; contextPercent?: number; toolCalls?: import("@/components/ChatMessage").ToolCallEntry[] }>>(() => {
-    try { const s = localStorage.getItem("lingxia-chat-history"); return s ? JSON.parse(s) : []; } catch { return []; }
+    try { const s = localStorage.getItem("lingxia-chat-history");
+return s ? JSON.parse(s) : []; } catch { return []; }
   });
+  const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
   const [lingxiaToolCalls, setLingxiaToolCalls] = useState<ToolCallEntry[]>([]);
   const [lingxiaShowToolCalls, setLingxiaShowToolCalls] = useState(true);
   const [lingxiaDisplayName, setLingxiaDisplayName] = useState(brand.name);
@@ -56,7 +59,38 @@ export default function Home() {
     if (!s) return "";
     return s.replace(/^trial_/, "").replace(/^lgc-/, "");
   };
-  const [activePage, setActivePage] = useState<PageKey>("chat");
+  const [activePage, setActivePage] = useState<PageKey>(() => {
+    // 支持别的页面（例如 CoopSession 返回按钮）通过 sessionStorage 指定首次落地的 page
+    try {
+      const v = sessionStorage.getItem("home_initial_page");
+      if (v) {
+        sessionStorage.removeItem("home_initial_page");
+        return v as PageKey;
+      }
+    } catch {}
+    return "chat";
+  });
+
+  // Step 6 扩展：主聊天 @ 触发协作的状态
+  const [, setLocationCoop] = useLocation();
+  const [mentionedUsers, setMentionedUsers] = useState<Array<{userId: number; userName: string; groupName: string | null; orgName: string | null; adoptId: string | null}>>([]);
+  const coopCreateFromChatMut = trpc.coop.create.useMutation({
+    onSuccess: (r) => {
+      setMentionedUsers([]);
+      setLingxiaInput("");
+      toast.success("已发起协作");
+      setLocationCoop(`/coop/${r.sessionId}`);
+    },
+    onError: (e) => toast.error(e.message || "协作创建失败"),
+  });
+
+    // Step 6: 侧栏协作红点（pendingCount 每 30s 刷新；WS 推入未来版）
+  const { data: coopPending } = trpc.coop.pendingCount.useQuery(undefined, {
+    refetchInterval: 30_000,
+    retry: false,
+  });
+  const coopBadgeCount = (coopPending?.pendingMyApproval || 0) + (coopPending?.awaitingMyConsolidation || 0);
+
   const [collabOpen, setCollabOpen] = useState(false);
 
   useEffect(() => {
@@ -279,6 +313,12 @@ export default function Home() {
   const skipCollabRef = useRef(false);
   const sendLingxiaMessage = async () => {
     if (!resolvedAdoptId || !lingxiaInput.trim() || lingxiaStreaming) return;
+    // 2026-04-17 SSE race fix: 强制 abort 上一次的流，避免 WS 重连/网络抖动后旧 reader 还在
+    // setLingxiaMsgs 写 delta，跟新流字符级交错（典型现象：英文 narrative + 中文技能列表混合）
+    if (lingxiaStreamAbortRef.current) {
+      try { lingxiaStreamAbortRef.current.abort(); } catch {}
+      lingxiaStreamAbortRef.current = null;
+    }
     const text = lingxiaInput.trim();
     const nowLabel = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
     const assistantTimeLabel = nowLabel;
@@ -311,11 +351,11 @@ export default function Home() {
 
     // ── 前端 collab 意图检测：推荐专业助手 ──
     const COLLAB_AGENTS: Array<{ pattern: RegExp; id: string; name: string; emoji: string }> = [
-      { pattern: /PPT|幻灯片|演示文稿|路演.*材料|做个.*演示/i, id: "task-ppt", name: "灵匠 · 幻灯片（PPT）", emoji: "📊" },
       { pattern: /HTML.*幻灯片|网页.*演示|slides/i, id: "task-slides", name: "灵匠 · 幻灯片（HTML）", emoji: "🎨" },
-      { pattern: /写代码|写个.*脚本|编程|调试.*代码|跑.*脚本|代码助手/i, id: "task-code", name: "灵匠 · 代码助手", emoji: "💻" },
+      { pattern: /PPT|幻灯片|演示文稿|路演.*材料|做个.*演示/i, id: "task-ppt", name: "灵匠 · 幻灯片（PPT）", emoji: "📊" },
       { pattern: /股票分析|选股|个股.*分析|K线|技术面.*分析|股票助手/i, id: "task-stock", name: "灵犀 · 股票分析", emoji: "📈" },
-      { pattern: /深度分析|深度.*思考|拆解.*任务|复杂.*任务|帮我.*规划/i, id: "task-trace", name: "灵枢 · 深度求索", emoji: "🔍" },
+      { pattern: /理赔|车险|定损|全损|残值|动力电池|新能源.*保险|电动车.*理赔|梯次利用/i, id: "task-claim-ev", name: "灵犀 · EV 理赔决策助手", emoji: "🔋" },
+      { pattern: /信贷|贷款|征信|风控|贷前调查|贷后管理|三表分析|担保物|五级分类|风险定价/i, id: "task-credit-risk", name: "灵犀 · 智贷决策助手", emoji: "🏦" },
     ];
     const collabMatch = COLLAB_AGENTS.find(a => a.pattern.test(text));
     if (collabMatch && !skipCollabRef.current) {
@@ -387,6 +427,37 @@ export default function Home() {
               }
 
               // ── tool_call 事件（与 HTTP SSE event:tool_call 一致）──
+              
+              // ── Agent Team 事件 ──
+              if (chunk._event === "agent_dispatch") {
+                const tasks = (chunk.agents || []).map((a) => ({
+                  id: a.id, agentId: a.agentId, agentName: a.name, prompt: a.prompt || "",
+                  status: "running", steps: [], result: undefined, durationMs: undefined,
+                }));
+                setAgentTasks(tasks);
+                return;
+              }
+              if (chunk._event === "agent_tool_update") {
+                setAgentTasks((prev) => prev.map((t) =>
+                  t.id === chunk.taskId ? {
+                    ...t,
+                    steps: chunk.toolStatus === "started"
+                      ? [...t.steps, { name: chunk.toolName || "tool", status: "running" }]
+                      : t.steps.map((s) => s.name === (chunk.toolName || "tool") && s.status === "running"
+                          ? { ...s, status: "done", durationMs: chunk.durationMs } : s),
+                  } : t
+                ));
+                return;
+              }
+              if (chunk._event === "agent_complete") {
+                setAgentTasks((prev) => prev.map((t) =>
+                  t.id === chunk.taskId ? {
+                    ...t, status: "done", result: chunk.result || "", durationMs: chunk.durationMs,
+                    steps: t.steps.map((s) => s.status === "running" ? { ...s, status: "done" } : s),
+                  } : t
+                ));
+                return;
+              }
               if (chunk._event === "tool_call") {
                 const toolName = String(chunk.name || "unknown");
                 const toolTs = Date.now();
@@ -1034,7 +1105,7 @@ export default function Home() {
             </div>
 
             {/* 控制台导航（Phase A） */}
-            <Sidebar activePage={activePage} setActivePage={setActivePage} collapsed={sidebarCollapsed} />
+            <Sidebar activePage={activePage} setActivePage={setActivePage} collapsed={sidebarCollapsed} coopBadge={coopBadgeCount} />
 
             {/* 旧侧栏能力暂留（Phase B 迁移），当前隐藏 */}
                         <SidebarFooter
@@ -1170,7 +1241,7 @@ export default function Home() {
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
                 </svg>
-                智能体协作
+                智能体广场
               </button>
             ) : undefined}
           />
@@ -1208,6 +1279,11 @@ export default function Home() {
                 </div>
               )}
 
+              {agentTasks.length > 0 && (
+                <div style={{ margin: "8px 0" }}>
+                  {agentTasks.map((t) => <AgentTaskCard key={t.id} task={t} />)}
+                </div>
+              )}
               {lingxiaMsgs.map((m, idx) => {
                 const isLast = idx === lingxiaMsgs.length - 1;
                 const isPlaceholder = isLast && m.role === "assistant" && m.text === "" && lingxiaStreaming;
@@ -1288,7 +1364,44 @@ export default function Home() {
             <ChatInput
               value={lingxiaInput}
               onChange={setLingxiaInput}
-              onSend={sendLingxiaMessage}
+              onSend={() => {
+                const text = (lingxiaInput || "").trim();
+                // 重扫 text 里实际还有的 @userName，过滤掉用户已删除的 mention（防 mentionedUsers 状态 ghost）
+                // 既有限制：textarea 是 plain text，不是 chip，删除标签靠这里 reconcile 兜底
+                const liveMentions = mentionedUsers.filter((u) => text.includes(`@${u.userName}`));
+                if (liveMentions.length === 0) {
+                  // 没 @ 任何人 → 普通消息
+                  if (mentionedUsers.length > 0) setMentionedUsers([]);
+                  sendLingxiaMessage();
+                  return;
+                }
+                if (!text) { toast.error("请先输入任务内容再发起协作"); return; }
+                if (liveMentions.length === 1) {
+                  // 1:1 协作 → 直接 coop.create，跳 /coop/:sessionId（保持原行为）
+                  coopCreateFromChatMut.mutate({
+                    title: text.slice(0, 80).split(/\n/)[0] || "主聊天发起的协作",
+                    originMessage: text,
+                    creatorAdoptId: resolvedAdoptId || "lgc-creator",
+                    members: liveMentions.map((u) => ({
+                      userId: u.userId,
+                      targetAdoptId: u.adoptId || `mock:${u.userId}`,
+                      subtask: text,
+                    })),
+                  });
+                  return;
+                }
+                // ≥2 人 → 跳 /coop/new 让用户给每人分子任务（飞书+Linear 模式）
+                try {
+                  sessionStorage.setItem("coop_prefill", JSON.stringify({
+                    origin: text,
+                    title: text.slice(0, 80).split(/\n/)[0],
+                    members: liveMentions.map((u) => ({ userId: u.userId, userName: u.userName, adoptId: u.adoptId })),
+                  }));
+                } catch {}
+                setMentionedUsers([]);
+                setLingxiaInput("");
+                setLocationCoop("/coop/new");
+              }}
               onStop={stopLingxiaStreaming}
               streaming={lingxiaStreaming}
               disabled={false}
@@ -1296,6 +1409,9 @@ export default function Home() {
               maxLength={4000}
               messages={lingxiaMsgs}
               onNewChat={resetLingxiaSession}
+              onUserMention={(u) => {
+                setMentionedUsers((prev) => prev.some((x) => x.userId === u.userId) ? prev : [...prev, u]);
+              }}
             />
 
           </main>

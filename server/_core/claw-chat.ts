@@ -17,7 +17,7 @@ export function registerChatStreamRoutes(app: express.Express) {
   // 直连 Gateway /v1/chat/completions SSE，用 Node http 模块透传（避免 fetch 缓冲问题）
   app.post("/api/claw/chat-stream", clawChatLimiter, async (req, res) => {
     const routeEnterMs = Date.now();
-    let { adoptId, message, model } = req.body || {};
+    let { adoptId, message, model, pendingToolContext, epochLabel } = req.body || {};
     if (!adoptId || !message) {
       res.status(400).json({ error: "adoptId and message required" });
       return;
@@ -248,13 +248,24 @@ export function registerChatStreamRoutes(app: express.Express) {
       brandSystemPrompt = brand.systemPrompt;
     } catch {}
 
+    // Phase 2 方案 D：如果上一轮是 agent 回复，用户端传来 pendingToolContext
+    //   将之注入 gateway messages 数组，openclaw 可读到 agent 结论做 follow-up
     const body = JSON.stringify(
       buildChatRequestBody({
         message,
         permissionProfile,
         brandSystemPrompt,
+        pendingToolContext: pendingToolContext && typeof pendingToolContext === "object"
+          ? {
+              agentName: String(pendingToolContext.agentName || "agent").slice(0, 64),
+              content: String(pendingToolContext.content || "").slice(0, 8000),
+            }
+          : null,
       })
     );
+    if (pendingToolContext && typeof pendingToolContext === "object") {
+      console.log("[CTX-INJECT] adoptId=" + adoptId + " agentName=" + String(pendingToolContext.agentName || "").slice(0, 40) + " contentLen=" + String(pendingToolContext.content || "").length);
+    }
 
     // DEBUG: 验证 tools 是否注入
     try {
@@ -291,17 +302,29 @@ export function registerChatStreamRoutes(app: express.Express) {
         const trialAgentDir = `${remoteHome}/.openclaw/agents/${trialAgentId}`;
         const runtimeAgentId = existsSync(trialAgentDir) ? trialAgentId : dbAgentId;
 
-        // ── Session 注册表查询：优先复用 epoch 匹配的已有 session key ──
-        // Gateway 标准 key 格式：agent:{agentId}:main
-        // 注册表 miss 时使用标准 key，让 Gateway 按 agent 配置的 workspace 扫描 skills
-        let sessionKey = lookupSessionRegistry(String(adoptId), runtimeAgentId, epoch);
-        if (!sessionKey) {
-          // 关键修复：epoch 变更后必须使用新 session key，避免复用旧上下文
-          // epoch=0 保持历史兼容；epoch>0 使用分代 key 实现真正"新会话"
-          sessionKey = epoch > 0
-            ? `agent:${runtimeAgentId}:main:e${epoch}`
-            : `agent:${runtimeAgentId}:main`;
-          upsertSessionRegistry(String(adoptId), runtimeAgentId, sessionKey, epoch);
+        // ── Session key 计算 ─────────────────────────────────────────
+        // 三种来源：
+        //   1) epochLabel（显式 label 隔离，协作子任务/会话嵌入场景用）
+        //      → sessionKey = agent:{agent}:main:{safeLabel}，不走 registry，每次稳定
+        //      → 跟主聊天的 e{epoch} 物理隔离，不污染主聊天 sandbox/记忆
+        //   2) 注册表命中（epoch 复用已存在的 session key）
+        //   3) 数字 epoch fallback（标准主聊天路径）
+        let sessionKey: string;
+        if (epochLabel && typeof epochLabel === "string" && epochLabel.trim().length > 0) {
+          const safeLabel = epochLabel.trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+          sessionKey = `agent:${runtimeAgentId}:main:${safeLabel}`;
+        } else {
+          const found = lookupSessionRegistry(String(adoptId), runtimeAgentId, epoch);
+          if (found) {
+            sessionKey = found;
+          } else {
+            // 关键修复：epoch 变更后必须使用新 session key，避免复用旧上下文
+            // epoch=0 保持历史兼容；epoch>0 使用分代 key 实现真正"新会话"
+            sessionKey = epoch > 0
+              ? `agent:${runtimeAgentId}:main:e${epoch}`
+              : `agent:${runtimeAgentId}:main`;
+            upsertSessionRegistry(String(adoptId), runtimeAgentId, sessionKey, epoch);
+          }
         }
 
 const options = {

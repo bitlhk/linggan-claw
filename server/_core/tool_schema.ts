@@ -102,18 +102,32 @@ export function buildChatRequestBody(params: {
   permissionProfile: PermissionProfile;
   baseModel?: string;
   brandSystemPrompt?: string;
+  pendingToolContext?: { agentName: string; content: string } | null;
 }) {
-  const { message, permissionProfile, baseModel = "openclaw", brandSystemPrompt } = params;
+  const { message, permissionProfile, baseModel = "openclaw", brandSystemPrompt, pendingToolContext } = params;
   const showVirtualExec = permissionProfile === "plus" || permissionProfile === "internal";
+
+  // Phase 2 方案 D：kill switch 控制是否注入 agent tool_result 上下文
+  const injectMode = String(process.env.CONTEXT_INJECT_MODE || "D").toLowerCase();
+  const shouldInject = pendingToolContext && pendingToolContext.content && injectMode === "d";
+
+  const messages: any[] = [
+    { role: "system", content: buildPlatformSecurityPrompt(brandSystemPrompt) },
+  ];
+  if (shouldInject) {
+    // 将上一轮 agent 回答作为 tool_result 注入，让 openclaw 可以引用
+    messages.push({
+      role: "tool",
+      name: pendingToolContext!.agentName.slice(0, 64),
+      content: pendingToolContext!.content.slice(0, 8000),
+    });
+  }
+  messages.push({ role: "user", content: message });
 
   const body: Record<string, any> = {
     model: baseModel,
     stream: true,
-    // system 消息放在 messages 首位，平台级约束注入，Agent 不可覆盖
-    messages: [
-      { role: "system", content: buildPlatformSecurityPrompt(brandSystemPrompt) },
-      { role: "user", content: message },
-    ],
+    messages,
   };
 
   const tools: any[] = [];

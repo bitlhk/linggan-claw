@@ -36,6 +36,7 @@ logs
 nohup.out
 .DS_Store
 scripts/sync-github.sh
+scripts/sync-skills.sh
 EXCLUDES
 
 # ── 2. 确保 .env.example 存在 ──

@@ -8,6 +8,7 @@
 
 export interface StreamWriter {
   writeText(text: string): void;
+  writeRaw(data: object): void;
   writeEnd(): void;
   writeError(msg: string): void;
   readonly ended: boolean;
@@ -31,6 +32,12 @@ export class SseStreamWriter implements StreamWriter {
   writeText(text: string) {
     if (!this.ended) {
       this.res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: text }, index: 0 }] })}\n\n`);
+    }
+  }
+
+  writeRaw(data: object) {
+    if (!this.ended) {
+      this.res.write(`data: ${JSON.stringify(data)}\n\n`);
     }
   }
 
@@ -59,6 +66,12 @@ export class WsStreamWriter implements StreamWriter {
   writeText(text: string) {
     if (!this.ended) {
       this.ws.send(JSON.stringify({ choices: [{ delta: { content: text }, index: 0 }] }));
+    }
+  }
+
+  writeRaw(data: object) {
+    if (!this.ended) {
+      this.ws.send(JSON.stringify(data));
     }
   }
 

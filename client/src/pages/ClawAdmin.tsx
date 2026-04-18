@@ -510,6 +510,8 @@ export default function ClawAdmin() {
                       </th>
                       <th className="p-3 text-left font-medium text-muted-foreground">Adopt ID</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">用户</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">Organization</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">Group</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">状态</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">权限</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">TTL</th>
@@ -524,6 +526,16 @@ export default function ClawAdmin() {
                         </td>
                         <td className="p-3 font-mono text-xs text-gray-900">{row.adoptId}</td>
                         <td className="p-3 text-xs text-muted-foreground">{row.userName || row.userEmail || `#${row.userId}`}</td>
+                        <td className="p-3 text-xs text-muted-foreground">{row.organizationName || "—"}</td>
+                        <td className="p-3 text-xs">
+                          {row.userGroupId && row.userGroupId > 0 ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 text-[11px]">
+                              <span className="font-medium">{row.groupName || `#${row.userGroupId}`}</span>
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">默认/外部</span>
+                          )}
+                        </td>
                         <td className="p-3">
                           <span className="inline-flex items-center gap-1.5 text-xs font-medium">
                             <span className="w-1.5 h-1.5 rounded-full" style={{ background: STATUS_COLORS[row.status] || "#9ca3af" }} />

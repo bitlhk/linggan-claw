@@ -1,4 +1,12 @@
-import { useRef, useState, useCallback, type KeyboardEvent } from "react";
+import { useRef, useState, useCallback, useEffect, type KeyboardEvent } from "react";
+
+type MentionUser = {
+  userId: number;
+  userName: string;
+  groupName: string | null;
+  orgName: string | null;
+  adoptId: string | null;
+};
 
 type ChatInputProps = {
   value: string;
@@ -11,6 +19,7 @@ type ChatInputProps = {
   placeholder?: string;
   maxLength?: number;
   messages?: Array<{ role: string; text: string; timeLabel: string }>;
+  onUserMention?: (user: MentionUser) => void;
 };
 
 export function ChatInput({
@@ -24,6 +33,7 @@ export function ChatInput({
   placeholder = "Message…",
   maxLength = 4000,
   messages = [],
+  onUserMention,
 }: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -31,13 +41,118 @@ export function ChatInput({
 
   // ── 语音录制状态 ──
   const [recording, setRecording] = useState(false);
-
-
   const [transcribing, setTranscribing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
+  // ── @mention 状态 ──
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionAtPos, setMentionAtPos] = useState<number>(-1); // @ 的位置
+  const [users, setUsers] = useState<MentionUser[]>([]);
+  const usersLoadedRef = useRef(false);
+
+  const loadUsers = useCallback(async () => {
+    if (usersLoadedRef.current) return;
+    usersLoadedRef.current = true;
+    try {
+      // tRPC query 的 REST 调用形式
+      const input = encodeURIComponent(JSON.stringify({ json: { limit: 100 } }));
+      const r = await fetch(`/api/trpc/coop.mentionCandidates?input=${input}`, { credentials: "include" });
+      if (!r.ok) {
+        usersLoadedRef.current = false;
+        return;
+      }
+      const payload = await r.json();
+      // superjson 格式：payload.result.data.json 是实际返回
+      const data = payload?.result?.data?.json || [];
+      const list: MentionUser[] = (data || []).map((u: any) => ({
+        userId: u.userId,
+        userName: u.userName || "(未命名)",
+        groupName: u.groupName,
+        orgName: u.orgName,
+        adoptId: u.adoptId,
+      }));
+      setUsers(list);
+    } catch {
+      usersLoadedRef.current = false;
+    }
+  }, []);
+
+  // 过滤匹配
+  const filteredUsers = mentionOpen
+    ? users.filter((u) => {
+        if (!mentionQuery) return true;
+        const q = mentionQuery.toLowerCase();
+        return (u.userName || "").toLowerCase().includes(q) || (u.groupName || "").toLowerCase().includes(q) || (u.orgName || "").toLowerCase().includes(q);
+      }).slice(0, 20)
+    : [];
+
+  // 检测输入中的 @ 触发
+  const detectMention = useCallback((text: string, cursor: number) => {
+    // 往回找最近的 @
+    let atIdx = -1;
+    for (let i = cursor - 1; i >= 0; i -= 1) {
+      const ch = text[i];
+      if (ch === "@") { atIdx = i; break; }
+      // 允许：中英文、数字、下划线、连字符、点
+      if (!/[\w\u4e00-\u9fa5\-·]/.test(ch)) break;
+    }
+    if (atIdx < 0) {
+      setMentionOpen(false);
+      return;
+    }
+    // @ 前一字符必须是行首/空白
+    const prev = atIdx === 0 ? " " : text[atIdx - 1];
+    if (!/\s|^$/.test(prev) && atIdx !== 0) {
+      setMentionOpen(false);
+      return;
+    }
+    const query = text.slice(atIdx + 1, cursor);
+    setMentionAtPos(atIdx);
+    setMentionQuery((prev) => {
+      if (prev !== query) setMentionIndex(0);
+      return query;
+    });
+    setMentionOpen(true);
+    loadUsers();
+  }, [loadUsers]);
+
+  const selectMention = useCallback((u: MentionUser) => {
+    // 插入 @用户名 标签，并告知父级（父级在发送时触发协作）
+    const before = value.slice(0, mentionAtPos);
+    const after = value.slice(textareaRef.current?.selectionStart ?? value.length);
+    onChange(before + `@${u.userName} ` + after);
+    onUserMention?.(u);
+    setMentionOpen(false);
+    // 聚焦回输入框
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [value, mentionAtPos, onChange, onUserMention]);
+
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionOpen && filteredUsers.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionIndex((i) => (i + 1) % filteredUsers.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIndex((i) => (i - 1 + filteredUsers.length) % filteredUsers.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        selectMention(filteredUsers[mentionIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionOpen(false);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (streaming) onStop?.();
@@ -88,7 +203,7 @@ export function ChatInput({
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
         const audioBlob = new Blob(chunksRef.current, { type: mimeType });
-        if (audioBlob.size < 100) return; // too short
+        if (audioBlob.size < 100) return;
 
         setTranscribing(true);
         try {
@@ -138,8 +253,93 @@ export function ChatInput({
     else startRecording();
   };
 
+  // mentionIndex 变化时，把当前高亮项滚入可视区（修复键盘 ↑↓ 翻不到列表底部的问题）
+  useEffect(() => {
+    if (!mentionOpen) return;
+    const el = document.querySelector(`[data-mention-idx="${mentionIndex}"]`) as HTMLElement | null;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [mentionIndex, mentionOpen]);
+
+  // 点击外部关闭 @mention
+  useEffect(() => {
+    if (!mentionOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      const ta = textareaRef.current;
+      if (ta && e.target instanceof Node && ta.contains(e.target)) return;
+      setMentionOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [mentionOpen]);
+
   return (
     <div className="flex-none mb-4 mt-0" style={{ position: "relative", paddingLeft: 40, paddingRight: 40 }}>
+      {/* @mention 浮层 */}
+      {mentionOpen && filteredUsers.length > 0 && (
+        <div
+          className="lingxia-mention-overlay"
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 6px)",
+            left: 40,
+            right: 40,
+            maxWidth: 420,
+            background: "var(--oc-card)",
+            border: "1px solid var(--oc-border)",
+            borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+            padding: 4,
+            zIndex: 50,
+            maxHeight: 280,
+            overflowY: "auto",
+          }}
+        >
+          <div style={{ padding: "4px 10px 6px", fontSize: 10, color: "var(--oc-text-secondary)", opacity: 0.7, letterSpacing: "0.05em" }}>
+            @ 选择协作伙伴 · ↑↓ 导航 · Enter 确认 · Esc 取消
+          </div>
+          {filteredUsers.map((u, i) => (
+            <button
+              key={u.userId}
+              data-mention-idx={i}
+              onMouseDown={(e) => { e.preventDefault(); selectMention(u); }}
+              onMouseEnter={() => setMentionIndex(i)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                width: "100%",
+                padding: "8px 10px",
+                borderRadius: 6,
+                background: i === mentionIndex ? "var(--oc-bg-hover)" : "transparent",
+                border: "none",
+                textAlign: "left",
+                cursor: "pointer",
+                color: "var(--oc-text-primary)",
+              }}
+            >
+              <span style={{
+                width: 26, height: 26, borderRadius: "50%", background: "var(--oc-bg-hover)",
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                fontSize: 12, fontWeight: 600, flexShrink: 0, color: "var(--oc-text-primary)",
+              }}>
+                {(u.userName || "?").slice(0, 1)}
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--oc-text-primary)" }}>
+                  {u.userName}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--oc-text-secondary)", opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {u.orgName || "—"}{u.groupName ? ` · ${u.groupName}` : ""}
+                </div>
+              </div>
+              {u.adoptId ? (
+                <span style={{ fontSize: 10, color: "var(--oc-accent)", opacity: 0.8, fontFamily: "monospace" }}>🤖</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* 附件预览 */}
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-2">
@@ -167,7 +367,6 @@ export function ChatInput({
           transition: "border-color 0.2s, box-shadow 0.2s",
         }}
       >
-        {/* 上：文字输入区 */}
         <div className="px-4 pt-3 pb-1">
           {recording ? (
             <div className="flex items-center gap-2" style={{ minHeight: 22, color: "var(--oc-accent)" }}>
@@ -184,9 +383,23 @@ export function ChatInput({
               ref={textareaRef}
               value={value}
               onChange={(e) => {
-                onChange(e.target.value);
+                const v = e.target.value;
+                onChange(v);
                 e.target.style.height = "auto";
                 e.target.style.height = Math.min(e.target.scrollHeight, 144) + "px";
+                // 检测 @
+                const cursor = e.target.selectionStart ?? v.length;
+                detectMention(v, cursor);
+              }}
+              onKeyUp={(e) => {
+                // 导航键不触发重检测，避免重置高亮
+                if (mentionOpen && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Tab", "Escape"].includes(e.key)) return;
+                const ta = e.currentTarget;
+                detectMention(ta.value, ta.selectionStart ?? ta.value.length);
+              }}
+              onClick={(e) => {
+                const ta = e.currentTarget;
+                detectMention(ta.value, ta.selectionStart ?? ta.value.length);
               }}
               onKeyDown={onKeyDown}
               placeholder={placeholder}
@@ -204,7 +417,6 @@ export function ChatInput({
           )}
         </div>
 
-        {/* 下：图标工具栏 */}
         <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
           <div className="flex items-center gap-1">
             <input ref={fileInputRef} type="file" multiple
@@ -268,10 +480,9 @@ export function ChatInput({
         </div>
       </div>
 
-      {/* 底部提示 */}
       <div className="mt-1.5 flex items-center justify-between px-1">
         <p className="text-[10px]" style={{ color: "var(--oc-text-secondary)", opacity: 0.7 }}>
-          Enter 发送 · Shift+Enter 换行
+          Enter 发送 · Shift+Enter 换行 · @ 选择智能体
         </p>
         <p className="text-[10px] font-mono" style={{ color: "var(--oc-text-secondary)", opacity: 0.5 }}>
           {value.length} / {maxLength}

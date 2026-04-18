@@ -56,6 +56,8 @@ async function ilinkGet(endpoint: string): Promise<any> {
 }
 
 async function ilinkPost(baseUrl: string, endpoint: string, payload: any, token?: string): Promise<any> {
+  // 2026-04-17: errcode 检查 — ilink 失败时返回 { errcode != 0, errmsg }
+  // 之前不检查导致 sendMessage 看似成功但实际未投递（token 过期等场景）
   const body = JSON.stringify({ ...payload, base_info: { channel_version: CHANNEL_VERSION } });
   const url = `${baseUrl.replace(/\/+$/, "")}/${endpoint}`;
   const resp = await fetch(url, {
@@ -63,7 +65,14 @@ async function ilinkPost(baseUrl: string, endpoint: string, payload: any, token?
     headers: makeHeaders(token, Buffer.byteLength(body)),
     body,
   });
-  return resp.json();
+  const data: any = await resp.json().catch(() => ({}));
+  if (data?.errcode !== undefined && data.errcode !== 0) {
+    const tag = endpoint.split("/").pop();
+    const err = new Error(`ilink ${tag} failed: errcode=${data.errcode} errmsg=${data.errmsg || data.errMsg || "unknown"}`);
+    (err as any).ilinkErrcode = data.errcode;
+    throw err;
+  }
+  return data;
 }
 
 // 刷新 context_token（短超时，不阻塞）

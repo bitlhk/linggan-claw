@@ -328,11 +328,12 @@ export function registerWSProxy(server: Server) {
           memAcc = new ResponseAccumulator(meta.userId, "main-chat", String(msg.message || ""));
 
           // ── 平台意图路由（与 HTTP 路径共用 intent-agent）──
+            console.log("[WS-PM] entering intent routing for:", String(msg.message || "").slice(0, 30));
           try {
             const { WsStreamWriter } = await import("./stream-writer");
             const { routeMessage } = await import("./intent-agent");
             const wsWriter = new WsStreamWriter(client, WebSocket.OPEN);
-            const handled = await routeMessage(meta.adoptId, String(msg.message || ""), wsWriter);
+            console.log("[PM-DEBUG] routeMessage called, msg:", String(msg.message || "").slice(0, 50)); const handled = await routeMessage(meta.adoptId, String(msg.message || ""), wsWriter);
             if (handled) return; // 平台已处理，不发 Gateway
           } catch (e) {
             console.error("[WS] platform router error:", e);

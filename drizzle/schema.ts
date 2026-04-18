@@ -1,4 +1,4 @@
-import { bigint, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { bigint, boolean, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -18,6 +18,8 @@ export const users = mysqlTable("users", {
   password: varchar("password", { length: 255 }), // 密码哈希值
   loginMethod: varchar("loginMethod", { length: 64 }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  groupId: int("groupId").default(0).notNull(),
+  organization: varchar("organization", { length: 200 }),
   accessLevel: mysqlEnum("accessLevel", ["public_only", "all"]).default("public_only").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -251,6 +253,19 @@ export const systemConfigs = mysqlTable("system_configs", {
   updatedBy: int("updatedBy"), // 更新人ID（管理员）
 });
 
+/**
+ * 灵虾组织协作 - 组定义
+ */
+export const lxGroups = mysqlTable("lx_groups", {
+  id: int("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  sortOrder: int("sort_order").default(99),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type LxGroup = typeof lxGroups.$inferSelect;
+
+
 export type SystemConfig = typeof systemConfigs.$inferSelect;
 export type InsertSystemConfig = typeof systemConfigs.$inferInsert;
 
@@ -367,6 +382,8 @@ export type InsertClawCollabSetting = typeof clawCollabSettings.$inferInsert;
  */
 export const clawCollabRequests = mysqlTable("claw_collab_requests", {
   id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  sessionId: varchar("sessionId", { length: 64 }),
+  subtaskIndex: int("subtaskIndex"),
   requesterAdoptId: varchar("requesterAdoptId", { length: 64 }).notNull(),
   targetAdoptId: varchar("targetAdoptId", { length: 64 }).notNull(),
   requesterUserId: int("requesterUserId").notNull(),
@@ -376,6 +393,7 @@ export const clawCollabRequests = mysqlTable("claw_collab_requests", {
   inputPayload: text("inputPayload"),
   status: mysqlEnum("status", ["pending", "approved", "rejected", "running", "completed", "failed", "cancelled", "partial_success", "waiting_input"]).default("pending").notNull(),
   resultSummary: text("resultSummary"),
+  resultVisibleToAll: boolean("resultVisibleToAll").default(false).notNull(),
   approvedAt: timestamp("approvedAt"),
   completedAt: timestamp("completedAt"),
   approvedBy: int("approvedBy"),
@@ -390,6 +408,46 @@ export const clawCollabRequests = mysqlTable("claw_collab_requests", {
 
 export type ClawCollabRequest = typeof clawCollabRequests.$inferSelect;
 export type InsertClawCollabRequest = typeof clawCollabRequests.$inferInsert;
+
+/**
+ * 灵虾组织协作 V2 - 协作 session（N 人协作的父记录）
+ */
+export const lxCoopSessions = mysqlTable("lx_coop_sessions", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  creatorUserId: int("creator_user_id").notNull(),
+  creatorAdoptId: varchar("creator_adopt_id", { length: 64 }).notNull(),
+  title: varchar("title", { length: 200 }),
+  originMessage: text("origin_message"),
+  status: mysqlEnum("status", ["drafting","inviting","running","consolidating","published","closed","dissolved"]).default("drafting").notNull(),
+  visibilityMode: mysqlEnum("visibility_mode", ["creator_only","all_members"]).default("creator_only").notNull(),
+  finalSummary: text("final_summary"),
+  finalArtifacts: text("final_artifacts"),
+  memberCount: int("member_count").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  publishedAt: timestamp("published_at"),
+  closedAt: timestamp("closed_at"),
+});
+
+export type LxCoopSession = typeof lxCoopSessions.$inferSelect;
+export type InsertLxCoopSession = typeof lxCoopSessions.$inferInsert;
+
+/**
+ * 灵虾组织协作 V2 - 协作事件流（append-only timeline）
+ */
+export const lxCoopEvents = mysqlTable("lx_coop_events", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  sessionId: varchar("session_id", { length: 64 }).notNull(),
+  eventType: varchar("event_type", { length: 48 }).notNull(),
+  actorUserId: int("actor_user_id"),
+  actorAdoptId: varchar("actor_adopt_id", { length: 64 }),
+  requestId: bigint("request_id", { mode: "number" }),
+  payload: text("payload"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type LxCoopEvent = typeof lxCoopEvents.$inferSelect;
+export type InsertLxCoopEvent = typeof lxCoopEvents.$inferInsert;
+
 
 /**
  * 工具执行审计表

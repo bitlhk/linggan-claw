@@ -239,12 +239,17 @@ async function pollLoop(adoptId: string): Promise<void> {
             syncBuf = refreshData.get_updates_buf || refreshData.sync_buf;
             acct.syncBuf = syncBuf;
           }
+          let refreshedToken = false;
           for (const rm of (refreshData.msgs || []).reverse()) {
             if (rm.context_token && rm.from_user_id) {
               acct.lastContextToken = rm.context_token;
+              refreshedToken = true;
               break;
             }
           }
+          // 2026-04-17 fix: refresh 后必须 save，否则 server 重启会丢最 fresh 的 contextToken
+          // 主动推送（coop-notify 等）依赖 acct.lastContextToken，旧 token 会被 ilink 静默拒绝
+          if (refreshedToken || acct.syncBuf) saveAccount(adoptId, acct);
         } catch {}
 
         // 发回复（截断到 4000 字）

@@ -180,7 +180,15 @@ export function registerBusinessRoutes(app: express.Express) {
   // POST /api/claw/business-chat-stream { agentId, message, sessionKey? }
   app.post("/api/claw/business-chat-stream", clawChatLimiter, async (req, res) => {
     console.log("[BIZ-STREAM] request received", { agentId: req.body?.agentId, ua: req.headers["user-agent"]?.slice(0,30) });
-    const userId = await resolveRequesterUserId(req, res);
+    // 支持内部调用（项目经理 dispatch）
+    const internalKey = String(req.headers["x-internal-key"] || "");
+    const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    let userId: number | null;
+    if (internalKey === expectedKey && req.headers["x-internal-user-id"]) {
+      userId = parseInt(String(req.headers["x-internal-user-id"]), 10) || null;
+    } else {
+      userId = await resolveRequesterUserId(req, res);
+    }
     if (!userId) return res.status(401).json({ error: "未登录" });
 
     const { agentId, message, sessionKey: clientSessionKey, model } = req.body || {};
@@ -268,6 +276,7 @@ export function registerBusinessRoutes(app: express.Express) {
         "工具：credit_lookup / financial_statement / guarantee_value / risk_classification / pricing_recommend / post_loan_monitor / compliance_check",
         "",
         "【行为约束 - 红线，比 task-bond 更严格】",
+        "0. **terminal 工具仅用于调用 credit-risk/tools/ 下的 7 个工具**。所有数学计算（同比/环比/CAGR/资产负债率/偿债比等）请在回答中直接心算给出，禁止用 python / shell / bc 做算数——这会被安全策略拦截导致会话中止。",
         "1. 永远用中文回复",
         "2. 每次决策必须：引用至少一个框架 + 给出五级分类 + 加免责强调'人工复核'",
         "3. **永远在末尾加免责声明**：'本建议为 AI 辅助决策，最终归档需经人工授信审批委员会复核'",
@@ -386,7 +395,29 @@ export function registerBusinessRoutes(app: express.Express) {
                       // 🛡️ L2 安全护栏
                       if (evt.tool === "terminal") {
                         const previewStr = String(evt.preview || "");
-                        const isWhitelisted = previewStr.includes("/finance/credit-risk/");
+                        // 白名单 1：授权工具路径
+                        const isToolCall = previewStr.includes("/finance/credit-risk/");
+                        // 白名单 2：纯数学 inline python（无危险 import / 无文件操作 / 短）
+                        const isSafeMath = (() => {
+                          if (!/python/.test(previewStr)) return false;
+                          if (previewStr.length > 800) return false;
+                          const dangerPatterns = [
+                            /import\s+(os|sys|subprocess|socket|urllib|requests|http|shutil|pathlib|pickle|ctypes)/,
+                            /from\s+(os|sys|subprocess|socket|urllib|requests|http|shutil|pathlib|pickle|ctypes)/,
+                            /__import__/,
+                            /open\s*\(/,
+                            /eval\s*\(/,
+                            /exec\s*\(/,
+                            /compile\s*\(/,
+                            /getattr\s*\(/,
+                          ];
+                          if (dangerPatterns.some((r) => r.test(previewStr))) return false;
+                          return true;
+                        })();
+                        const isWhitelisted = isToolCall || isSafeMath;
+                        if (isSafeMath && !isToolCall) {
+                          console.log("[CREDIT-RISK SECURITY] 放行纯数学 inline python:", previewStr.slice(0, 120));
+                        }
                         if (!isWhitelisted) {
                           console.warn("[CREDIT-RISK SECURITY] 拦截非授权 terminal 调用:", previewStr.slice(0, 200));
                           res.write(`data: ${JSON.stringify({ __status: "⚠️ 安全策略：检测到未授权工具调用，会话已中止" })}\n\n`);
@@ -2094,7 +2125,15 @@ export function registerBusinessRoutes(app: express.Express) {
   };
 
   app.get("/api/claw/business-files", async (req, res) => {
-    const userId = await resolveRequesterUserId(req, res);
+    // 支持内部调用（项目经理 dispatch）
+    const internalKey = String(req.headers["x-internal-key"] || "");
+    const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    let userId: number | null;
+    if (internalKey === expectedKey && req.headers["x-internal-user-id"]) {
+      userId = parseInt(String(req.headers["x-internal-user-id"]), 10) || null;
+    } else {
+      userId = await resolveRequesterUserId(req, res);
+    }
     if (!userId) return res.status(401).json({ error: "未登录" });
 
     const agentId = String(req.query.agentId || "").trim();
@@ -2148,7 +2187,15 @@ export function registerBusinessRoutes(app: express.Express) {
 
   // ── 业务 Agent 文件下载 ───────────────────────────────────────────────
   app.get("/api/claw/business-files/download", async (req, res) => {
-    const userId = await resolveRequesterUserId(req, res);
+    // 支持内部调用（项目经理 dispatch）
+    const internalKey = String(req.headers["x-internal-key"] || "");
+    const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    let userId: number | null;
+    if (internalKey === expectedKey && req.headers["x-internal-user-id"]) {
+      userId = parseInt(String(req.headers["x-internal-user-id"]), 10) || null;
+    } else {
+      userId = await resolveRequesterUserId(req, res);
+    }
     if (!userId) return res.status(401).json({ error: "未登录" });
 
     const agentId = String(req.query.agentId || "").trim();
@@ -2212,7 +2259,15 @@ export function registerBusinessRoutes(app: express.Express) {
 
   // ── 业务 Agent 文件删除（单个或清空） ────────────────────────────────
   app.delete("/api/claw/business-files", async (req, res) => {
-    const userId = await resolveRequesterUserId(req, res);
+    // 支持内部调用（项目经理 dispatch）
+    const internalKey = String(req.headers["x-internal-key"] || "");
+    const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    let userId: number | null;
+    if (internalKey === expectedKey && req.headers["x-internal-user-id"]) {
+      userId = parseInt(String(req.headers["x-internal-user-id"]), 10) || null;
+    } else {
+      userId = await resolveRequesterUserId(req, res);
+    }
     if (!userId) return res.status(401).json({ error: "未登录" });
 
     const agentId = String(req.query.agentId || req.body?.agentId || "").trim();
@@ -2287,7 +2342,15 @@ export function registerBusinessRoutes(app: express.Express) {
   });
   // ── Remote 业务 Agent 文件代理（proxy to remote server） ───────────────
   app.get("/api/claw/remote-file", async (req, res) => {
-    const userId = await resolveRequesterUserId(req, res);
+    // 支持内部调用（项目经理 dispatch）
+    const internalKey = String(req.headers["x-internal-key"] || "");
+    const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    let userId: number | null;
+    if (internalKey === expectedKey && req.headers["x-internal-user-id"]) {
+      userId = parseInt(String(req.headers["x-internal-user-id"]), 10) || null;
+    } else {
+      userId = await resolveRequesterUserId(req, res);
+    }
     if (!userId) return res.status(401).json({ error: "未登录" });
 
     const agentId = String(req.query.agentId || "").trim();

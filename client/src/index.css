@@ -733,6 +733,15 @@
   border-radius: 10px;
   height: 32px;
 }
+select.settings-input {
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
 .settings-input:focus,
 .settings-select:focus,
 .settings-select:focus-within {
@@ -1055,6 +1064,12 @@
   --oc-text-tertiary: #86868b;
   --oc-text-quaternary:#aeaeb2;
   --accent-subtle:    rgba(220, 38, 38, 0.06);
+
+  /* 修复：shadcn token 在 light 下的覆盖（默认 :root 里是 dark 色，light 块必须显式覆盖）*/
+  --foreground:       var(--text);
+  --muted-foreground: var(--muted);
+  --card-foreground:  var(--text);
+  --popover-foreground: var(--text);
 }
 
 /* 亮色 Claw：红色在亮色下稍深 */

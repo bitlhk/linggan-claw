@@ -1,5 +1,5 @@
 import { desc, eq, inArray, and, sql } from "drizzle-orm";
-import { users, clawAdoptions, clawAdoptionEvents, clawProfileSettings, InsertClawAdoption, InsertClawAdoptionEvent, InsertClawProfileSetting, ClawAdoption } from "../../drizzle/schema";
+import { users, clawAdoptions, clawAdoptionEvents, clawProfileSettings, InsertClawAdoption, InsertClawAdoptionEvent, InsertClawProfileSetting, ClawAdoption, registrations, lxGroups } from "../../drizzle/schema";
 import { getDb } from "./connection";
 
 // ============ 灵感龙虾方案（领养实例） ============
@@ -152,9 +152,14 @@ export async function listClawAdoptionsAdmin(params?: {
         updatedAt: clawAdoptions.updatedAt,
         userName: users.name,
         userEmail: users.email,
+        userGroupId: users.groupId,
+        organizationName: sql<string | null>`COALESCE(${users.organization}, ${registrations.company})`,
+        groupName: lxGroups.name,
       })
       .from(clawAdoptions)
       .leftJoin(users, eq(clawAdoptions.userId, users.id))
+      .leftJoin(registrations, eq(registrations.email, users.email))
+      .leftJoin(lxGroups, eq(lxGroups.id, users.groupId))
       .orderBy(desc(clawAdoptions.id))
       .limit(limit);
 

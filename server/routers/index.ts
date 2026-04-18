@@ -8,6 +8,7 @@ import { clawRouter } from "./claw";
 import { ipAccessLogsRouter } from "./ipAccessLogs";
 import { systemConfigsRouter } from "./systemConfigs";
 import { collabRouter } from "./collab";
+import { coopRouter } from "./coop";
 import { agentHealthRouter, bizAgentsRouter } from "./agents";
 
 export const appRouter = router({
@@ -26,6 +27,7 @@ export const appRouter = router({
   ipAccessLogs: ipAccessLogsRouter,
   systemConfigs: systemConfigsRouter,
   collab: collabRouter,
+  coop: coopRouter,
   agentHealth: agentHealthRouter,
   bizAgents: bizAgentsRouter,
 });

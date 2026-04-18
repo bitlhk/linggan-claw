@@ -12,6 +12,8 @@ import { loadSettings, applySettings } from "./lib/settings";
 const Home = lazy(() => import("./pages/Home"));
 const ClawHome = lazy(() => import("./pages/ClawHome"));
 const ClawAdmin = lazy(() => import("./pages/ClawAdmin"));
+const CoopSession = lazy(() => import("./pages/CoopSession"));
+const CoopNew = lazy(() => import("./pages/CoopNew"));
 const Login = lazy(() => import("./pages/Login"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -51,6 +53,14 @@ function Router() {
         {/* ── 子虾控制台 ── */}
         <Route path={"/claw/:adoptId"}>
           <Home />
+        </Route>
+
+        {/* ── 协作 session 窗口（V2）── */}
+        <Route path={"/coop/new"}>
+          <CoopNew />
+        </Route>
+        <Route path={"/coop/:sessionId"}>
+          <CoopSession />
         </Route>
 
         {/* /scenarios 重定向到首页 */}

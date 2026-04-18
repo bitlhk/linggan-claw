@@ -251,30 +251,6 @@ async function dispatchToAgent(
 // 灰度发布：只对指定 adoptId 启用 PM
 const PM_ENABLED_ADOPT_IDS = new Set(["lgc-ofnmjm4joj"]);
 
-// Phase 1 强制路由：仅对特定 adoptId 生效，命中正则跳过 PM LLM 直接 dispatch
-const FORCE_ROUTE_ADOPT_IDS = new Set(["lgc-ofnmjm4joj"]);
-const FORCE_ROUTE_MAP: Array<{ pattern: RegExp; agentId: string }> = [
-  // 顶部优先匹配，均走 Hermes（发 __hermes_tool 事件，被原生 ToolCallCard 渲染）
-  // EV 理财
-  { pattern: /电池|EV理财|新能源.*保险|新能源.*理财|电动车.*理财|动力电池|全损|残值|梯次利用/, agentId: "task-claim-ev" },
-  // 信贷风控
-  { pattern: /信贷|贷款|征信|风控|贷前调查|贷后管理|三表分析|担保物|五级分类|风险定价/, agentId: "task-credit-risk" },
-  // 债券投研
-  { pattern: /债券|国开债|国债|信用债|中债估值|收益率曲线|久期|违约预警/, agentId: "task-bond" },
-  // 个人理财
-  { pattern: /资产配置|理财规划|家庭财务|税费规划|基金.*配置|家庭.*资产/, agentId: "task-my-wealth" },
-  // 深度求索 / 复杂任务拆解
-  { pattern: /深度分析|深度求索|拆解.*任务|复杂.*任务|帮我规划|深度思考/, agentId: "task-trace" },
-];
-
-function matchForceRoute(message: string): { agentId: string } | null {
-  for (const rule of FORCE_ROUTE_MAP) {
-    if (rule.pattern.test(message)) return { agentId: rule.agentId };
-  }
-  return null;
-}
-
-
 // 旧版 L1+L2 意图路由（其他用户用这个）
 async function oldRouteMessage(adoptId: string, message: string, writer: StreamWriter): Promise<boolean> {
   const OLD_PATS: [RegExp, number][] = [
@@ -291,7 +267,9 @@ async function oldRouteMessage(adoptId: string, message: string, writer: StreamW
   if (score < 7) return false;
   const intent = await classifyIntent(message);
   if (!intent || intent.type === "passthrough") return false;
-  writer.writeText("🧠 正在理解你的需求...\n\n");
+  writer.writeText("🧠 正在理解你的需求...
+
+");
   const { executePlatformIntent } = await import("./intent-executor");
   await executePlatformIntent(adoptId, intent, writer);
   return true;
@@ -302,50 +280,25 @@ export async function routeMessage(
   message: string,
   writer: StreamWriter,
 ): Promise<boolean> {
-  // Phase 1 强制路由：特定 adoptId + 正则命中 → 跳过所有门禁直接 dispatch
-  let forcedActions: { tool: string; args: any }[] | null = null;
-  if (FORCE_ROUTE_ADOPT_IDS.has(adoptId)) {
-    const m = matchForceRoute(message);
-    if (m) {
-      console.log("[FORCE-ROUTE] adoptId=" + adoptId + " -> " + m.agentId);
-      forcedActions = [{ tool: "dispatch_task", args: { agent_id: m.agentId, prompt: message } }];
-    }
+  // 灰度发布：非白名单用户走旧版 L1+L2
+  if (!PM_ENABLED_ADOPT_IDS.has(adoptId)) {
+    return oldRouteMessage(adoptId, message, writer);
   }
 
-  if (!forcedActions) {
-    // 灰度发布：非白名单用户走旧版 L1+L2
-    if (!PM_ENABLED_ADOPT_IDS.has(adoptId)) {
-      return oldRouteMessage(adoptId, message, writer);
-    }
-
-    // 短消息快速通过，不调 LLM
-    if (!needsProjectManager(message)) return false;
-
-    // L1 最小门禁：当前只放行"理财+选股"组合进 Agent Team，其他走旧版
-    const hasWealth = /资产配置|理财规划|家庭财务|\d+\s*万.*(投资|配置|理财|规划)/.test(message);
-    const hasStock = /选股|A股|个股|股票.*(推荐|挑|选|买)/.test(message);
-    if (!(hasWealth && hasStock)) {
-      console.log("[PM-L1] 未命中理财+选股组合，走旧版路由");
-      return oldRouteMessage(adoptId, message, writer);
-    }
-    console.log("[PM-L1] 命中理财+选股组合，进 Agent Team");
-    if (!DEEPSEEK_API_KEY) return false;
-  }
+  // 短消息快速通过，不调 LLM
+  if (!needsProjectManager(message)) return false;
+  if (!DEEPSEEK_API_KEY) return false;
 
   // 加载可用 Agent 列表
   const agents = await loadAgentList();
 
-  // 调项目经理（强制路由时跳过）
+  // 调项目经理
   let actions: { tool: string; args: any }[];
-  if (forcedActions) {
-    actions = forcedActions;
-  } else {
-    try {
-      actions = await callProjectManager(message, agents);
-    } catch (e: any) {
-      console.warn("[PM] project manager error:", e?.message?.slice(0, 80));
-      return false; // 失败 → passthrough
-    }
+  try {
+    actions = await callProjectManager(message, agents);
+  } catch (e: any) {
+    console.warn("[PM] project manager error:", e?.message?.slice(0, 80));
+    return false; // 失败 → passthrough
   }
 
   // 全是 passthrough → 交给主聊天
@@ -376,10 +329,11 @@ export async function routeMessage(
   if (dispatches.length > 0) {
     const agentMap = new Map(agents.map(a => [a.id, a.name]));
 
-    // Single-agent: inline toolCall conveys status, no placeholder text.
-    // Multi-agent: keep text placeholder (bubble then receives PM summary).
-    const singleAgent = dispatches.length === 1;
-    if (!singleAgent) {
+    // Bubble: PM status
+    if (dispatches.length === 1) {
+      const name = agentMap.get(dispatches[0].args.agent_id) || dispatches[0].args.agent_id;
+      writer.writeText("🤖 正在调用 **" + name + "** ...");
+    } else {
       writer.writeText("🤖 已拆解为 " + dispatches.length + " 个子任务，并行执行中...");
     }
 
@@ -390,10 +344,6 @@ export async function routeMessage(
       name: agentMap.get(d.args.agent_id) || d.args.agent_id,
       prompt: (d.args.prompt || "").slice(0, 100),
     }));
-    // Phase 1 新增：单 agent 场景发 bind_agent 事件，前端给气泡打 fromAgent 标签
-    if (singleAgent) {
-      writer.writeRaw({ _event: "bind_agent", agentId: taskDefs[0].agentId, agentName: taskDefs[0].name });
-    }
     writer.writeRaw({ _event: "agent_dispatch", agents: taskDefs });
 
     // Parallel execution with event forwarding
@@ -414,8 +364,6 @@ export async function routeMessage(
 
         let result = "";
         const taskStartMs = Date.now();
-        // FIFO stack for matching hermes tool.completed (no id) back to tool.started id
-        const toolIdStack: string[] = [];
         try {
           const resp = await fetch("http://127.0.0.1:5180/api/claw/business-chat-stream", {
             method: "POST",
@@ -439,37 +387,20 @@ export async function routeMessage(
             const { done, value } = await reader.read();
             if (done) break;
             const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split("\n");
+            const lines = chunk.split("
+");
             for (const line of lines) {
               if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
               try {
                 const ev = JSON.parse(line.slice(6));
                 const content = ev?.choices?.[0]?.delta?.content;
-                if (content) {
-                  result += content;
-                  if (singleAgent) writer.writeText(content);
-                }
-                // Forward hermes tool events as openclaw-native tool_call / tool_result
-                // 使用 _gateway=false 触发可折叠的 ToolCallCard（与 openclaw tool use 视觉一致）
+                if (content) result += content;
+                // Forward tool events as agent_tool_update
                 if (ev?.__hermes_tool === "started") {
-                  const toolId = String(ev.id || `agent_tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-                  toolIdStack.push(toolId);
-                  writer.writeRaw({
-                    _event: "tool_call",
-                    id: toolId,
-                    name: String(ev.name || "tool"),
-                    arguments: ev.preview ? JSON.stringify({ preview: String(ev.preview) }) : "",
-                  });
+                  writer.writeRaw({ _event: "agent_tool_update", taskId, toolName: ev.name || "tool", toolStatus: "started" });
                 }
                 if (ev?.__hermes_tool === "completed") {
-                  const toolId = toolIdStack.shift() || "";
-                  writer.writeRaw({
-                    _event: "tool_result",
-                    tool_call_id: toolId,
-                    result: "",
-                    is_error: Boolean(ev.is_error),
-                    durationMs: Number(ev.durationMs || Math.round((ev.duration || 0) * 1000)),
-                  });
+                  writer.writeRaw({ _event: "agent_tool_update", taskId, toolName: ev.name || "tool", toolStatus: "completed", durationMs: Math.round((ev.duration || 0) * 1000) });
                 }
               } catch {}
             }
@@ -478,8 +409,8 @@ export async function routeMessage(
           console.warn("[PM-DISPATCH] error:", e?.message?.slice(0, 60));
         }
 
-        // Send agent_complete. Single-agent: result already streamed into bubble, only send status+duration.
-        writer.writeRaw({ _event: "agent_complete", taskId, result: singleAgent ? "" : result.slice(0, 2000), durationMs: Date.now() - taskStartMs });
+        // Send agent_complete
+        writer.writeRaw({ _event: "agent_complete", taskId, result: result.slice(0, 2000), durationMs: Date.now() - taskStartMs });
         return { name, agentId: d.args.agent_id, result };
       }),
     );
@@ -489,8 +420,13 @@ export async function routeMessage(
       try {
         const summaryPrompt = results
           .filter(r => r.result)
-          .map(r => "[" + r.name + "]:\n" + r.result.slice(0, 1500))
-          .join("\n\n---\n\n");
+          .map(r => "[" + r.name + "]:
+" + r.result.slice(0, 1500))
+          .join("
+
+---
+
+");
         const summaryResp = await fetch(DEEPSEEK_BASE + "/v1/chat/completions", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": "Bearer " + DEEPSEEK_API_KEY },
@@ -508,17 +444,25 @@ export async function routeMessage(
         if (summaryResp.ok) {
           const sd = await summaryResp.json();
           const st = sd?.choices?.[0]?.message?.content || "";
-          if (st) writer.writeText("\n\n📋 **综合方案**\n\n" + st);
+          if (st) writer.writeText("
+
+📋 **综合方案**
+
+" + st);
         }
       } catch (e) {
         console.warn("[PM] summary failed:", e?.message?.slice(0, 60));
       }
     } else if (results.length === 1 && results[0].result) {
-      writer.writeText("\n\n" + results[0].result);
+      writer.writeText("
+
+" + results[0].result);
     }
   }
 
   writer.writeEnd();
+  return true;
+}
   return true;
 }
 
