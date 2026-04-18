@@ -37,7 +37,7 @@ export function MainPanel({
     canEdit: !!skills?.canEdit,
     pending: !!skills?.pending,
     onToggle: skills?.onToggle ?? (() => {}),
-    adoptId: skills?.adoptId || "",
+    adoptId: adoptId || "",
   };
 
   const safeSettings = {

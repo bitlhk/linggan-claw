@@ -414,8 +414,8 @@ export function CollabPage({ adoptId }: { adoptId: string }) {
             <div className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>⚠️ 聊天记录、私有记忆、使用明细是平台铁律，永远不会被任何协作任务访问。</div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={handleSettingsSave} disabled={updateSettings.isLoading} className="btn-primary-soft">
-              {updateSettings.isLoading ? "保存中…" : "保存设置"}
+            <button onClick={handleSettingsSave} disabled={updateSettings.isPending} className="btn-primary-soft">
+              {updateSettings.isPending ? "保存中…" : "保存设置"}
             </button>
             {sendStatus && <span className="badge badge-success">{sendStatus}</span>}
           </div>

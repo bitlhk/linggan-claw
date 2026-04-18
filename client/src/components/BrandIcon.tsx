@@ -24,7 +24,7 @@ export function BrandIcon({
   const isDefault = !brand.logo || brand.logo === DEFAULT_LOGO;
 
   if (isDefault) {
-    return <LingxiaIcon size={size} animate={animate} className={className} style={style} />;
+    return <LingxiaIcon size={size} animate={animate} className={className} />;
   }
 
   return (

@@ -14,12 +14,14 @@ export function registerDownloadRoutes(app: express.Express) {
   // ── Sandbox 文件下载 ──────────────────────────────────────────────
   // GET /api/claw/sandbox/files?adoptId=xxx
   // GET /api/claw/sandbox/files/download?adoptId=xxx&file=yyy.csv
-  app.get("/api/claw/sandbox/files", requireClawOwner, async (req, res) => {
+  app.get("/api/claw/sandbox/files", async (req, res) => {
     try {
       const adoptId = parseAdoptId(req.query.adoptId);
-      const { getClawByAdoptId } = await import("../db");
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return sendError(res, "NOT_FOUND", "claw not found");
+      // 2026-04-18 fix: requireClawOwner 是 (req,res,adoptId) 形态，不是 express middleware。
+      // 之前挂在 app.get 第二参数位置会导致 adoptId=next_fn，DB 查不到 → 路由永远 404。
+      // 现在在 handler 里主动调用，顺便补上归属校验（原来只查存在、没校验 userId）。
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return; // 401/403/404 已由 requireClawOwner 发出
 
       const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
@@ -38,14 +40,13 @@ export function registerDownloadRoutes(app: express.Express) {
     }
   });
 
-  app.get("/api/claw/sandbox/files/download", requireClawOwner, async (req, res) => {
+  app.get("/api/claw/sandbox/files/download", async (req, res) => {
     try {
       const adoptId = parseAdoptId(req.query.adoptId);
       const fileName = parseFileName(req.query.file);
 
-      const { getClawByAdoptId } = await import("../db");
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return sendError(res, "NOT_FOUND", "claw not found");
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
 
       const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
@@ -61,14 +62,13 @@ export function registerDownloadRoutes(app: express.Express) {
   });
 
   // ── Workspace file download（技能产出文件，路径在 workspace 内）──────
-  app.get("/api/claw/workspace/files/download", requireClawOwner, async (req, res) => {
+  app.get("/api/claw/workspace/files/download", async (req, res) => {
     try {
       const adoptId = parseAdoptId(req.query.adoptId);
       const relPath = parseRelPath(req.query.path);
 
-      const { getClawByAdoptId } = await import("../db");
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return sendError(res, "NOT_FOUND", "claw not found");
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
 
       const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
@@ -192,15 +192,14 @@ export function registerDownloadRoutes(app: express.Express) {
 
   // ── Workspace 文件运行（在隔离沙箱中执行） ─────────────────────────
   // POST /api/claw/workspace/run  { adoptId, path }
-  app.post("/api/claw/workspace/run", requireClawOwner, async (req, res) => {
+  app.post("/api/claw/workspace/run", async (req, res) => {
     try {
       const body = req.body || {};
       const adoptId = parseAdoptId(body.adoptId);
       const relPath = parseRelPath(body.path, "path");
 
-      const { getClawByAdoptId } = await import("../db");
-      const claw = await getClawByAdoptId(adoptId);
-      if (!claw) return sendError(res, "NOT_FOUND", "claw not found");
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
 
       const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
       const runtimeAgentId = resolveRuntimeAgentId(adoptId, String((claw as any).agentId || ""));
