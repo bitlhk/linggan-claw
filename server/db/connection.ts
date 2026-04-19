@@ -38,12 +38,12 @@ export async function getDb() {
       });
 
       // 监听连接池错误
-      connection.on('error', (err) => {
+      (connection as any).on('error', (err: any) => {
         console.error('[Database] Pool error:', err);
       });
 
       _connection = connection;
-      _db = drizzle(connection);
+      _db = drizzle(connection) as any;
 
       // 测试连接
       await connection.query("SELECT 1");

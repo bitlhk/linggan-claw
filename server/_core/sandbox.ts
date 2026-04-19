@@ -153,7 +153,6 @@ export async function sandboxExec(opts: SandboxExecOpts): Promise<SandboxExecRes
 
     const startResult = spawnSync("docker", dockerArgs, {
       timeout: 5000,
-      encoding: "utf8",
     });
 
     if (startResult.status !== 0) {
@@ -173,7 +172,6 @@ export async function sandboxExec(opts: SandboxExecOpts): Promise<SandboxExecRes
     await new Promise<void>((resolve, reject) => {
       const child = spawn("docker", ["exec", containerName, "sh", "-c", command], {
         timeout: timeoutMs,
-        encoding: "utf8",
       });
 
       // stdout 收集（异步累积）

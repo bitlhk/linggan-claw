@@ -512,7 +512,7 @@ export const clawRouter = router({
           adoptId,
           agentId,
           status: "creating",
-          permissionProfile: profile,
+          permissionProfile: profile as "starter" | "plus" | "internal",
           ttlDays,
           entryUrl,
           expiresAt,
@@ -532,7 +532,7 @@ export const clawRouter = router({
             adoptId,
             agentId,
             userId,
-            permissionProfile: profile,
+            permissionProfile: profile as "starter" | "plus" | "internal",
             ttlDays,
           });
 

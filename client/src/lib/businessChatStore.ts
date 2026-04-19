@@ -141,6 +141,34 @@ export async function sendBusinessMessage(
   const controller = new AbortController();
   controllers.set(agentId, controller);
 
+  // 2026-04-18: flushTimer / flushDelta 从 try 内提到 function 顶级作用域，
+  // 让 L314 catch 块也能访问（TS flow narrow 不把 try 内 let 传到 catch）
+  let pendingDelta = "";
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let firstChunkFlushed = false;
+  const flushDelta = () => {
+    if (!pendingDelta) return;
+    const d = pendingDelta;
+    pendingDelta = "";
+    setAgentState(agentId, (s) => {
+      const n = [...s.msgs];
+      const last = n[n.length - 1];
+      n[n.length - 1] = {
+        role: "assistant",
+        text: (last?.text || "") + d,
+        status: undefined,
+        reasoning: last?.reasoning,
+        toolCalls: last?.toolCalls,
+      };
+      return { ...s, msgs: n };
+    });
+  };
+  const scheduleFlush = () => {
+    if (!firstChunkFlushed) { firstChunkFlushed = true; flushDelta(); return; }
+    if (flushTimer !== null) return;
+    flushTimer = setTimeout(() => { flushTimer = null; flushDelta(); }, 16);
+  };
+
   try {
     const resp = await fetch(`${apiBase}/api/claw/business-chat-stream`, {
       method: "POST",
@@ -162,33 +190,6 @@ export async function sendBusinessMessage(
     const decoder = new TextDecoder();
     let buf = "";
     let currentEvent = "";
-
-    // ── 16ms delta batching: avoid setState-per-token render storms (long prompts) ──
-    let pendingDelta = "";
-    let flushTimer: ReturnType<typeof setTimeout> | null = null;
-    let firstChunkFlushed = false;
-    const flushDelta = () => {
-      if (!pendingDelta) return;
-      const d = pendingDelta;
-      pendingDelta = "";
-      setAgentState(agentId, (s) => {
-        const n = [...s.msgs];
-        const last = n[n.length - 1];
-        n[n.length - 1] = {
-          role: "assistant",
-          text: (last?.text || "") + d,
-          status: undefined,
-          reasoning: last?.reasoning,
-          toolCalls: last?.toolCalls,
-        };
-        return { ...s, msgs: n };
-      });
-    };
-    const scheduleFlush = () => {
-      if (!firstChunkFlushed) { firstChunkFlushed = true; flushDelta(); return; }
-      if (flushTimer !== null) return;
-      flushTimer = setTimeout(() => { flushTimer = null; flushDelta(); }, 16);
-    };
 
     while (true) {
       const { done, value } = await reader.read();

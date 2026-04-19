@@ -36,6 +36,7 @@ export function AgentPage({ adoptId, skills }: { adoptId: string; skills?: { sha
   const [effective, setEffective] = useState<EffectiveResp | null>(null);
   const [coreFiles, setCoreFiles] = useState<CoreFileMeta[]>([]);
   const [loading, setLoading] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState("");
 
   const [fileName, setFileName] = useState("MEMORY.md");
@@ -166,7 +167,9 @@ export function AgentPage({ adoptId, skills }: { adoptId: string; skills?: { sha
           coreFiles={coreFiles}
           fileFilter={fileFilter}
           setFileFilter={setFileFilter}
-          load={load}
+          refreshAll={load}
+          previewOpen={previewOpen}
+          setPreviewOpen={setPreviewOpen}
           fileName={fileName}
           loadCoreFile={loadCoreFile}
           fileContent={fileContent}

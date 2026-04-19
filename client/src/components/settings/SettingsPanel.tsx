@@ -48,8 +48,8 @@ export const SettingsPanel: React.FC<Props> = ({ open, onClose }) => {
                 {(["default", "lavender", "ocean"] as const).map((t) => (
                   <button
                     key={t}
-                    className={`theme-swatch theme-swatch--${t} ${settings.theme === t ? "active" : ""}`}
-                    onClick={() => update({ theme: t })}
+                    className={`theme-swatch theme-swatch--${t} ${(settings.theme as any) === t ? "active" : ""}`}
+                    onClick={() => update({ theme: t as any })}
                     title={t === "default" ? "灵感红" : t === "lavender" ? "薰衣草" : "海洋蓝"}
                   >
                     <span className="theme-swatch-dot" />

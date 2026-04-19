@@ -63,14 +63,6 @@ export async function executePlatformIntent(
         ? { mode: "announce", to: "conversation" }
         : { mode: "none" },
     };
-    // 记录灵虾侧的投递配置（Gateway 不管这部分）
-    if (channel !== "conversation") {
-      try {
-        const { saveCronDeliveryConfig } = await import("./cron-delivery");
-        // jobId 在创建后才知道，先存 adoptId + jobName 映射
-        await saveCronDeliveryConfig(adoptId, String(intent.name || "定时任务"), channel);
-      } catch {}
-    }
     try {
       const resp = await fetch(`${BASE}/api/claw/cron/add`, {
         method: "POST",
@@ -79,6 +71,19 @@ export async function executePlatformIntent(
       });
       const data = await resp.json() as any;
       if (!resp.ok) { writer.writeError(`创建失败: ${data?.error || resp.status}`); return; }
+      // create 成功后用返回的 jobId 记录灵虾侧投递配置（Gateway 不管这部分）
+      if (channel !== "conversation") {
+        const newJobId = String(data?.id || data?.job?.id || "").trim();
+        try {
+          const { saveCronDeliveryConfig } = await import("./cron-delivery");
+          await saveCronDeliveryConfig(
+            adoptId,
+            String(intent.name || "定时任务"),
+            channel,
+            newJobId || undefined,
+          );
+        } catch {}
+      }
       const chName = channel === "weixin" ? "微信" : channel === "wecom" ? "企业微信" : channel === "feishu" ? "飞书" : "主聊天";
       writer.writeText(`✅ **定时任务已创建**\n\n`);
       writer.writeText(`| 项目 | 内容 |\n|------|------|\n`);
@@ -99,15 +104,29 @@ export async function executePlatformIntent(
       const data = await resp.json() as any;
       const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
       if (jobs.length === 0) {
-        writer.writeText("📋 当前没有定时任务。\n\n说「每天 9 点查工行股价发微信」就能创建一个。\n");
+        writer.writeText("📋 当前没有定时任务。\n\n说「每天 9 点查银行股价发微信」就能创建一个。\n");
       } else {
+        // 非 conversation 渠道 Gateway delivery 是 "none"，真实渠道在灵虾侧 cron-delivery 配置里
+        // 优先用侧车配置覆盖，保证列表展示的渠道和真正的投递渠道一致
+        let getChannel: ((jobId: string, jobName?: string) => string | undefined) | null = null;
+        try {
+          const mod = await import("./cron-delivery");
+          getChannel = mod.getCronDeliveryChannel?.bind(null, adoptId) ?? null;
+        } catch {}
+        const chLabel = (ch: string) =>
+          ch === "weixin" ? "微信" :
+          ch === "wecom" ? "企业微信" :
+          ch === "feishu" ? "飞书" :
+          ch === "webhook" ? "Webhook" :
+          ch === "conversation" ? "主聊天" : ch;
         writer.writeText(`📋 **你的定时任务（${jobs.length} 个）**\n\n`);
         writer.writeText(`| # | 名称 | 状态 | 计划 | 渠道 |\n|---|------|------|------|------|\n`);
         jobs.forEach((j: any, i: number) => {
           const status = j.enabled ? "✅ 启用" : "⏸ 暂停";
           const sched = j.schedule?.expr || (j.schedule?.everyMs ? `每${Math.round(j.schedule.everyMs / 60000)}分钟` : "—");
-          const ch = j.delivery?.to || j.delivery?.channel || "conversation";
-          writer.writeText(`| ${i + 1} | ${j.name || "—"} | ${status} | ${sched} | ${ch} |\n`);
+          const sidecar = getChannel ? getChannel(String(j.id || ""), String(j.name || "")) : undefined;
+          const raw = sidecar || j.delivery?.to || j.delivery?.channel || "conversation";
+          writer.writeText(`| ${i + 1} | ${j.name || "—"} | ${status} | ${sched} | ${chLabel(raw)} |\n`);
         });
         writer.writeText(`\n> 在侧边栏「定时任务」页面可以编辑或删除。\n`);
       }
@@ -143,6 +162,11 @@ export async function executePlatformIntent(
         writer.writeError(`删除失败: ${d?.error || delResp.status}`);
         return;
       }
+      // Gateway 删除成功后清理灵虾侧的侧车投递配置，避免后续同名任务串联旧渠道
+      try {
+        const { deleteCronDeliveryConfig } = await import("./cron-delivery");
+        await deleteCronDeliveryConfig(adoptId, String(match.id));
+      } catch {}
       writer.writeText(`✅ 已删除定时任务「${match.name}」\n`);
     } catch (e: any) { writer.writeError(e?.message || String(e)); return; }
     writer.writeEnd();

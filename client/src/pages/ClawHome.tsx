@@ -15,7 +15,7 @@ import {
   Loader2, LogIn, LogOut, Settings, ArrowRight,
   MessageCircle, Brain, Cpu, Zap, Shield, Network,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { toast } from "sonner";
 import { useBrand } from "@/lib/useBrand";
 import {
@@ -26,16 +26,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
-// ── 动画变体 ──
-const fadeInUp = {
+// ── 动画变体（2026-04-18: 加 Variants 类型，避免 framer-motion v11 ease 字符串被推断为 string 而非具体 Easing 枚举）──
+const fadeInUp: Variants = {
   hidden: { opacity: 0, y: 24 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
 };
-const staggerContainer = {
+const staggerContainer: Variants = {
   hidden: {},
   visible: { transition: { staggerChildren: 0.1 } },
 };
-const scaleIn = {
+const scaleIn: Variants = {
   hidden: { opacity: 0, scale: 0.8 },
   visible: { opacity: 1, scale: 1, transition: { duration: 0.6, ease: "easeOut" } },
 };
@@ -169,7 +169,8 @@ export default function ClawHome() {
       const currentStatus = result?.adoption?.status;
       if (currentStatus !== "active") {
         const startedAt = Date.now();
-        let status = currentStatus;
+        // 2026-04-18: 显式 string 类型避免 TS narrow 掉 "active"（poll 中会等到 active）
+        let status: string | undefined = currentStatus;
         while (Date.now() - startedAt < 60000) {
           const elapsed = Date.now() - startedAt;
           if (elapsed < 15000) setProvisionStep("正在创建实例身份与路由…");

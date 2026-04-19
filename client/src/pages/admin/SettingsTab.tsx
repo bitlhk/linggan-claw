@@ -88,9 +88,9 @@ export function SettingsTab() {
   useEffect(() => {
     if (smtpConfig) {
       setSmtpFormData({
-        host: smtpConfig.host,
-        port: smtpConfig.port,
-        user: smtpConfig.user,
+        host: smtpConfig.host ?? "",
+        port: smtpConfig.port ?? "",
+        user: smtpConfig.user ?? "",
         password: "",
         from: smtpConfig.from || "",
         enabled: smtpConfig.enabled,
@@ -381,7 +381,7 @@ export function SettingsTab() {
                   <Input
                     id="smtp-password"
                     type="password"
-                    placeholder={smtpConfig?.password ? "已设置（留空不修改）" : "请输入密码"}
+                    placeholder={(smtpConfig as any)?.password ? "已设置（留空不修改）" : "请输入密码"}
                     value={smtpFormData.password}
                     onChange={(e) => setSmtpFormData({...smtpFormData, password: e.target.value})}
                   />

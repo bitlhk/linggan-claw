@@ -16,7 +16,7 @@
 // External deps
 // ─────────────────────────────────────────────────────────────────────────────
 import { sandboxExec } from "./sandbox";
-import { appendFileSync, mkdirSync, mkdtempSync, renameSync, readdirSync } from "fs";
+import { appendFileSync, mkdirSync, mkdtempSync, renameSync, readdirSync, unlinkSync, rmdirSync } from "fs";
 import os from "os";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,6 +34,8 @@ export type PolicyDenyReason =
   | "too_many_args"
   | "args_type_invalid"
   | "cwd_not_allowed"
+  | "cmd_too_long"
+  | "rate_limited"
   | "unknown_error";
 
 export type ExecutorName = "sandbox" | "native" | "none";
@@ -103,7 +105,6 @@ export const TOOL_POLICY: ToolPolicyConfig = {
       "whoami", "id", "hostname", "uname", "date",
       "base64", "md5sum", "sha256sum", "sha1sum",
       "jq", "xxd", "hexdump",
-      "curl", "wget",
     ],
 
     // 黑名单模式（正则）
@@ -169,8 +170,31 @@ const POLICY_DENY_USER_READABLE: Partial<Record<PolicyDenyReason, string>> = {
   too_many_args:       "参数过多，请简化",
   args_type_invalid:   "参数类型错误",
   cwd_not_allowed:     "工作目录不在允许范围内",
+  cmd_too_long:        "命令过长，超过长度上限",
+  rate_limited:        "已达每小时 exec 次数上限，请稍后再试",
   unknown_error:       "未知错误，请稍后重试",
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 加固 3：per-user 每小时 exec 速率限制（进程内 Map，pm2 重启清零，MVP 可接受）
+// ─────────────────────────────────────────────────────────────────────────────
+const EXEC_RATE_LIMIT_MAP = new Map<number, { count: number; resetAt: number }>();
+const EXEC_RATE_LIMIT_MAX = parseInt(process.env.SANDBOX_RATE_LIMIT_PER_USER_HOUR || "200", 10);
+const EXEC_RATE_LIMIT_WINDOW_MS = 3600_000;
+
+function checkExecRateLimit(userId: number): { allowed: boolean; resetInMin?: number } {
+  const now = Date.now();
+  let rl = EXEC_RATE_LIMIT_MAP.get(userId);
+  if (!rl || now >= rl.resetAt) {
+    rl = { count: 0, resetAt: now + EXEC_RATE_LIMIT_WINDOW_MS };
+    EXEC_RATE_LIMIT_MAP.set(userId, rl);
+  }
+  if (rl.count >= EXEC_RATE_LIMIT_MAX) {
+    return { allowed: false, resetInMin: Math.ceil((rl.resetAt - now) / 60_000) };
+  }
+  rl.count += 1;
+  return { allowed: true };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 工具名映射（1 层）───────────────────────────────────────────────────────────
@@ -249,6 +273,13 @@ export function validateSandboxExecInput(argsStr: string): {
   const cmdRaw = obj.cmd ?? obj.command ?? obj.code ?? obj._;
   const cmd = typeof cmdRaw === "string" ? cmdRaw.trim() : null;
   if (!cmd) return { ok: false, denyReason: "invalid_arguments" };
+
+  // 加固 2：命令总长度限制（cmd + args 拼接），默认 4KB
+  const cmdMaxLen = parseInt(process.env.SANDBOX_CMD_MAX_LENGTH || "4096", 10);
+  const argsPreview = Array.isArray(obj.args) ? (obj.args as unknown[]).filter(a => typeof a === "string").join(" ") : "";
+  if (cmd.length + argsPreview.length > cmdMaxLen) {
+    return { ok: false, denyReason: "cmd_too_long" };
+  }
 
   // args: 必须是字符串数组，最多 maxArgs 个
   const argsRaw = obj.args ?? obj._args;
@@ -426,33 +457,48 @@ async function flushAuditBuffer() {
   if (auditBuffer.length === 0) return;
   const records = auditBuffer.splice(0, auditBuffer.length);
   try {
+    // 2026-04-18 fix: 原代码 3 处 bug，从没执行成功过：
+    //   1) getDb() 是 async，原代码同步调用拿到 Promise
+    //   2) db.prepare/stmt.run 是 better-sqlite3 API，Drizzle MySQL 不支持
+    //   3) 表名写错 tool_execution_audit（单数），DB 实际是 tool_execution_audits
+    // 改用 Drizzle 的 insert API，type-safe 且正确处理 MySQL ON DUPLICATE KEY
     const { getDb } = await import("../db");
-    const db = getDb();
+    const db = await getDb();
     if (!db) return;
-    const sql = `
-      INSERT INTO tool_execution_audit (
-        audit_id, request_id, user_id, agent_id, profile, tool_call_id,
-        original_tool_name, routed_tool_name, command, args, cwd, timeout_ms,
-        policy_decision, deny_reason, denied_reason, executor,
-        exit_code, stdout_bytes, stderr_bytes, truncated, duration_ms, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE audit_id = audit_id
-    `;
-    const stmt = db.prepare(sql);
+    const { toolExecutionAudits } = await import("../../drizzle/schema");
+    const { sql: sqlTag } = await import("drizzle-orm");
+
+    let ok = 0, fail = 0;
     for (const r of records) {
       try {
-        stmt.run(
-          r.auditId, r.requestId, r.userId ?? null, r.agentId ?? null,
-          r.profile, r.toolCallId, r.originalToolName, r.routedToolName,
-          r.command ?? null, r.args ? JSON.stringify(r.args) : null,
-          r.cwd ?? null, r.timeoutMs ?? null,
-          r.policyDecision, r.denyReason ?? null, r.deniedReason ?? null,
-          r.executor, r.exitCode ?? null, r.stdoutBytes ?? null,
-          r.stderrBytes ?? null, r.truncated ? 1 : 0, r.durationMs ?? null, r.createdAt,
-        );
-      } catch { /* log and skip individual bad rows */ }
+        await db.insert(toolExecutionAudits).values({
+          auditId:          r.auditId,
+          requestId:        r.requestId ?? null,
+          userId:           r.userId ?? null,
+          agentId:          r.agentId ?? null,
+          profile:          r.profile,
+          toolCallId:       r.toolCallId,
+          originalToolName: r.originalToolName,
+          routedToolName:   r.routedToolName,
+          command:          r.command ?? null,
+          args:             r.args ? JSON.stringify(r.args) : null,
+          cwd:              r.cwd ?? null,
+          timeoutMs:        r.timeoutMs ?? null,
+          policyDecision:   r.policyDecision,
+          denyReason:       r.denyReason ?? null,
+          deniedReason:     r.deniedReason ?? null,
+          executor:         r.executor,
+          exitCode:         r.exitCode ?? null,
+          stdoutBytes:      r.stdoutBytes ?? null,
+          stderrBytes:      r.stderrBytes ?? null,
+          truncated:        r.truncated ? 1 : 0,
+          durationMs:       r.durationMs ?? null,
+          createdAt:        new Date(r.createdAt),
+        }).onDuplicateKeyUpdate({ set: { auditId: sqlTag`audit_id` } });
+        ok++;
+      } catch { fail++; }
     }
-    auditLog({ event: "audit_flush", count: records.length });
+    auditLog({ event: "audit_flush", count: records.length, ok, fail });
   } catch (err) {
     auditLog({ event: "audit_flush_error", error: String(err), count: records.length });
   }
@@ -519,6 +565,33 @@ export async function routeTool(
   const routedToolName = policy.allowed
     ? (policy.toolHandler ?? "none")
     : "none";
+
+  // ── Step 1.5: 速率限制（仅对通过 policy 的 sandbox_exec 计数）──
+  if (policy.allowed && routedToolName === "sandbox_exec") {
+    const rl = checkExecRateLimit(ctx.userId);
+    if (!rl.allowed) {
+      const denyMsg = `[速率限制] 每小时最多 ${EXEC_RATE_LIMIT_MAX} 次 exec，约 ${rl.resetInMin} 分钟后重置`;
+      const result: RoutedToolResult = {
+        auditId, toolCallId: req.id, toolName: req.name, executor: "none",
+        ok: false, output: denyMsg, truncated: false,
+        errorType: "policy_denied", policyDenyReason: "rate_limited",
+        suppressedOriginalResult: true,
+        meta: { originalToolName, routedToolName, policyDecision: "deny", deniedReason: denyMsg, durationMs: Date.now() - startMs },
+      };
+      enqueueAudit({
+        auditId, requestId: ctx.adoptId, userId: ctx.userId, agentId: ctx.agentId,
+        profile: ctx.permissionProfile, toolCallId: req.id,
+        originalToolName, routedToolName,
+        command: input.cmd ?? undefined, args: input.args ?? undefined,
+        cwd: input.cwd ?? undefined, timeoutMs: TOOL_POLICY.sandboxExec.timeoutMs,
+        policyDecision: "deny", denyReason: "rate_limited",
+        deniedReason: denyMsg,
+        executor: "none",
+        createdAt: Date.now(),
+      });
+      return result;
+    }
+  }
 
   // ── Step 2: 拒绝时快速返回 ─────────────────────────────────────────────
   if (!policy.allowed) {
@@ -639,10 +712,10 @@ export async function routeTool(
       if (tmpOutputDir) {
         try {
           for (const f of readdirSync(tmpOutputDir)) {
-            try { require("fs").unlinkSync(`${tmpOutputDir}/${f}`); } catch {}
+            try { unlinkSync(`${tmpOutputDir}/${f}`); } catch (e) { console.warn(`[sandbox-cleanup] unlink failed: ${tmpOutputDir}/${f}`, e); }
           }
-          require("fs").rmdirSync(tmpOutputDir);
-        } catch {}
+          rmdirSync(tmpOutputDir);
+        } catch (e) { console.warn(`[sandbox-cleanup] rmdir failed: ${tmpOutputDir}`, e); }
       }
     }
   } else {

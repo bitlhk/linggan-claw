@@ -1,7 +1,15 @@
 // ── 启动期强校验：关键环境变量缺失则拒绝启动 ──
+// 2026-04-18 fix: 测试模式（NODE_ENV=test 或 VITEST=1）不 process.exit，用 mock 占位，
+// 以便 vitest/jest import 相关模块时不直接 kill 进程
+const _isTest = process.env.NODE_ENV === "test" || !!process.env.VITEST;
+
 const _requiredEnv = (key: string, label: string): string => {
   const val = process.env[key];
   if (!val || val === "changeme" || val === "linggan123") {
+    if (_isTest) {
+      // 测试环境 tolerate 缺失，返回可识别的 mock 值
+      return `__test_mock_${key}__`;
+    }
     console.error(`[FATAL] ${label} (${key}) 未配置或使用了默认弱值，拒绝启动。请在 .env 中设置。`);
     process.exit(1);
   }

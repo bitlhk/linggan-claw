@@ -10,6 +10,12 @@ import { ResponseAccumulator, injectMemory } from "./response-accumulator";
 
 export function registerBusinessRoutes(app: express.Express) {
 
+  // ── 内部调用 IP 白名单（防止 INTERNAL_API_KEY 兜底字符串泄露后被外网伪造身份）──
+  const isInternalCallerIp = (req: express.Request) => {
+    const ip = req.socket.remoteAddress || "";
+    return ip === "127.0.0.1" || ip === "::1" || ip.startsWith("::ffff:127.");
+  };
+
   // ── TIL 辅助：远端 file-service 代理 + tenantShort 计算 ────────────
   const HERMES_SKILLS_ROOT = process.env.HERMES_SKILLS_ROOT || "/home/ubuntu/.hermes/skills";
   const TENANT_SECRET_LOCAL = process.env.TENANT_SECRET || "linggan-tenant-2026-default-change-me";
@@ -182,9 +188,9 @@ export function registerBusinessRoutes(app: express.Express) {
     console.log("[BIZ-STREAM] request received", { agentId: req.body?.agentId, ua: req.headers["user-agent"]?.slice(0,30) });
     // 支持内部调用（项目经理 dispatch）
     const internalKey = String(req.headers["x-internal-key"] || "");
-    const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    const expectedKey = process.env.INTERNAL_API_KEY || "";
     let userId: number | null;
-    if (internalKey === expectedKey && req.headers["x-internal-user-id"]) {
+    if (isInternalCallerIp(req) && expectedKey && internalKey === expectedKey && req.headers["x-internal-user-id"]) {
       userId = parseInt(String(req.headers["x-internal-user-id"]), 10) || null;
     } else {
       userId = await resolveRequesterUserId(req, res);
@@ -229,7 +235,7 @@ export function registerBusinessRoutes(app: express.Express) {
     // ── 合规缓冲（各 Hermes 分支共享）──
     let creditReportBuffer = "";
 
-    // ── 智贷决策助手专用分支：走 Hermes + 银保监+工银智涌 grounding ──
+    // ── 智贷决策助手专用分支：走 Hermes + 银保监+行业大模型 grounding ──
     if (bizAgentCfg?.kind === "remote" && agentId === "task-credit-risk") {
       const tenantCtx: TenantContext = await beginTenantSession(
         userId, agentId, "chat_send",
@@ -249,14 +255,14 @@ export function registerBusinessRoutes(app: express.Express) {
         "1. 金融监管总局《固定资产贷款管理办法》《流动资金贷款管理办法》（2024年第1、2号令）—— 三大贷款管理办法修订版",
         "2. 原银保监会《商业银行授信工作尽职指引》（银监发〔2004〕51号）—— 现由金融监管总局承继执行",
         "3. 银保监会+人民银行《商业银行金融资产风险分类办法》（2023年第1号令，2023.7.1生效）—— 五级分类最新标准",
-        "4. 工商银行《工银智涌/智贷通/工小审》—— 行业大模型落地标杆",
+        "4. 头部大行《行业大模型/智贷平台/智审平台》—— 行业大模型落地标杆",
         "",
         "【贷前-贷时-贷后三查框架（金融监管总局）】",
         "贷前调查（借款人资质 + 贷款用途真实性 + 还款来源可靠性 + 抵押物评估 + 保证人代偿能力）",
         "贷时审查（客户评分 + 风险预警 + 集中度检查 + LPR市场化定价）",
         "贷后检查（经营动态 + 财务健康 + 贷款用途跟踪 + 担保物状态 + 早期预警指标）",
         "",
-        "【工行『智贷通』5 大类能力】（你的工具集对应这 5 类）",
+        "【头部大行『智贷平台』5 大类能力】（你的工具集对应这 5 类）",
         "1. 知识助手 - 制度查询 + 案例库 → compliance_check",
         "2. 数据助手 - 客户征信 + 流水分析 → credit_lookup, financial_statement",
         "3. 任务助手 - 流程编排（agent 自身的工作流编排）",
@@ -1632,7 +1638,7 @@ export function registerBusinessRoutes(app: express.Express) {
       const KRONOS_HINT = KRONOS_KEY ? ("\n\n[平台工具] 你可以调用 Kronos 量化预测 API 获取价格预测数据：" +
         `\ncurl -s -X POST http://127.0.0.1:8190/api/v1/predict -H 'Content-Type: application/json' -H 'X-API-Key: ${KRONOS_KEY}' -d '{"symbol":"股票代码","horizon":5}'` +
         "\n返回：current_price(当前价) + signal(BUY/SELL/HOLD) + predictions(未来N天预测+置信区间)" +
-        "\nA股代码直接用6位数字（如601398），美股用代码（如AAPL）。" +
+        "\nA股代码直接用6位数字（如600036），美股用代码（如AAPL）。" +
         "\n在分析报告中融入预测数据时，必须注明'基于 Kronos 模型的量化预测，仅供参考，不构成投资建议'。\n") : "";
       const stockBody = JSON.stringify({
         message: msgStr + KRONOS_HINT,
@@ -1879,35 +1885,21 @@ export function registerBusinessRoutes(app: express.Express) {
           "- 禁止生成 HTML 幻灯片或演示文稿（那是其他 Agent 的职责）。",
         ].join("\n") + await injectMemory(userId, "") });
       } else if (agentId === "task-ppt") {
+        // 2026-04-18: task-ppt 切到 Claude Code runtime (api_url=:19800, remote_agent_id=claude-code)
+        // skill 在 ~/.claude/skills/ppt-insight/，Claude 通过 Skill 工具自动调用
         remoteMessages.push({ role: "system", content: [
-          "你是 PPT 生成技能，通过 scripts/generate.js 从 content.json 生成 PPT 文件。",
+          "生成 PPT / 演示文稿 / 汇报材料时，**使用 Skill 工具调用 ppt-insight**，按其 SKILL.md 流程执行。",
           "",
-          "【关键约束】你正在通过 API 代理与用户通信，不支持交互式工具。",
-          "- 绝对不要使用 AskUserQuestion 工具，它会导致会话阻塞。",
-          "- 如果需要澄清，直接把问题作为普通文本输出，用户会在下一条消息回复。",
+          "【运行时约束】",
+          "- 禁用 AskUserQuestion（SSE 单向流会死锁）。需要澄清用自然语言写在回复里。",
+          "- 中文回复。",
+          "- 讨论型问题（如「几页合适？」「怎么展开？」）文字回答即可，不要跑生成流程。",
           "",
-          "【租户隔离 CRITICAL】本次会话的 tenant token 是：",
-          `  ${tenantCtxRemote.tenantShort}`,
+          `【本次 tenant token (16 hex)】${tenantCtxRemote.tenantShort}`,
+          "这是 skill 内部 generate.js 第 3 参数必须传的 16 位 hex 字面量（SKILL.md 里有说明）。",
           "",
-          "调用 scripts/generate.js 时，必须把此 tenant token 作为第 3 个参数硬编码传入，例如：",
-          `  node /workspace/skills/ppt-insight/scripts/generate.js /workspace/output/content.json "文件名.pptx" "${tenantCtxRemote.tenantShort}"`,
-          "",
-          "⚠️ 不要使用 \"$SESSION_KEY\" 这样的环境变量占位符；必须硬编码上面 16 位 hex 值。",
-          `传对了文件会落到 output/${tenantCtxRemote.tenantShort}/ 子目录（租户隔离）；`,
-          "传错或没传会落到 output/default/，导致跨租户数据泄露。",
-          "",
-          "【工作流程】",
-          "1. 默认先返回文字结论；只有用户明确要 PPT 时才生成。",
-          "2. 生成 PPT 时：",
-          "   a. 用 write 工具在 /workspace/output/content.json 写入 slide 数据（格式见 skills/ppt-insight/SKILL.md 和 scripts/content_example.json）",
-          "   b. exec 执行上面的 node 命令（第 3 参数必须是 tenant token）",
-          "   c. 确认 exit 0，在回复里告诉用户文件名和完整路径",
-          "",
-          "【内嵌预览 CRITICAL】生成 PPT 成功后，必须在你的回复**最末尾**追加一行隐藏 marker（前端渲染用，用户看不到）：",
-          "   <!-- __files:[{\"name\":\"xxx.pptx\",\"ext\":\".pptx\",\"size\":0,\"url\":\"xxx.pptx\"},{\"name\":\"xxx-preview.html\",\"ext\":\".html\",\"size\":0,\"url\":\"xxx-preview.html\"}] -->",
-          "其中两个 `xxx` 都要替换成你实际生成的文件名（不含路径，不含 output 目录前缀）。必须包含 .pptx 和同名的 -preview.html 两个条目。不要改动 JSON 格式，不要放在摘要中间，必须是回复的最后一行。",
-          "",
-          "始终用中文回复。",
+          "【前端下载卡片由 proxy 自动生成】",
+          "不要自己在回复里加 `<!-- __files:... -->` marker。claude-code-proxy 层扫描产物后会自动 append，你加了会和 proxy 重复。",
         ].join("\n") + await injectMemory(userId, "") });
       }
       remoteMessages.push({ role: "user", content: msgStr });
@@ -2127,9 +2119,9 @@ export function registerBusinessRoutes(app: express.Express) {
   app.get("/api/claw/business-files", async (req, res) => {
     // 支持内部调用（项目经理 dispatch）
     const internalKey = String(req.headers["x-internal-key"] || "");
-    const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    const expectedKey = process.env.INTERNAL_API_KEY || "";
     let userId: number | null;
-    if (internalKey === expectedKey && req.headers["x-internal-user-id"]) {
+    if (isInternalCallerIp(req) && expectedKey && internalKey === expectedKey && req.headers["x-internal-user-id"]) {
       userId = parseInt(String(req.headers["x-internal-user-id"]), 10) || null;
     } else {
       userId = await resolveRequesterUserId(req, res);
@@ -2189,9 +2181,9 @@ export function registerBusinessRoutes(app: express.Express) {
   app.get("/api/claw/business-files/download", async (req, res) => {
     // 支持内部调用（项目经理 dispatch）
     const internalKey = String(req.headers["x-internal-key"] || "");
-    const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    const expectedKey = process.env.INTERNAL_API_KEY || "";
     let userId: number | null;
-    if (internalKey === expectedKey && req.headers["x-internal-user-id"]) {
+    if (isInternalCallerIp(req) && expectedKey && internalKey === expectedKey && req.headers["x-internal-user-id"]) {
       userId = parseInt(String(req.headers["x-internal-user-id"]), 10) || null;
     } else {
       userId = await resolveRequesterUserId(req, res);
@@ -2261,9 +2253,9 @@ export function registerBusinessRoutes(app: express.Express) {
   app.delete("/api/claw/business-files", async (req, res) => {
     // 支持内部调用（项目经理 dispatch）
     const internalKey = String(req.headers["x-internal-key"] || "");
-    const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    const expectedKey = process.env.INTERNAL_API_KEY || "";
     let userId: number | null;
-    if (internalKey === expectedKey && req.headers["x-internal-user-id"]) {
+    if (isInternalCallerIp(req) && expectedKey && internalKey === expectedKey && req.headers["x-internal-user-id"]) {
       userId = parseInt(String(req.headers["x-internal-user-id"]), 10) || null;
     } else {
       userId = await resolveRequesterUserId(req, res);
@@ -2344,9 +2336,9 @@ export function registerBusinessRoutes(app: express.Express) {
   app.get("/api/claw/remote-file", async (req, res) => {
     // 支持内部调用（项目经理 dispatch）
     const internalKey = String(req.headers["x-internal-key"] || "");
-    const expectedKey = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";
+    const expectedKey = process.env.INTERNAL_API_KEY || "";
     let userId: number | null;
-    if (internalKey === expectedKey && req.headers["x-internal-user-id"]) {
+    if (isInternalCallerIp(req) && expectedKey && internalKey === expectedKey && req.headers["x-internal-user-id"]) {
       userId = parseInt(String(req.headers["x-internal-user-id"]), 10) || null;
     } else {
       userId = await resolveRequesterUserId(req, res);

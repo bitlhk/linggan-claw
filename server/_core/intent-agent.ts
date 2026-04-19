@@ -181,13 +181,16 @@ async function callProjectManager(
 
   if (!toolCalls || toolCalls.length === 0) {
     // LLM 没调工具 → 当作 passthrough
+    console.log("[PM-TOOLS] no tool_calls, LLM content:", String(choice?.message?.content || "").slice(0, 120));
     return [{ tool: "passthrough", args: {} }];
   }
 
-  return toolCalls.map((tc: any) => ({
+  const mapped = toolCalls.map((tc: any) => ({
     tool: tc.function?.name || "passthrough",
     args: tc.function?.arguments ? JSON.parse(tc.function.arguments) : {},
   }));
+  console.log("[PM-TOOLS] LLM returned:", mapped.map((a: { tool: string; args: any }) => `${a.tool}(${JSON.stringify(a.args).slice(0, 80)})`).join(", "));
+  return mapped;
 }
 
 // ── 执行 dispatch_task: 调业务 Agent ──
@@ -321,14 +324,23 @@ export async function routeMessage(
     // 短消息快速通过，不调 LLM
     if (!needsProjectManager(message)) return false;
 
-    // L1 最小门禁：当前只放行"理财+选股"组合进 Agent Team，其他走旧版
+    // L1 门禁：放行两类进 PM——
+    //   (a) 理财+选股组合 → Agent Team 多 agent 编排
+    //   (b) 定时任务/渠道发送/列表/删除 → PM 平台操作工具（create_schedule/send_message 等）
+    // 其他走旧版 oldRouteMessage。
     const hasWealth = /资产配置|理财规划|家庭财务|\d+\s*万.*(投资|配置|理财|规划)/.test(message);
     const hasStock = /选股|A股|个股|股票.*(推荐|挑|选|买)/.test(message);
-    if (!(hasWealth && hasStock)) {
-      console.log("[PM-L1] 未命中理财+选股组合，走旧版路由");
+    const hasPlatformOp =
+      /定时任务|每天|每隔|每周|提醒我|cron|schedule/i.test(message) ||
+      /(?:发|推|送)(?:到|给|去)?\s*(?:我的?)?\s*(?:微信|企微|飞书|webhook)/i.test(message) ||
+      /(?:删除|取消|关闭|停止).*任务|任务列表|哪些.*任务|通知渠道|哪些渠道/.test(message);
+    if (!(hasWealth && hasStock) && !hasPlatformOp) {
+      console.log("[PM-L1] 未命中理财+选股组合/平台操作，走旧版路由");
       return oldRouteMessage(adoptId, message, writer);
     }
-    console.log("[PM-L1] 命中理财+选股组合，进 Agent Team");
+    console.log(hasPlatformOp
+      ? "[PM-L1] 命中平台操作关键字，进 PM"
+      : "[PM-L1] 命中理财+选股组合，进 Agent Team");
     if (!DEEPSEEK_API_KEY) return false;
   }
 

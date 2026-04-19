@@ -47,7 +47,9 @@ const queryClient = new QueryClient({
     },
     mutations: {
       // Mutation 重试策略
-      retry: (failureCount, error, mutation) => {
+      // 2026-04-18: tRPC v11 RetryValue 类型只接受 2 参数 (failureCount, error)，
+      // 但 react-query 底层 runtime 实际会传第 3 个 mutation 参数。这里用 as any cast 让 TS 通过。
+      retry: ((failureCount: number, error: any, mutation: any) => {
         // 登录/注册/验证码相关的 mutation 不重试
         const mutationKey = mutation?.options?.mutationKey;
         if (mutationKey && Array.isArray(mutationKey)) {
@@ -88,7 +90,7 @@ const queryClient = new QueryClient({
           }
         }
         return false;
-      },
+      }) as any,
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
       networkMode: "online",
     },

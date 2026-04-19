@@ -12,6 +12,8 @@ const POLL_INTERVAL_MS = 60_000;
 
 interface DeliveryConfig {
   adoptId: string;
+  // jobId 是主 key（优先使用）；jobName 只作 display 和旧数据 fallback
+  jobId?: string;
   jobName: string;
   channel: string;
   lastDeliveredRunTs?: number;
@@ -28,15 +30,46 @@ function saveConfigs(configs: DeliveryConfig[]) {
   writeFileSync(CONFIG_PATH, JSON.stringify(configs, null, 2), "utf-8");
 }
 
-export async function saveCronDeliveryConfig(adoptId: string, jobName: string, channel: string) {
+export async function saveCronDeliveryConfig(
+  adoptId: string,
+  jobName: string,
+  channel: string,
+  jobId?: string,
+) {
   const configs = loadConfigs();
-  const existing = configs.find(c => c.adoptId === adoptId && c.jobName === jobName);
+  // 优先按 jobId 命中（精确）；退化到 jobName（旧数据兼容）
+  const existing = configs.find(c =>
+    c.adoptId === adoptId && (
+      (jobId && c.jobId === jobId) ||
+      (!jobId && !c.jobId && c.jobName === jobName)
+    )
+  );
   if (existing) {
     existing.channel = channel;
+    if (jobId) existing.jobId = jobId;
+    existing.jobName = jobName;
   } else {
-    configs.push({ adoptId, jobName, channel });
+    configs.push({ adoptId, jobId, jobName, channel });
   }
   saveConfigs(configs);
+}
+
+/** 删除某个 job 的投递配置（按 jobId 精确匹配）。用于 schedule_delete 清理。 */
+export async function deleteCronDeliveryConfig(adoptId: string, jobId: string) {
+  if (!adoptId || !jobId) return;
+  const configs = loadConfigs();
+  const next = configs.filter(c => !(c.adoptId === adoptId && c.jobId === jobId));
+  if (next.length !== configs.length) saveConfigs(next);
+}
+
+/** 给 platform 层用的只读查询：按 adoptId+jobId 返回渠道（无配置返回 undefined） */
+export function getCronDeliveryChannel(adoptId: string, jobId: string, jobName?: string): string | undefined {
+  const configs = loadConfigs();
+  const hit = configs.find(c => c.adoptId === adoptId && (
+    (c.jobId && c.jobId === jobId) ||
+    (!c.jobId && jobName && c.jobName === jobName)
+  ));
+  return hit?.channel;
 }
 
 async function pollAndDeliver() {
@@ -56,9 +89,10 @@ async function pollAndDeliver() {
 
   for (const cfg of configs) {
     try {
-      const job = allJobs.find((j: any) =>
-        (j.name || "").includes(cfg.jobName) || (cfg.jobName || "").includes(j.name || "___")
-      );
+      // 优先 jobId 精确匹配；没有 jobId 的旧数据才 fallback 到 jobName 精确匹配
+      const job = cfg.jobId
+        ? allJobs.find((j: any) => String(j?.id || "") === cfg.jobId)
+        : allJobs.find((j: any) => String(j?.name || "") === cfg.jobName);
       if (!job) continue;
 
       // 拉最近一条 run

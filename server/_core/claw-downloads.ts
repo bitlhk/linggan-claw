@@ -145,7 +145,9 @@ export function registerDownloadRoutes(app: express.Express) {
       const sig = rawToken.slice(dotIdx + 1);
 
       const { createHmac } = await import("crypto");
-      const secret = process.env.JWT_SECRET || "linggan-file-token-secret";
+      // secret 必须和 helpers.ts:generateFileToken 对齐：FILE_TOKEN_SECRET 优先，回退 JWT_SECRET
+      const secret = process.env.FILE_TOKEN_SECRET || process.env.JWT_SECRET || "";
+      if (!secret) return sendError(res, "INTERNAL_ERROR", "file token secret not configured");
       const expectedSig = createHmac("sha256", secret).update(payload).digest("base64url");
       if (sig !== expectedSig) return sendError(res, "UNAUTHORIZED", "invalid token signature");
 
@@ -210,10 +212,10 @@ export function registerDownloadRoutes(app: express.Express) {
 
       // 根据扩展名选择运行时
       const ext = relPath.split(".").pop()?.toLowerCase() || "";
+      // 注：.ts 不支持——沙箱是 --network=none + --read-only，npx tsx 需要拉包/写缓存会失败
       const runtimeMap: Record<string, string[]> = {
         py:   ["python3", `/workspace/${relPath}`],
         js:   ["node",    `/workspace/${relPath}`],
-        ts:   ["npx", "tsx", `/workspace/${relPath}`],
         sh:   ["sh",      `/workspace/${relPath}`],
         bash: ["bash",    `/workspace/${relPath}`],
       };

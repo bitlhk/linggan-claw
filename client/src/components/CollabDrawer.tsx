@@ -603,7 +603,7 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
               <div className="mt-3 mx-auto max-w-[260px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(201,100,66,0.04)", border: "1px solid rgba(201,100,66,0.12)" }}>
                 <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
                 {[
-                  { q: "分析工商银行 601398", icon: "🏦" },
+                  { q: "分析某大行股票", icon: "🏦" },
                   { q: "分析贵州茅台 600519", icon: "🍶" },
                   { q: "分析比亚迪 002594", icon: "🚗" },
                   { q: "分析宁德时代 300750", icon: "🔋" },
@@ -702,19 +702,19 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
                 </div>
               </div>
               <p className="text-sm mt-3 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵犀 · 智贷决策助手</p>
-              <p className="text-xs mt-1.5 max-w-[280px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>商业银行信贷风控 · 银保监 + 工行《工银智涌》三框架</p>
+              <p className="text-xs mt-1.5 max-w-[280px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>商业银行信贷风控 · 银保监 + 头部大行大模型三框架</p>
               <div className="mt-4 mx-auto max-w-[280px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(190,30,45,0.04)", border: "1px solid rgba(190,30,45,0.15)" }}>
                 <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
                 {[
                   { q: "上海某科技公司申请 3000 万 3 年经营贷，给个完整审贷建议", icon: "📑" },
                   { q: "某制造业老客户最近被列为被执行人，怎么处置？", icon: "🔍" },
                   { q: "客户用苏州工业园区 5000 平米厂房抵押，估值合理吗？最多放多少？", icon: "🏠" },
-                  { q: "为什么工银智涌'智贷通'能把审批时效从 7 天压到 8 小时？", icon: "🏛️" },
+                  { q: "为什么头部大行大模型平台能把审批时效从 7 天压到 8 小时？", icon: "🏛️" },
                 ].map(({ q, icon }) => (
                   <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-start gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}><span className="shrink-0">{icon}</span><span>{q}</span></p>
                 ))}
               </div>
-              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>银保监三查 · 工行智贷通 5 大类能力 · 7 工具协作</p>
+              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>银保监三查 · 智贷平台 5 大类能力 · 7 工具协作</p>
             </>
           ) : agent.id === "task-bond" ? (
             <>

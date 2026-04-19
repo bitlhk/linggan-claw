@@ -526,7 +526,7 @@ function generateMockResult(params: {
 - 汇总前置成果生成 PPT
 - 共 18 页，含 6 个数据图表
 - 文件：Q1合规报告.pptx
-- 样式：工商银行标准模板`;
+- 样式：大行标准公文模板`;
   } else {
     detail = `执行结果：
 - 已按子任务完成处理

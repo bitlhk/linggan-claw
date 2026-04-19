@@ -221,7 +221,7 @@ export const authRouter = router({
         // 创建session
         const sessionToken = await sdk.signSession({
           userId: user.id,
-          name: user.name || user.email,
+          name: user.name || user.email || "",
         });
 
         // 设置cookie

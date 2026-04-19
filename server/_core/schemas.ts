@@ -13,14 +13,14 @@ import { sanitizeRelPath, sanitizeFileName } from "./helpers";
 /** 非空字符串，trim 后不为空 */
 export function parseNonEmptyString(input: any, fieldName = "field"): string {
   const val = String(input ?? "").trim();
-  if (!val) throw new ApiError("BAD_REQUEST", `${fieldName} required`, 400);
+  if (!val) throw new ApiError("BAD_REQUEST", `${fieldName} required`);
   return val;
 }
 
 /** 正整数 */
 export function parsePositiveInt(input: any, fieldName = "field"): number {
   const n = Number(input);
-  if (!Number.isInteger(n) || n <= 0) throw new ApiError("BAD_REQUEST", `${fieldName} must be a positive integer`, 400);
+  if (!Number.isInteger(n) || n <= 0) throw new ApiError("BAD_REQUEST", `${fieldName} must be a positive integer`);
   return n;
 }
 
@@ -29,8 +29,8 @@ export function parsePositiveInt(input: any, fieldName = "field"): number {
 /** adoptId：非空字符串，仅允许 a-z0-9_- */
 export function parseAdoptId(input: any): string {
   const val = String(input ?? "").trim();
-  if (!val) throw new ApiError("BAD_REQUEST", "adoptId required", 400);
-  if (!/^[a-zA-Z0-9_-]+$/.test(val)) throw new ApiError("BAD_REQUEST", "adoptId format invalid", 400);
+  if (!val) throw new ApiError("BAD_REQUEST", "adoptId required");
+  if (!/^[a-zA-Z0-9_-]+$/.test(val)) throw new ApiError("BAD_REQUEST", "adoptId format invalid");
   return val;
 }
 
@@ -38,7 +38,7 @@ export function parseAdoptId(input: any): string {
 export function parseRelPath(input: any, fieldName = "path"): string {
   const raw = String(input ?? "");
   const cleaned = sanitizeRelPath(raw);
-  if (!cleaned) throw new ApiError("BAD_REQUEST", `invalid ${fieldName}`, 400);
+  if (!cleaned) throw new ApiError("BAD_REQUEST", `invalid ${fieldName}`);
   return cleaned;
 }
 
@@ -46,14 +46,14 @@ export function parseRelPath(input: any, fieldName = "path"): string {
 export function parseFileName(input: any, fieldName = "file"): string {
   const raw = String(input ?? "").trim();
   const cleaned = sanitizeFileName(raw);
-  if (!cleaned) throw new ApiError("BAD_REQUEST", `invalid ${fieldName}`, 400);
+  if (!cleaned) throw new ApiError("BAD_REQUEST", `invalid ${fieldName}`);
   return cleaned;
 }
 
 /** memory target：白名单模式 */
 export function parseMemoryTarget(input: any): { target: string; type: "memory" | "dreams" | "daily" | "notes" } {
   const t = String(input ?? "").trim();
-  if (!t) throw new ApiError("BAD_REQUEST", "target required", 400);
+  if (!t) throw new ApiError("BAD_REQUEST", "target required");
 
   if (t === "MEMORY.md") return { target: t, type: "memory" };
   if (t === "DREAMS.md") return { target: t, type: "dreams" };
@@ -64,7 +64,7 @@ export function parseMemoryTarget(input: any): { target: string; type: "memory" 
   const n = t.match(/^notes:([a-zA-Z0-9._-]+\.md)$/);
   if (n) return { target: t, type: "notes" };
 
-  throw new ApiError("BAD_REQUEST", "path_not_allowed", 400);
+  throw new ApiError("BAD_REQUEST", "path_not_allowed");
 }
 
 /** TTL 秒数：正整数，默认值可选 */
@@ -77,7 +77,7 @@ export function parseTtl(input: any, defaultValue = 1800): number {
 /** memory write mode: append | replace */
 export function parseWriteMode(input: any): "append" | "replace" {
   const mode = String(input ?? "append").trim();
-  if (mode !== "append" && mode !== "replace") throw new ApiError("BAD_REQUEST", "invalid_mode", 400);
+  if (mode !== "append" && mode !== "replace") throw new ApiError("BAD_REQUEST", "invalid_mode");
   return mode;
 }
 

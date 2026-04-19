@@ -31,7 +31,7 @@ export default function Home() {
   // 灵虾子域名聊天态（MVP）
   const brand = useBrand();
   const [lingxiaInput, setLingxiaInput] = useState("");
-  const [lingxiaMsgs, setLingxiaMsgs] = useState<Array<{ role: "user" | "assistant"; text: string; timeLabel: string; usage?: { input: number; output: number }; model?: string; contextWindow?: number; contextPercent?: number; toolCalls?: import("@/components/ChatMessage").ToolCallEntry[] }>>(() => {
+  const [lingxiaMsgs, setLingxiaMsgs] = useState<Array<{ role: "user" | "assistant"; text: string; timeLabel: string; status?: string; usage?: { input: number; output: number }; model?: string; contextWindow?: number; contextPercent?: number; toolCalls?: import("@/components/ChatMessage").ToolCallEntry[] }>>(() => {
     try { const s = localStorage.getItem("lingxia-chat-history");
 return s ? JSON.parse(s) : []; } catch { return []; }
   });
@@ -163,6 +163,9 @@ return s ? JSON.parse(s) : []; } catch { return []; }
   // 流式聊天状态（替换原 tRPC mutation）
   const [lingxiaStreaming, setLingxiaStreaming] = useState(false);
   const lingxiaStreamAbortRef = useRef<AbortController | null>(null);
+  // 2026-04-19 SSE race fix: 每次 send 自增 seq，handler 用闭包抓 myStreamSeq，
+  // 只有 streamSeqRef.current === myStreamSeq 时才写 state；否则视为 stale 事件早退。
+  const streamSeqRef = useRef(0);
   const wsClientRef = useRef<OpenClawWSClient | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -230,7 +233,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
         const parsed = JSON.parse(saved);
         const normalized = Array.isArray(parsed)
           ? parsed.map((m: any) => ({
-              role: m?.role === "assistant" ? "assistant" : "user",
+              role: (m?.role === "assistant" ? "assistant" : "user") as "user" | "assistant",
               text: String(m?.text || ""),
               timeLabel: String(m?.timeLabel || new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })),
             }))
@@ -319,6 +322,10 @@ return s ? JSON.parse(s) : []; } catch { return []; }
       try { lingxiaStreamAbortRef.current.abort(); } catch {}
       lingxiaStreamAbortRef.current = null;
     }
+    // 2026-04-19 SSE race fix: 本次 send 的 seq，闭包下传所有 handler
+    streamSeqRef.current += 1;
+    const myStreamSeq = streamSeqRef.current;
+    const isStale = () => streamSeqRef.current !== myStreamSeq;
     const text = lingxiaInput.trim();
     const nowLabel = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
     const assistantTimeLabel = nowLabel;
@@ -401,6 +408,8 @@ return s ? JSON.parse(s) : []; } catch { return []; }
         // 用 setRawHandler 代替 addEventListener，跨重连自动保持
           const wsHandler = (chunk: any) => {
             try {
+              // SSE race fix: 老流的 chunk 直接早退，不写新 placeholder
+              if (isStale()) return;
               if (chunk.type === "connected") return;
               lastEventAtRef.current = Date.now();
 
@@ -430,7 +439,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
               
               // ── Agent Team 事件 ──
               if (chunk._event === "agent_dispatch") {
-                const tasks = (chunk.agents || []).map((a) => ({
+                const tasks = (chunk.agents || []).map((a: any) => ({
                   id: a.id, agentId: a.agentId, agentName: a.name, prompt: a.prompt || "",
                   status: "running", steps: [], result: undefined, durationMs: undefined,
                 }));
@@ -628,6 +637,8 @@ return s ? JSON.parse(s) : []; } catch { return []; }
       let firstChunkFlushed = false;
 
       const flushDelta = () => {
+        // SSE race fix: 老流的累积 delta 扔掉，不污染新 placeholder
+        if (isStale()) { pendingDelta = ""; return; }
         if (!pendingDelta) return;
         if (!perf.firstPaintMs) perf.firstPaintMs = Date.now();
         const delta = pendingDelta;
@@ -661,6 +672,8 @@ return s ? JSON.parse(s) : []; } catch { return []; }
       while (!sseDone) {
         const { done, value } = await reader.read();
         if (done) break;
+        // SSE race fix: 已被新 send 踢掉，立刻停止解析
+        if (isStale()) { sseDone = true; break; }
         buffer += decoder.decode(value, { stream: true });
 
         const lines = buffer.split("\n");
@@ -810,7 +823,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
                 const lastIdx = next.length - 1;
                 if (lastIdx >= 0 && next[lastIdx].role === "assistant") {
                   const tcs = next[lastIdx].toolCalls || [];
-                  next[lastIdx] = { ...next[lastIdx], toolCalls: tcs.map((tc) => tc.id === toolCallId ? { ...tc, result, status, durationMs: Date.now() - tc.ts, executor, truncated, suppressedOriginalResult, policyDenyReason, auditId, outputFiles, adoptId: resolvedAdoptId ?? undefined } : tc) };
+                  next[lastIdx] = { ...next[lastIdx], toolCalls: tcs.map((tc) => tc.id === toolCallId ? { ...tc, result, status, durationMs: Date.now() - tc.ts, executor, truncated, suppressedOriginalResult, policyDenyReason, auditId, outputFiles, adoptId: resolvedAdoptId ?? undefined } : tc) as import("@/components/ChatMessage").ToolCallEntry[] };
                 }
                 return next;
               });
@@ -920,6 +933,8 @@ return s ? JSON.parse(s) : []; } catch { return []; }
         firstPaintToDoneMs: toDur(perf.firstPaintMs, perf.clientDoneMs),
       });
     } catch (error: any) {
+      // SSE race fix: stale 流的 AbortError / 网络错误都不要写 state，否则会污染新流
+      if (isStale()) return;
       if (error?.name === "AbortError") {
         setLingxiaMsgs((prev) => {
           const next = [...prev];
@@ -943,14 +958,17 @@ return s ? JSON.parse(s) : []; } catch { return []; }
         return next;
       });
     } finally {
-      lingxiaStreamAbortRef.current = null;
-      if (!wsOk) setLingxiaStreaming(false);
-      setConnStatus("connected");
-      setActiveToolName(null);
-      setActiveToolStartMs(null);
-      setActiveToolStep(null);
-      setActiveToolTotal(null);
-      setActiveToolLabel(null);
+      // SSE race fix: stale 流不要清 abortRef / streaming / activeTool，否则会误杀新流
+      if (!isStale()) {
+        lingxiaStreamAbortRef.current = null;
+        if (!wsOk) setLingxiaStreaming(false);
+        setConnStatus("connected");
+        setActiveToolName(null);
+        setActiveToolStartMs(null);
+        setActiveToolStep(null);
+        setActiveToolTotal(null);
+        setActiveToolLabel(null);
+      }
     }
   };
 
@@ -1433,7 +1451,6 @@ return s ? JSON.parse(s) : []; } catch { return []; }
                 data: lingxiaSkills as any,
                 canEdit: !!user,
                 pending: toggleSkillMutation.isPending,
-                adoptId: resolvedAdoptId || "",
                 onToggle: (skillId, enable, source) => {
                   if (!user) { toast.error("请先登录"); return; }
                   toggleSkillMutation.mutate({ adoptId: resolvedAdoptId!, skillId, enable, source });

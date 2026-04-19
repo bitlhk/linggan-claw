@@ -158,12 +158,11 @@ export function registerMiscRoutes(app: express.Express) {
         return res.redirect((process.env.FRONTEND_URL || (process.env.FRONTEND_URL || "https://www.linggan.top/")));
       }
 
-      const { createOpenclawSDK } = await import("./sdk");
-      const sdk = createOpenclawSDK();
+      const { sdk } = await import("./sdk");
+      
       const token = await sdk.signSession({
         userId: context.user.id,
-        name: context.user.name,
-        isAdmin: context.user.role === "admin",
+        name: context.user.name ?? "",
       });
 
       // shared cookie for subdomains

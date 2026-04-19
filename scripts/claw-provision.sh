@@ -188,7 +188,8 @@ path, agent_id, profile = sys.argv[1], sys.argv[2], sys.argv[3]
 DEFAULT_MODEL = "glm5/glm-5"
 
 profile_map = {
-    "starter": {
+    # trial: 预备档位，给未来公网/培训客户用，此轮不默认触发
+    "trial": {
         "tools": {
             "profile": "messaging",
             "allow": ["read", "memory_search", "memory_get", "web_fetch", "web_search"],
@@ -198,22 +199,27 @@ profile_map = {
         },
         "model": DEFAULT_MODEL
     },
+    # plus: 默认档位 = pro 级，内部同事全员
     "plus": {
         "tools": {
             "profile": "coding",
-            "deny": ["gateway", "nodes", "browser", "cron", "sessions_spawn", "write", "edit"],
+            "deny": ["gateway", "nodes", "browser", "sessions_spawn"],
             "fs": {"workspaceOnly": True},
             "exec": {"ask": "off", "security": "full"}
         },
         "model": DEFAULT_MODEL
     },
+    # internal: 调试用，只给自己
     "internal": {
         "tools": {"profile": "full"},
         "model": DEFAULT_MODEL
     }
 }
 
-cfg = profile_map.get(profile, profile_map["starter"])
+# starter 向后兼容：映射为 trial
+if profile == "starter":
+    profile = "trial"
+cfg = profile_map.get(profile, profile_map["plus"])
 
 with open(path) as f:
     d = json.load(f)

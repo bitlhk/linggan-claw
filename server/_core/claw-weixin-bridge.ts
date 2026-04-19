@@ -50,11 +50,20 @@ async function ilinkPost(baseUrl: string, endpoint: string, payload: any, token?
     headers: makeHeaders(token, Buffer.byteLength(body)),
     body,
   });
-  return resp.json();
+  const json: any = await resp.json().catch(() => ({}));
+  // 临时：打印 sendmessage 的完整响应，看字段名
+  if (endpoint === "ilink/bot/sendmessage") {
+    console.log(`[WEIXIN-BRIDGE] sendmessage status=${resp.status} body=${JSON.stringify(json).slice(0, 400)}`);
+  }
+  const errcode = Number(json?.errcode ?? json?.ret ?? json?.error_code ?? 0);
+  if (!resp.ok || errcode !== 0) {
+    console.error(`[WEIXIN-BRIDGE] ilinkPost ${endpoint} failed status=${resp.status} errcode=${errcode} errmsg=${String(json?.errmsg || json?.message || json?.err_msg || "").slice(0, 160)}`);
+  }
+  return json;
 }
 
-// 发消息到微信
-async function sendToWeixin(acct: any, chatId: string, text: string, contextToken: string): Promise<void> {
+// 发消息到微信——返回 iLink 结果，调用方可据此判失败
+async function sendToWeixin(acct: any, chatId: string, text: string, contextToken: string): Promise<any> {
   const msg: any = {
     from_user_id: "",
     to_user_id: chatId,
@@ -64,7 +73,12 @@ async function sendToWeixin(acct: any, chatId: string, text: string, contextToke
     context_token: contextToken,
     item_list: [{ type: 1, text_item: { text } }],
   };
-  await ilinkPost(acct.baseUrl || ILINK_BASE_URL, "ilink/bot/sendmessage", { msg }, acct.token);
+  const result = await ilinkPost(acct.baseUrl || ILINK_BASE_URL, "ilink/bot/sendmessage", { msg }, acct.token);
+  const errcode = Number(result?.errcode ?? result?.ret ?? 0);
+  if (errcode !== 0) {
+    throw new Error(`iLink sendmessage failed: errcode=${errcode} errmsg=${String(result?.errmsg || result?.message || "").slice(0, 120)}`);
+  }
+  return result;
 }
 
 // 调灵虾 chat-stream（internal key 绕过 auth）

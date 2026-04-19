@@ -46,7 +46,7 @@ export function ToolsPanel({
   const runnableCount = all.filter((t) => t.runtimeAvailable).length;
   const blockedCount = all.filter((t) => !t.runtimeAvailable).length;
 
-  const profile = (policy as any)?.profile || effective?.profile || "-";
+  const profile = (policy as any)?.profile || (effective as any)?.profile || "-";
   const deny: string[] = (policy as any)?.deny || [];
   const allow: string[] = (policy as any)?.allow || [];
   const sandbox = (policy as any)?.sandbox || {};

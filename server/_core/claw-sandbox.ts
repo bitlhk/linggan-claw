@@ -16,16 +16,16 @@ export function registerSandboxRoutes(app: express.Express) {
     try {
       const { adoptId, command, timeoutMs, env } = (req.body || {}) as any;
 
-      // 1. validate params
+      // 1. validate params（ApiError 抛出会被 handleRouteError 转成 400）
       const validAdoptId = parseAdoptId(adoptId);
       const validCommand = parseNonEmptyString(command, "command");
-      if (command.length > 4096) {
+      if (validCommand.length > 4096) {
         return sendError(res, "BAD_REQUEST", "command too long");
       }
 
-      // 2. auth + ownership via requireClawOwner (same as all other claw routes)
-      const adoption = await requireClawOwner(req, res, adoptId);
-      if (!adoption) return; // requireClawOwner already sent 401/403/404
+      // 2. auth + ownership via requireClawOwner
+      const adoption = await requireClawOwner(req, res, validAdoptId);
+      if (!adoption) return;
 
       // 3. plus profile check
       const profile = (adoption as any).permissionProfile || "starter";
@@ -35,8 +35,8 @@ export function registerSandboxRoutes(app: express.Express) {
 
       // 5. exec
       const result = await sandboxExec({
-        adoptId,
-        command,
+        adoptId: validAdoptId,
+        command: validCommand,
         timeoutMs: typeof timeoutMs === "number" ? Math.min(timeoutMs, 30000) : undefined,
         env: env && typeof env === "object" ? env : undefined,
       });
@@ -44,7 +44,7 @@ export function registerSandboxRoutes(app: express.Express) {
 
     } catch (err: any) {
       console.error("[sandbox/exec] error:", err);
-      return sendError(res, "INTERNAL_ERROR", "sandbox_exec_failed");
+      return handleRouteError(res, err);
     }
   });
 

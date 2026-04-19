@@ -97,7 +97,7 @@ export default function Login() {
     registerMutation.mutate({
       name: data.name,
       company: data.company,
-      partnerType: data.partnerType,
+      partnerType: data.partnerType, verificationCode: "",
       email: data.email,
       password: data.password,
     });
