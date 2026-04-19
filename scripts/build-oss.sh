@@ -47,6 +47,18 @@ docs/灵虾多租户*.md
 docs/灵虾子Agent*.md
 docs/enterprise-agent-training.md
 docs/scratch
+# 2026-04-19 第二轮：内部过程性报告（性能/优化/Docker/NodeModules/实现分析）
+scripts/pre-oss-scan.sh
+docs/PERFORMANCE_*.md
+docs/*OPTIMIZATION*.md
+docs/DOCKER_*.md
+docs/NODE_MODULES_*.md
+docs/BUILD_SIZE_REPORT.md
+docs/AUTO_BLOCK_4XX_IMPLEMENTATION.md
+docs/IP_ACCESS_LIMIT_IMPLEMENTATION.md
+docs/WSS_INTEGRATION_PLAN.md
+docs/ACCESS_STATS_V2_PLAN.md
+docs/RESOURCE_OPTIMIZATION.md
 EXCLUDES
 
 # ── 2. 确保 .env.example 存在 ──
