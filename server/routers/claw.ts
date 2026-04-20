@@ -1090,61 +1090,9 @@ export const clawRouter = router({
         return { ok: true };
       }),
 
-    // ── 记忆 读/写 ────────────────────────────────────────────
-    getMemory: protectedProcedure
-      .input(z.object({ adoptId: z.string().min(1).max(64) }))
-      .query(async ({ input }) => {
-        const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("灵虾实例不存在");
-
-        const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
-        const remoteUser = process.env.CLAW_REMOTE_USER || "root";
-        const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
-        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-        const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
-        const memoryPath = `${remoteHome}/.openclaw/workspace-lingganclaw/${claw.agentId}/MEMORY.md`;
-
-        try {
-          let content: string;
-          if (useRemote) {
-            const cmd = `sshpass -p '${remotePassword.replace(/'/g, "'\\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 ${remoteUser}@${remoteHost} "cat '${memoryPath}' 2>/dev/null || echo ''"`;
-            content = execSync(cmd, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
-          } else {
-            content = execSync(`cat '${memoryPath}' 2>/dev/null || echo ""`, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
-          }
-          return { content: content.trim() };
-        } catch {
-          return { content: "" };
-        }
-      }),
-
-    updateMemory: protectedProcedure
-      .input(z.object({
-        adoptId: z.string().min(1).max(64),
-        content: z.string().max(20000),
-      }))
-      .mutation(async ({ input, ctx }) => {
-        const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("灵虾实例不存在");
-        if (String(claw.userId) !== String(ctx.user!.id)) throw new Error("无权操作");
-
-        const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
-        const remoteUser = process.env.CLAW_REMOTE_USER || "root";
-        const remotePassword = process.env.CLAW_REMOTE_PASSWORD || "";
-        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-        const useRemote = !!remoteHost && remoteHost !== "127.0.0.1";
-        const memoryPath = `${remoteHome}/.openclaw/workspace-lingganclaw/${claw.agentId}/MEMORY.md`;
-        const escaped = input.content.replace(/'/g, "'\\''");
-
-        if (useRemote) {
-          const cmd = `sshpass -p '${remotePassword.replace(/'/g, "'\\''")}' ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 ${remoteUser}@${remoteHost} "mkdir -p '$(dirname '${memoryPath}')' && cat > '${memoryPath}' << 'MEMEOF'\n${input.content}\nMEMEOF"`;
-          execSync(cmd, { encoding: "utf8", stdio: ["ignore","pipe","pipe"] });
-        } else {
-          const fs = await import("fs");
-          fs.writeFileSync(memoryPath, input.content, "utf8");
-        }
-        return { ok: true };
-      }),
+    // getMemory / updateMemory tRPC 端点已删除 (2026-04-20 review)
+    // 原 OpenClaw 硬编码 sshpass 路径; Home.tsx 死代码清理后无调用
+    // 前端改用 REST /api/claw/core-files/* + /api/claw/memory/* (已分叉 lgh-/lgc-)
 
     // ── 会话历史（localStorage 为主，DB 备用）─────────────────
     // 前端用 localStorage，此接口供未来 DB 持久化预留

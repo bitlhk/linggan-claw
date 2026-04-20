@@ -59,8 +59,11 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
     setLoading(true);
     setError("");
     try {
-      const r = await fetch(`/api/claw/files/list?adoptId=${encodeURIComponent(adoptId)}`, { credentials: "include" });
-      if (!r.ok) throw new Error(`list ${r.status}`);
+      // 2026-04-20 review fix: 带 currentPath 给后端, 避免深层目录被 MAX_LIST_DEPTH=4 裁剪
+      const params = new URLSearchParams({ adoptId });
+      if (currentPath) params.set("path", currentPath);
+      const r = await fetch("/api/claw/files/list?" + params.toString(), { credentials: "include" });
+      if (!r.ok) throw new Error("list " + r.status);
       const d: ListResp = await r.json();
       setFiles(d.files || []);
       setCaps(d.capabilities);
@@ -72,7 +75,7 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
     }
   };
 
-  useEffect(() => { load(); }, [adoptId]);
+  useEffect(() => { load(); }, [adoptId, currentPath]);
 
   const previewFile = async (file: FileNode) => {
     if (!isPreviewable(file.name)) return;

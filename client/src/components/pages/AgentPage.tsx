@@ -96,18 +96,41 @@ export function AgentPage({ adoptId, skills }: { adoptId: string; skills?: { sha
     if (!adoptId || !fileName) return;
     setFileSaving(true);
     try {
-      // memory_write: 走受控 Memory Write API（白名单+限额+审计），而非任意 core-files/save
-      const target = fileName === "MEMORY.md"
-        ? "MEMORY.md"
-        : fileName.match(/^memory\/(\d{4}-\d{2}-\d{2})\.md$/)
-        ? `memory:${fileName.match(/^memory\/(\d{4}-\d{2}-\d{2})\.md$/)![1]}`
-        : `notes:${fileName.replace(/^notes\//, "")}`;
+      // 2026-04-20 review fix: runtime-aware save endpoint
+      // - lgh- (Hermes): SOUL/MEMORY/USER 走 memory/write, target 直接 filename
+      // - lgc- (OpenClaw): MEMORY.md + memory:YYYY-MM-DD 走 memory/write (budget+audit)
+      //                    其他 core files (SOUL/AGENTS/TOOLS/IDENTITY/STYLE/PLAN/KNOWLEDGE) 走 core-files/save
+      const isHermes = String(adoptId).startsWith("lgh-");
+      const dailyMemoryMatch = fileName.match(/^memory\/(\d{4}-\d{2}-\d{2})\.md$/);
 
-      const r = await fetch(`/api/claw/memory/write`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adoptId, target, mode: "replace", content: fileContent, etag: fileEtag }),
-      });
+      let r: Response;
+      if (isHermes) {
+        r = await fetch("/api/claw/memory/write", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ adoptId, target: fileName, mode: "replace", content: fileContent, etag: fileEtag }),
+        });
+      } else if (fileName === "MEMORY.md" || dailyMemoryMatch) {
+        const target = fileName === "MEMORY.md" ? "MEMORY.md" : ("memory:" + dailyMemoryMatch![1]);
+        r = await fetch("/api/claw/memory/write", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ adoptId, target, mode: "replace", content: fileContent, etag: fileEtag }),
+        });
+      } else if (fileName.startsWith("notes/")) {
+        r = await fetch("/api/claw/memory/write", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ adoptId, target: "notes:" + fileName.replace(/^notes\//, ""), mode: "replace", content: fileContent, etag: fileEtag }),
+        });
+      } else {
+        // OpenClaw core files: SOUL/AGENTS/TOOLS/IDENTITY/STYLE/PLAN/KNOWLEDGE
+        r = await fetch("/api/claw/core-files/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ adoptId, name: fileName, content: fileContent, etag: fileEtag }),
+        });
+      }
       if (r.status === 409) throw new Error("文件已被更新，请刷新后重试");
       if (r.status === 429) { const d = await r.json(); throw new Error(`写入限制：${d?.error || "rate_limited"}`); }
       if (r.status === 413) { const d = await r.json(); throw new Error(`内容过大：${d?.error || "file_too_large"}`); }

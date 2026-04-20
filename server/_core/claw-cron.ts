@@ -351,12 +351,30 @@ export function registerCronRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       if (isHermesAdopt(adoptId)) {
-        // Hermes only supports name/prompt/schedule/enabled/delivery/skills/model patch
+        // 2026-04-20 review fix: 补 schedule / delivery / skills / model 字段转发
+        // 之前只 forward name/enabled/prompt, 其他 silent drop
         const linggPatch: any = {};
         if (patch.name !== undefined) linggPatch.name = patch.name;
         if (patch.enabled !== undefined) linggPatch.enabled = patch.enabled;
         if (patch?.payload?.message !== undefined) linggPatch.prompt = patch.payload.message;
         if (patch.prompt !== undefined) linggPatch.prompt = patch.prompt;
+        // schedule (OpenClaw shape: every/cron/at → Lingg interval/cron/once)
+        if (patch.schedule !== undefined) {
+          const sk = String(patch.schedule?.kind || "");
+          const linggKind = sk === "every" ? "interval" : sk === "at" ? "once" : (sk === "interval" || sk === "cron" || sk === "once") ? sk : undefined;
+          if (linggKind) {
+            linggPatch.schedule = {
+              kind: linggKind as any,
+              intervalMinutes: sk === "every" && patch.schedule.everyMs ? Math.round(Number(patch.schedule.everyMs) / 60000) : patch.schedule.intervalMinutes,
+              cronExpr: patch.schedule.expr || patch.schedule.cronExpr,
+              runAt: patch.schedule.at || patch.schedule.runAt,
+            };
+          }
+        }
+        if (patch.delivery?.mode !== undefined) linggPatch.delivery = { mode: String(patch.delivery.mode), target: patch.delivery?.to };
+        if (patch.skills !== undefined) linggPatch.meta = { ...(linggPatch.meta || {}), skills: patch.skills };
+        if (patch?.payload?.model !== undefined) linggPatch.meta = { ...(linggPatch.meta || {}), model: patch.payload.model };
+        if (patch.model !== undefined) linggPatch.meta = { ...(linggPatch.meta || {}), model: patch.model };
         const out = await hermesCron.updateJob(toHermesHandle(claw), id, linggPatch);
         return res.json({ runtime: "hermes", job: out });
       }
