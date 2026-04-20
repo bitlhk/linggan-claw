@@ -26,6 +26,7 @@ export type CreateCoopSessionParams = {
   creatorAdoptId: string;
   title: string;
   originMessage: string;
+  consolidationPromptPreset?: string | null;
   members: Array<{
     userId: number;
     targetAdoptId: string;
@@ -51,6 +52,7 @@ export async function createCoopSession(params: CreateCoopSessionParams) {
     creatorAdoptId: params.creatorAdoptId,
     title: params.title,
     originMessage: params.originMessage,
+    consolidationPromptPreset: params.consolidationPromptPreset?.trim() || null,
     status: "inviting",
     memberCount: params.members.length,
   });

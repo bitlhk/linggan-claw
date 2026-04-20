@@ -38,6 +38,34 @@ export function registerChatStreamRoutes(app: express.Express) {
       if (!claw) return;
     }
 
+    // ── Hermes runtime 分叉（lgh-*）────────────────────────────────
+    // 仅影响 adoptId 前缀为 "lgh-" 的请求；lgc-* 代码路径 byte-identical
+    if (String(adoptId).startsWith("lgh-")) {
+      const msgStrForHermes = String(message || "").slice(0, 4000);
+      if (msgStrForHermes.trim().length === 0) {
+        res.status(400).json({ error: "message is empty" });
+        return;
+      }
+      const { forwardToHermes } = await import("./hermes-bridge");
+      await forwardToHermes(
+        {
+          adoptId: String(claw.adoptId),
+          agentId: String(claw.agentId),
+          userId: Number(claw.userId),
+          hermesPort: (claw as any).hermesPort ?? null,
+        },
+        msgStrForHermes,
+        res,
+        {
+          // 不传 sessionId 让 bridge 用 makeSessionId(adoptId) 生成固定 session_id
+          // 这样跨请求 Hermes state.db 的 conversation history 累积
+          model,
+          req,  // 传 req 让 bridge 监听 close 事件做 upstream abort
+        },
+      );
+      return;
+    }
+
     // 安全校验：agentId 必须符合预期格式，防止 shell 注入
     const AGENT_ID_RE = /^trial_lgc-[a-z0-9]{4,30}$/;
     if (!AGENT_ID_RE.test(String(claw.agentId || ""))) {
@@ -237,7 +265,7 @@ export function registerChatStreamRoutes(app: express.Express) {
       rawProfile === "plus" || rawProfile === "internal" ? rawProfile : "starter";
 
     // 前端传入的模型 ID，白名单校验后通过 x-openclaw-model header 生效
-    const ALLOWED_CLAW_MODELS = new Set(["glm5/glm-5", "glm5/glm-5.1", "minimax-portal/MiniMax-M2.7", "deepseek/deepseek-chat"]);
+    const ALLOWED_CLAW_MODELS = new Set(["glm5/glm-5", "glm5/glm-5.1", "deepseek/deepseek-chat"]);
     const reqModel = (typeof model === "string" && model.trim()) ? model.trim() : "";
     const backendModel = (reqModel && ALLOWED_CLAW_MODELS.has(reqModel)) ? reqModel : "";
 

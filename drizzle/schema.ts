@@ -298,6 +298,7 @@ export const clawAdoptions = mysqlTable("claw_adoptions", {
   agentId: varchar("agentId", { length: 128 }).notNull().unique(),
   status: mysqlEnum("status", ["creating", "active", "expiring", "recycled", "failed"]).default("creating").notNull(),
   permissionProfile: varchar("permissionProfile", { length: 32 }).default("plus").notNull(),
+  hermesPort: int("hermes_port"),
   ttlDays: int("ttlDays").default(7).notNull(),
   entryUrl: varchar("entryUrl", { length: 512 }).notNull(),
   expiresAt: timestamp("expiresAt"), // nullable: null表示永久
@@ -418,6 +419,7 @@ export const lxCoopSessions = mysqlTable("lx_coop_sessions", {
   creatorAdoptId: varchar("creator_adopt_id", { length: 64 }).notNull(),
   title: varchar("title", { length: 200 }),
   originMessage: text("origin_message"),
+  consolidationPromptPreset: varchar("consolidation_prompt_preset", { length: 1000 }),
   status: mysqlEnum("status", ["drafting","inviting","running","consolidating","published","closed","dissolved"]).default("drafting").notNull(),
   visibilityMode: mysqlEnum("visibility_mode", ["creator_only","all_members"]).default("creator_only").notNull(),
   finalSummary: text("final_summary"),

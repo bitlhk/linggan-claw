@@ -50,6 +50,7 @@ export const coopRouter = router({
       z.object({
         title: z.string().min(1).max(200),
         originMessage: z.string().max(10_000),
+        consolidationPromptPreset: z.string().max(1000).optional(),
         creatorAdoptId: z.string().min(1),
         members: z
           .array(
@@ -70,6 +71,7 @@ export const coopRouter = router({
         creatorAdoptId: input.creatorAdoptId,
         title: input.title,
         originMessage: input.originMessage,
+        consolidationPromptPreset: input.consolidationPromptPreset,
         members: input.members,
       });
       // 异步推送邀请通知（微信/站内），不阻塞响应

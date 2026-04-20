@@ -201,7 +201,14 @@ export default function ClawHome() {
     window.location.reload();
   };
 
-  const adoption = clawMe?.adoption;
+  // 2026-04-19: 支持多 runtime（lgc-* OpenClaw + lgh-* Hermes）
+  // 向后兼容：若服务端尚未升级，回退到单张 adoption
+  const adoptions: any[] = Array.isArray((clawMe as any)?.adoptions)
+    ? (clawMe as any).adoptions
+    : (clawMe as any)?.adoption
+      ? [(clawMe as any).adoption]
+      : [];
+  const hasAnyClaw = adoptions.length > 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50/80">
@@ -296,36 +303,56 @@ export default function ClawHome() {
                 </div>
               )}
 
-              {/* 已有虾 → 进入 */}
-              {user && !isLoading && adoption && (
-                <Card className="border-border/50 bg-white/80 backdrop-blur-sm overflow-hidden">
-                  <div className="p-5">
-                    <div className="flex items-center gap-3 mb-4">
-                      <BrandIcon size={40} />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-gray-900">我的{brand.name}</p>
-                        <p className="text-xs font-mono text-muted-foreground">{adoption.adoptId}</p>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className={`w-2 h-2 rounded-full ${adoption.status === "active" ? "bg-green-500 animate-pulse" : "bg-yellow-500"}`} />
-                        <span className={`text-xs font-medium ${adoption.status === "active" ? "text-green-600" : "text-yellow-600"}`}>
-                          {adoption.status === "active" ? "在线" : adoption.status}
-                        </span>
-                      </div>
-                    </div>
-                    <Button
-                      className="w-full bg-primary hover:bg-primary/90 text-white"
-                      onClick={() => setLocation(`/claw/${adoption.adoptId}`)}
-                    >
-                      进入控制台
-                      <ArrowRight className="w-4 h-4 ml-2" />
-                    </Button>
-                  </div>
-                </Card>
+              {/* 已有虾 → 进入（支持 OpenClaw lgc-* 和 Hermes lgh-* 多卡） */}
+              {user && !isLoading && hasAnyClaw && (
+                <div className="space-y-3">
+                  {adoptions.map((a: any) => {
+                    const isHermes = String(a.adoptId || "").startsWith("lgh-");
+                    const runtimeLabel = isHermes ? "Hermes · 专业版" : `${brand.name}`;
+                    const runtimeBadge = isHermes ? "⚡ Hermes" : "🦐 OpenClaw";
+                    return (
+                      <Card key={a.adoptId} className="border-border/50 bg-white/80 backdrop-blur-sm overflow-hidden">
+                        <div className="p-5">
+                          <div className="flex items-center gap-3 mb-4">
+                            <BrandIcon size={40} />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <p className="text-sm font-semibold text-gray-900">{runtimeLabel}</p>
+                                <span
+                                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                    isHermes
+                                      ? "bg-purple-100 text-purple-700"
+                                      : "bg-primary/10 text-primary"
+                                  }`}
+                                >
+                                  {runtimeBadge}
+                                </span>
+                              </div>
+                              <p className="text-xs font-mono text-muted-foreground truncate">{a.adoptId}</p>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className={`w-2 h-2 rounded-full ${a.status === "active" ? "bg-green-500 animate-pulse" : "bg-yellow-500"}`} />
+                              <span className={`text-xs font-medium ${a.status === "active" ? "text-green-600" : "text-yellow-600"}`}>
+                                {a.status === "active" ? "在线" : a.status}
+                              </span>
+                            </div>
+                          </div>
+                          <Button
+                            className={`w-full text-white ${isHermes ? "bg-purple-600 hover:bg-purple-700" : "bg-primary hover:bg-primary/90"}`}
+                            onClick={() => setLocation(`/claw/${a.adoptId}`)}
+                          >
+                            进入控制台
+                            <ArrowRight className="w-4 h-4 ml-2" />
+                          </Button>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
               )}
 
-              {/* 没有虾 → 领养 */}
-              {user && !isLoading && !adoption && (
+              {/* 没有虾 → 领养（默认走 OpenClaw） */}
+              {user && !isLoading && !hasAnyClaw && (
                 <Button
                   size="lg"
                   className="w-full bg-primary hover:bg-primary/90 text-white h-12 text-base"

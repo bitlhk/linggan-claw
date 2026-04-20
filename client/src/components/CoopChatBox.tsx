@@ -221,16 +221,17 @@ export function CoopChatBox({ sessionId, requestId, subtask, coopTitle, onSubmit
   }
 
   return (
-    <div className="mt-3 border border-border/60 rounded-lg bg-white" style={{ overflow: "hidden" }}>
+    <div className="mt-3 border border-border/60 rounded-lg bg-card" style={{ overflow: "hidden" }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-blue-50 border-b border-border/40">
+      <div className="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-border/40">
         <div className="text-xs text-foreground">
           <span className="font-semibold">🤝 协作工作台</span>
           <span className="ml-2 text-muted-foreground">独立 sandbox · 不污染主聊天</span>
         </div>
         <Button
           size="sm"
-          className="h-7 text-xs bg-green-600 hover:bg-green-700"
+          className="h-7 text-xs text-white"
+          style={{ background: "var(--oc-success)" }}
           onClick={() => setModalOpen(true)}
           disabled={submitting || streaming || msgs.length === 0}
           title={msgs.length === 0 ? "先跟虾对话产生结果" : "提交本次结果到协作"}
@@ -241,7 +242,7 @@ export function CoopChatBox({ sessionId, requestId, subtask, coopTitle, onSubmit
       </div>
 
       {/* 消息列表 */}
-      <div className="px-3 py-3 space-y-2 max-h-[420px] overflow-y-auto bg-gray-50/50">
+      <div className="px-3 py-3 space-y-2 max-h-[420px] overflow-y-auto bg-muted/30">
         {msgs.length === 0 ? (
           <div className="text-xs text-muted-foreground text-center py-4">
             子任务已预填到下方输入框，按发送让你的虾开始处理（可改）
@@ -252,8 +253,8 @@ export function CoopChatBox({ sessionId, requestId, subtask, coopTitle, onSubmit
               <div
                 className={`max-w-[85%] text-xs px-3 py-2 rounded-lg whitespace-pre-wrap ${
                   m.role === "user"
-                    ? "bg-blue-600 text-white"
-                    : "bg-white border border-border/40 text-foreground"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-card border border-border/40 text-foreground"
                 }`}
                 style={{ overflowWrap: "anywhere" }}
               >

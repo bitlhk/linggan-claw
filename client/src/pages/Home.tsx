@@ -108,8 +108,6 @@ return s ? JSON.parse(s) : []; } catch { return []; }
   }, [sidebarCollapsed, sidebarWidth]);
   const [lingxiaOpenSections, setLingxiaOpenSections] = useState<Set<string>>(new Set(["soul"]));
   const toggleLingxiaSection = (s: string) => setLingxiaOpenSections(prev => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
-  const [lingxiaMemoryContent, setLingxiaMemoryContent] = useState("");
-  const [lingxiaMemoryEditing, setLingxiaMemoryEditing] = useState(false);
   const [lingxiaTopSettingsOpen, setLingxiaTopSettingsOpen] = useState(false);
 
   const { user } = useAuth({ redirectOnUnauthenticated: false });
@@ -169,15 +167,18 @@ return s ? JSON.parse(s) : []; } catch { return []; }
   const wsClientRef = useRef<OpenClawWSClient | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
 
-  // 初始化 WSS 连接（后台自动尝试，不阻塞 UI）
+  // lgh-* 虾是 Hermes runtime，不走 OpenClaw WSS；直接 HTTP SSE 由 server 侧 prefix 分叉到 hermes-bridge
+  const isHermesRuntime = String(resolvedAdoptId || "").startsWith("lgh-");
+
+  // 初始化 WSS 连接（后台自动尝试，不阻塞 UI）—— 仅 OpenClaw (lgc-*)
   useEffect(() => {
-    if (!resolvedAdoptId) return;
+    if (!resolvedAdoptId || isHermesRuntime) return;
     const apiBase = (import.meta as any).env?.VITE_API_URL || "";
     const ws = new OpenClawWSClient(resolvedAdoptId, apiBase);
     wsClientRef.current = ws;
     ws.connect().then((ok) => { if (ok) setWsConnected(true); });
     return () => { ws.disconnect(); wsClientRef.current = null; setWsConnected(false); };
-  }, [resolvedAdoptId]);
+  }, [resolvedAdoptId, isHermesRuntime]);
   const lingxiaMsgViewportRef = useRef<HTMLDivElement | null>(null);
   const [lingxiaNearBottom, setLingxiaNearBottom] = useState(true);
   // 工具执行显性化状态
@@ -208,20 +209,6 @@ return s ? JSON.parse(s) : []; } catch { return []; }
     onError: (e) => toast.error(e.message),
   });
   const [lingxiaSkillEditor, setLingxiaSkillEditor] = useState<{ id: string; content: string } | null>(null);
-
-  // 记忆
-  const { data: lingxiaMemoryData, refetch: refetchMemory } = trpc.claw.getMemory.useQuery(
-    { adoptId: resolvedAdoptId || "" },
-    { enabled: !!resolvedAdoptId && lingxiaOpenSections.has("memory"), retry: false }
-  );
-  const updateMemoryMutation = trpc.claw.updateMemory.useMutation({
-    onSuccess: () => { setLingxiaMemoryEditing(false); refetchMemory(); toast.success("记忆已保存"); },
-    onError: (e) => toast.error(e.message),
-  });
-  // 同步记忆内容到编辑框
-  useEffect(() => {
-    if (lingxiaMemoryData?.content !== undefined) setLingxiaMemoryContent(lingxiaMemoryData.content);
-  }, [lingxiaMemoryData]);
 
   // localStorage 会话持久化
   const MSGS_KEY = resolvedAdoptId ? `lgc_msgs_${resolvedAdoptId}` : null;
@@ -398,9 +385,10 @@ return s ? JSON.parse(s) : []; } catch { return []; }
       const perf: Record<string, number> = { clientSendMs: Date.now() };
       const controller = new AbortController();
       lingxiaStreamAbortRef.current = controller;
-      // ── WSS 优先路径 ──
-      const wsClient = wsClientRef.current;
-      console.log(`[DIAG] wsClient.state = ${wsClient?.state ?? "null"}, will ${wsClient?.state === "connected" ? "try WSS first" : "use HTTP SSE directly"}`);
+      // ── WSS 优先路径（仅 OpenClaw runtime） ──
+      // Hermes (lgh-*) 跳过 WSS 尝试，直接走 HTTP SSE（server 会 prefix 分叉到 hermes-bridge）
+      const wsClient = isHermesRuntime ? null : wsClientRef.current;
+      console.log(`[DIAG] runtime=${isHermesRuntime ? "hermes" : "openclaw"}, wsClient.state = ${wsClient?.state ?? "null"}, will ${wsClient?.state === "connected" ? "try WSS first" : "use HTTP SSE directly"}`);
       if (wsClient?.state === "connected") {
         console.log("[WS] sending via WebSocket");
         // WS 消息处理：后端 WS 代理已转成与 HTTP SSE 一致的格式
@@ -1127,7 +1115,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
 
             {/* 旧侧栏能力暂留（Phase B 迁移），当前隐藏 */}
                         <SidebarFooter
-              version={openclawVersion}
+              version={isHermesRuntime ? "Hermes v0.10.0" : openclawVersion}
               expiryText={lingxiaExpiryInfo.text}
               expiryColor={lingxiaExpiryInfo.color}
               collapsed={sidebarCollapsed}
@@ -1248,7 +1236,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
                 onClick={() => {
                   const profile = (clawByAdoptId as any)?.permissionProfile || "starter";
                   if (profile === "starter") {
-                    toast.info("智能体广场需要 Plus 套餐");
+                    toast.info("智能体广场需要 Pro 套餐");
                     return;
                   }
                   setCollabOpen(true);

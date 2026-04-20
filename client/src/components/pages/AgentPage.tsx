@@ -2,23 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import { PageContainer } from "@/components/console/PageContainer";
 import { FilesPanel } from "@/components/pages/agent/FilesPanel";
 import { OverviewPanel } from "@/components/pages/agent/OverviewPanel";
-import { SkillsPanel } from "@/components/pages/agent/SkillsPanel";
-import { ToolsPanel } from "@/components/pages/agent/ToolsPanel";
 import type { AgentPanel, CoreFileMeta, EffectiveResp, ToolPolicy } from "@/components/pages/agent/types";
 
 const PANELS: { id: AgentPanel; label: string }[] = [
   { id: "overview", label: "概览" },
   { id: "files", label: "文件" },
-  { id: "tools", label: "工具" },
-  { id: "skills", label: "技能" },
 ];
 
 function getInitialPanel(): AgentPanel {
   if (typeof window === "undefined") return "overview";
   const q = new URLSearchParams(window.location.search).get("agentPanel");
-  if (q === "overview" || q === "files" || q === "tools" || q === "skills") return q;
+  if (q === "overview" || q === "files") return q;
   const saved = localStorage.getItem("agent.activePanel") as AgentPanel | null;
-  if (saved && ["overview", "files", "tools", "skills"].includes(saved)) return saved;
+  if (saved && ["overview", "files"].includes(saved)) return saved;
   return "overview";
 }
 
@@ -133,7 +129,7 @@ export function AgentPage({ adoptId, skills }: { adoptId: string; skills?: { sha
   const dirty = fileContent !== savedContent;
 
   return (
-    <PageContainer title="代理">
+    <PageContainer title="记忆">
       <div className="console-tabs">
         {PANELS.map((p) => (
           <button
@@ -182,13 +178,6 @@ export function AgentPage({ adoptId, skills }: { adoptId: string; skills?: { sha
         />
       )}
 
-      {activePanel === "tools" && (
-        <ToolsPanel effective={effective} policy={policy} enabledTools={enabledTools} totalTools={flatTools.length} />
-      )}
-
-      {activePanel === "skills" && (
-        <SkillsPanel sharedSkills={sharedSkills} systemSkills={systemSkills} privateSkills={privateSkills} />
-      )}
     </PageContainer>
   );
 }

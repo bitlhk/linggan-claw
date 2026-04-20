@@ -28,7 +28,7 @@ export const collabRouter = router({
         const { getClawByAdoptId } = await import("../db");
         const claw = await getClawByAdoptId(input.adoptId);
         if (!claw || claw.userId !== ctx.user!.id) throw new TRPCError({ code: "FORBIDDEN" });
-        if (claw.permissionProfile === "starter") throw new TRPCError({ code: "FORBIDDEN", message: "协作广场需要 Plus 套餐，请联系管理员升级" });
+        if (claw.permissionProfile === "starter") throw new TRPCError({ code: "FORBIDDEN", message: "协作广场需要 Pro 套餐，请联系管理员升级" });
         const settings = await getCollabSettings(claw.id);
         return settings || { adoptionId: claw.id, visibilityMode: "private", acceptDm: "off", acceptTask: "off", sharingPolicy: "none" };
       }),
@@ -49,7 +49,7 @@ export const collabRouter = router({
         const { getClawByAdoptId } = await import("../db");
         const claw = await getClawByAdoptId(input.adoptId);
         if (!claw || claw.userId !== ctx.user!.id) throw new TRPCError({ code: "FORBIDDEN" });
-        if (claw.permissionProfile === "starter") throw new TRPCError({ code: "FORBIDDEN", message: "协作广场需要 Plus 套餐，请联系管理员升级" });
+        if (claw.permissionProfile === "starter") throw new TRPCError({ code: "FORBIDDEN", message: "协作广场需要 Pro 套餐，请联系管理员升级" });
         const patch: any = {};
         if (input.displayName !== undefined) patch.displayName = input.displayName;
         if (input.headline !== undefined) patch.headline = input.headline;
@@ -94,7 +94,7 @@ export const collabRouter = router({
         const { getClawByAdoptId } = await import("../db");
         const requester = await getClawByAdoptId(input.requesterAdoptId);
         if (!requester || requester.userId !== ctx.user!.id) throw new TRPCError({ code: "FORBIDDEN" });
-        if (requester.permissionProfile === "starter") throw new TRPCError({ code: "FORBIDDEN", message: "协作广场需要 Plus 套餐，请联系管理员升级" });
+        if (requester.permissionProfile === "starter") throw new TRPCError({ code: "FORBIDDEN", message: "协作广场需要 Pro 套餐，请联系管理员升级" });
         const target = await getClawByAdoptId(input.targetAdoptId);
         if (!target || target.permissionProfile === "starter") throw new TRPCError({ code: "NOT_FOUND" });
         const targetSettings = await getCollabSettings(target.id);

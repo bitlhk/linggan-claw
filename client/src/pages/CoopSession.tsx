@@ -12,9 +12,10 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, ArrowLeft, CheckCircle2, XCircle, Clock, Play, Send, Users as UsersIcon, Paperclip, Download } from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle2, Users as UsersIcon, Paperclip, Download } from "lucide-react";
 import { toast } from "sonner";
 import { CoopChatBox } from "@/components/CoopChatBox";
+import { memberStatusMeta, sessionStatusMeta } from "@/lib/coopStatus";
 
 type EventAttachment = { name: string; url: string; source?: string; size?: number };
 
@@ -39,15 +40,12 @@ function AttachmentList({ attachments }: { attachments: EventAttachment[] }) {
             href={f.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors text-xs"
+            className="flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors text-xs text-primary hover:bg-primary/10"
             style={{
-              background: "rgba(99, 102, 241, 0.06)",
-              border: "1px solid rgba(99, 102, 241, 0.2)",
-              color: "#1e40af",
+              background: "color-mix(in oklab, var(--oc-accent) 6%, transparent)",
+              border: "1px solid color-mix(in oklab, var(--oc-accent) 20%, transparent)",
               textDecoration: "none",
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(99, 102, 241, 0.12)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(99, 102, 241, 0.06)")}
             title={`下载 ${f.name}`}
           >
             <Download className="w-3 h-3 shrink-0" />
@@ -60,27 +58,7 @@ function AttachmentList({ attachments }: { attachments: EventAttachment[] }) {
   );
 }
 
-const STATUS_META: Record<string, { label: string; color: string; bg: string; icon: any }> = {
-  pending:          { label: "等待响应",   color: "#a16207", bg: "#fef3c7", icon: Clock },
-  approved:         { label: "已同意",     color: "#166534", bg: "#dcfce7", icon: CheckCircle2 },
-  running:          { label: "执行中",     color: "#1e40af", bg: "#dbeafe", icon: Play },
-  completed:        { label: "已提交",     color: "#166534", bg: "#d1fae5", icon: Send },
-  failed:           { label: "执行失败",   color: "#991b1b", bg: "#fee2e2", icon: XCircle },
-  rejected:         { label: "已拒绝",     color: "#991b1b", bg: "#fee2e2", icon: XCircle },
-  cancelled:        { label: "已取消",     color: "#4b5563", bg: "#f3f4f6", icon: XCircle },
-  partial_success:  { label: "部分成功",   color: "#a16207", bg: "#fef3c7", icon: CheckCircle2 },
-  waiting_input:    { label: "等待输入",   color: "#a16207", bg: "#fef3c7", icon: Clock },
-};
-
-const SESSION_STATUS_META: Record<string, { label: string; color: string }> = {
-  drafting:       { label: "草稿中",       color: "#6b7280" },
-  inviting:       { label: "邀请中",       color: "#a16207" },
-  running:        { label: "协作进行中",   color: "#1e40af" },
-  consolidating:  { label: "整合中",       color: "#7c3aed" },
-  published:      { label: "已发布",       color: "#166534" },
-  closed:         { label: "已关闭",       color: "#4b5563" },
-  dissolved:      { label: "已解散",       color: "#4b5563" },
-};
+// 状态 meta 统一走 lib/coopStatus，避免各文件重复定义。
 
 export default function CoopSession() {
   const [, params] = useRoute("/coop/:sessionId");
@@ -142,7 +120,7 @@ export default function CoopSession() {
   if (error || !data) {
     return (
       <div className="p-8 text-center">
-        <div className="text-lg font-medium text-red-600 mb-2">加载失败</div>
+        <div className="text-lg font-medium text-destructive mb-2">加载失败</div>
         <div className="text-sm text-foreground mb-4">{error?.message || "协作不存在或无权访问"}</div>
         <Button variant="outline" onClick={() => setLocation("/")}>
           <ArrowLeft className="w-4 h-4 mr-2" /> 返回首页
@@ -155,10 +133,10 @@ export default function CoopSession() {
   const currentUserId = (data as any).viewerUserId as number | undefined;
   const isMember = Boolean((data as any).viewerIsMember);
   const isCreator = Boolean((data as any).viewerIsCreator);
-  const sessionStatus = SESSION_STATUS_META[session.status] || { label: session.status, color: "#6b7280" };
+  const sessionStatus = sessionStatusMeta(session.status);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30">
+    <div className="min-h-screen bg-muted/40">
       {/* 顶部 Header */}
       <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border/50">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-4">
@@ -176,11 +154,9 @@ export default function CoopSession() {
           </Button>
           <div className="flex-1">
             <div className="flex items-center gap-3">
-              <UsersIcon className="w-5 h-5 text-blue-600" />
+              <UsersIcon className="w-5 h-5 text-primary" />
               <h1 className="text-lg font-semibold text-foreground">{session.title || "协作任务"}</h1>
-              <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full" style={{ background: sessionStatus.color + "20", color: sessionStatus.color }}>
-                {sessionStatus.label}
-              </span>
+              <span className={`badge ${sessionStatus.badgeClass}`}>{sessionStatus.label}</span>
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               协作 ID: <span className="font-mono">{session.id}</span> · {members.length} 位成员 · {isCreator && isMember ? "你是发起人（含成员）" : isCreator ? "你是发起人" : "你是协作成员"}
@@ -205,29 +181,29 @@ export default function CoopSession() {
         {(() => {
           const myCard = members.find((m: any) => m.targetUserId === currentUserId);
           if (!myCard) return null;
-          const meta = STATUS_META[myCard.status] || STATUS_META.pending;
+          const meta = memberStatusMeta(myCard.status);
           const Icon = meta.icon;
           // running / approved 都算"已接手"：可以展开 ChatBox 继续干活
           const showChatBox = ["approved", "running"].includes(myCard.status);
           return (
-            <Card className="p-4 bg-blue-50/40 border-blue-200 hover:shadow-md transition-shadow">
+            <Card className="p-4 bg-primary/5 border-primary/20 hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-foreground">
                     {myCard.targetUserName || myCard.targetEmail || `#${myCard.targetUserId}`}
-                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-blue-600 text-white font-normal">我</span>
+                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground font-normal">我</span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">
                     {myCard.targetOrgName || "—"}
-                    {myCard.targetGroupName && myCard.targetGroupId! > 0 ? (<><span className="mx-1">·</span><span className="text-blue-600">{myCard.targetGroupName}</span></>) : null}
+                    {myCard.targetGroupName && myCard.targetGroupId! > 0 ? (<><span className="mx-1">·</span><span className="text-primary">{myCard.targetGroupName}</span></>) : null}
                   </div>
                 </div>
-                <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium shrink-0" style={{ background: meta.bg, color: meta.color }}>
+                <span className={`badge ${meta.badgeClass} inline-flex items-center gap-1 shrink-0`}>
                   <Icon className="w-3 h-3" /> {meta.label}
                 </span>
               </div>
               <div className="text-xs text-muted-foreground mb-1">分配给我的子任务</div>
-              <div className="text-sm text-foreground bg-gray-50 rounded p-2 mb-3">{myCard.taskSummary || "—"}</div>
+              <div className="text-sm text-foreground bg-muted/50 rounded p-2 mb-3">{myCard.taskSummary || "—"}</div>
               {/* pending → 接手 / 修改 / 拒绝 */}
               {myCard.status === "pending" ? (
                 <InvitationActions
@@ -252,8 +228,12 @@ export default function CoopSession() {
               {myCard.status === "completed" && myCard.resultSummary ? (
                 <>
                   <div
-                    className="mt-2 text-xs text-green-700 bg-green-50 rounded p-2 whitespace-pre-wrap"
-                    style={{ maxHeight: 240, overflowY: "auto", overflowWrap: "anywhere" }}
+                    className="mt-2 text-xs text-foreground rounded p-2 whitespace-pre-wrap"
+                    style={{
+                      background: "color-mix(in oklab, var(--oc-success) 10%, transparent)",
+                      border: "1px solid color-mix(in oklab, var(--oc-success) 25%, transparent)",
+                      maxHeight: 240, overflowY: "auto", overflowWrap: "anywhere",
+                    }}
                   >
                     {myCard.resultSummary}
                   </div>
@@ -267,7 +247,7 @@ export default function CoopSession() {
         {/* 其他成员卡片（不含我，3 列 grid） */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {members.filter((m: any) => m.targetUserId !== currentUserId).map((m) => {
-            const meta = STATUS_META[m.status] || STATUS_META.pending;
+            const meta = memberStatusMeta(m.status);
             const Icon = meta.icon;
             return (
               <Card key={m.requestId} className="p-4 bg-card border-border/50 hover:shadow-md transition-shadow">
@@ -276,21 +256,25 @@ export default function CoopSession() {
                     <div className="font-medium text-foreground truncate">{m.targetUserName || m.targetEmail || `#${m.targetUserId}`}</div>
                     <div className="text-xs text-muted-foreground mt-0.5">
                       {m.targetOrgName || "—"}
-                      {m.targetGroupName && m.targetGroupId! > 0 ? (<><span className="mx-1">·</span><span className="text-blue-600">{m.targetGroupName}</span></>) : null}
+                      {m.targetGroupName && m.targetGroupId! > 0 ? (<><span className="mx-1">·</span><span className="text-primary">{m.targetGroupName}</span></>) : null}
                     </div>
                   </div>
-                  <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium shrink-0" style={{ background: meta.bg, color: meta.color }}>
+                  <span className={`badge ${meta.badgeClass} inline-flex items-center gap-1 shrink-0`}>
                     <Icon className="w-3 h-3" /> {meta.label}
                   </span>
                 </div>
                 <div className="text-xs text-muted-foreground mb-1">子任务</div>
-                <div className="text-sm text-foreground bg-gray-50 rounded p-2 mb-3">{m.taskSummary || "—"}</div>
+                <div className="text-sm text-foreground bg-muted/50 rounded p-2 mb-3">{m.taskSummary || "—"}</div>
                 {/* 完成后的结果 */}
                 {m.status === "completed" && m.resultSummary ? (
                   <>
                     <div
-                      className="mt-2 text-xs text-green-700 bg-green-50 rounded p-2 whitespace-pre-wrap"
-                      style={{ maxHeight: 240, overflowY: "auto", overflowWrap: "anywhere" }}
+                      className="mt-2 text-xs text-foreground rounded p-2 whitespace-pre-wrap"
+                      style={{
+                        background: "color-mix(in oklab, var(--oc-success) 10%, transparent)",
+                        border: "1px solid color-mix(in oklab, var(--oc-success) 25%, transparent)",
+                        maxHeight: 240, overflowY: "auto", overflowWrap: "anywhere",
+                      }}
                     >
                       {m.resultSummary}
                     </div>
@@ -304,9 +288,15 @@ export default function CoopSession() {
 
         {/* ── 已发布的最终结果（所有 member 都能看，发起人也能看）── */}
         {session.status === "published" && session.finalSummary ? (
-          <Card className="mt-6 p-5 bg-green-50/40 border-green-200">
+          <Card
+            className="mt-6 p-5"
+            style={{
+              background: "color-mix(in oklab, var(--oc-success) 8%, transparent)",
+              borderColor: "color-mix(in oklab, var(--oc-success) 30%, transparent)",
+            }}
+          >
             <div className="flex items-center gap-2 mb-3">
-              <CheckCircle2 className="w-4 h-4 text-green-600" />
+              <CheckCircle2 className="w-4 h-4" style={{ color: "var(--oc-success)" }} />
               <div className="text-sm font-semibold text-foreground">📢 协作最终汇总（已发布）</div>
               {(session as any).publishedAt ? (
                 <span className="text-[11px] text-muted-foreground ml-auto">
@@ -315,10 +305,9 @@ export default function CoopSession() {
               ) : null}
             </div>
             <div
-              className="text-sm text-foreground whitespace-pre-wrap rounded p-3"
+              className="text-sm text-foreground whitespace-pre-wrap rounded p-3 bg-card"
               style={{
-                background: "rgba(255, 255, 255, 0.7)",
-                border: "1px solid rgba(34, 197, 94, 0.3)",
+                border: "1px solid color-mix(in oklab, var(--oc-success) 30%, transparent)",
                 maxHeight: 480,
                 overflowY: "auto",
                 overflowWrap: "anywhere",
@@ -350,7 +339,9 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
   const [draft, setDraft] = useState<string>(session.finalSummary || "");
   const [providerUsed, setProviderUsed] = useState<string>("");
   const [hasDraft, setHasDraft] = useState(Boolean(session.finalSummary));
-  const [customInstructions, setCustomInstructions] = useState<string>("");
+  // 优先读发起时从模板写入的汇总预设；没有则空串（走默认 SYSTEM_PROMPT）
+  const [customInstructions, setCustomInstructions] = useState<string>(session.consolidationPromptPreset || "");
+  const hasPreset = Boolean(session.consolidationPromptPreset);
 
   const consolidateMut = trpc.coop.consolidate.useMutation({
     onSuccess: (r) => {
@@ -402,7 +393,7 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
       {!isPublished && !isClosed && readyToConsolidate ? (
         <div className="mt-2 mb-3">
           <label className="text-xs text-muted-foreground mb-1 block">
-            自定义汇总指令（可选 · 留空走默认）
+            自定义汇总指令{hasPreset ? "（已从发起模板预填 · 可修改）" : "（可选 · 留空走默认）"}
           </label>
           <Textarea
             value={customInstructions}
@@ -441,7 +432,13 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
           {providerUsed ? <div className="text-[11px] text-muted-foreground mt-1">模型：{providerUsed}</div> : null}
           {!isPublished && !isClosed ? (
             <div className="mt-3 flex justify-end">
-              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => publishMut.mutate({ sessionId, finalSummary: draft })} disabled={publishMut.isPending || !draft.trim()}>
+              <Button
+                size="sm"
+                className="text-white"
+                style={{ background: "var(--oc-success)" }}
+                onClick={() => publishMut.mutate({ sessionId, finalSummary: draft })}
+                disabled={publishMut.isPending || !draft.trim()}
+              >
                 {publishMut.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
                 发布给所有成员
               </Button>
@@ -481,9 +478,9 @@ function InvitationActions({ requestId, originalSubtask, onAgree, onReject, busy
         </div>
       ) : (
         <div className="flex gap-2">
-          <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => onAgree()} disabled={busy}>接手 →</Button>
+          <Button size="sm" className="h-7 text-xs text-white" style={{ background: "var(--oc-success)" }} onClick={() => onAgree()} disabled={busy}>接手 →</Button>
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEditing(true)} disabled={busy}>修改子任务</Button>
-          <Button size="sm" variant="ghost" className="h-7 text-xs text-red-600 hover:bg-red-50" onClick={() => onReject()} disabled={busy}>拒绝</Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:bg-destructive/10" onClick={() => onReject()} disabled={busy}>拒绝</Button>
         </div>
       )}
     </div>

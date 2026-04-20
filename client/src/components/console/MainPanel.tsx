@@ -4,7 +4,6 @@ import { AgentPage } from "@/components/pages/AgentPage";
 import { SchedulePage } from "@/components/pages/SchedulePage";
 import { SettingsPage } from "@/components/pages/SettingsPage";
 import { DocsPage } from "@/components/pages/DocsPage";
-import { DreamsPage } from "@/components/pages/DreamsPage";
 import { CollabPage } from "@/components/pages/CollabPage";
 import type { PageKey } from "@/components/console/Sidebar";
 
@@ -56,7 +55,6 @@ export function MainPanel({
   }
   if (activePage === "agent") return <AgentPage adoptId={adoptId || ""} skills={safeSkills.data as any} />;
   if (activePage === "schedule") return <SchedulePage adoptId={adoptId || ""} />;
-  if (activePage === "dreams") return <DreamsPage adoptId={adoptId || ""} />;
   if (activePage === "docs") return <DocsPage />;
   if (activePage === "collab") return <CollabPage adoptId={adoptId || ""} />;
 

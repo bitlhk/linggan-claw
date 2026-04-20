@@ -1,4 +1,4 @@
-export type AgentPanel = "overview" | "files" | "tools" | "skills";
+export type AgentPanel = "overview" | "files";
 
 export type ToolPolicy = {
   adoptId: string;

@@ -1,12 +1,17 @@
 /**
  * CoopNew — 发起多人协作
- * URL: /coop/new
+ *
+ * 两种形态：
+ *   - <CoopNewForm />  嵌入式（CollabPage 内 list↔create 切换；onDone / onCancel 回调）
+ *   - <CoopNew />      独立路由 /coop/new（薄壳：sticky header + 自己管 navigation）
+ *
+ * 纯表单逻辑放在 CoopNewForm，独立路由只提供 wrapper 和默认回调。
  *
  * 流程：
- *   1. 填协作标题 + 原始消息
+ *   1. 选模板 / 填协作标题 / 原始消息 / 汇总预设
  *   2. 选人（从 coop.mentionCandidates 拉候选，按 group 过滤）
- *   3. 每人一个子任务（默认 = 原始消息）
- *   4. 发起 → coop.create → 跳 /coop/:sessionId
+ *   3. 每人一个子任务（默认 = 原始消息 或 模板 memberPrompt）
+ *   4. 发起 → coop.create → onDone(sessionId)
  */
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
@@ -18,7 +23,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Users as UsersIcon, Search, UserPlus, X, Bot, Sparkles } from "lucide-react";
+import { ArrowLeft, Loader2, Users as UsersIcon, Search, UserPlus, X, Sparkles } from "lucide-react";
+import { COOP_TEMPLATES, getTemplateById, renderVars } from "@/data/coopTemplates";
 
 type Candidate = {
   userId: number;
@@ -42,12 +48,20 @@ type PrefillPayload = {
   members?: Array<{ userId: number; userName?: string | null; adoptId?: string | null }>;
 };
 
-export default function CoopNew() {
-  const [, setLocation] = useLocation();
+type CoopNewFormProps = {
+  /** 发起成功的回调；接收新 sessionId。独立页默认导航到 /coop/:sid，嵌入页可切回 list 或也跳 */
+  onDone?: (sessionId: string) => void;
+  /** "取消 / 返回" 的回调。独立页 history.back，嵌入页 setMode("list") */
+  onCancel?: () => void;
+};
+
+export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
   const { user } = useAuth();
   const selfUserId = user?.id;
   const [title, setTitle] = useState("");
   const [originMessage, setOriginMessage] = useState("");
+  const [consolidationPromptPreset, setConsolidationPromptPreset] = useState("");
+  const [templateId, setTemplateId] = useState<string>("blank");
   const [keyword, setKeyword] = useState("");
   const [groupFilter, setGroupFilter] = useState<number | undefined>(undefined);
   const [selected, setSelected] = useState<SelectedMember[]>([]);
@@ -80,7 +94,7 @@ export default function CoopNew() {
   const createMut = trpc.coop.create.useMutation({
     onSuccess: (r) => {
       toast.success("协作已发起");
-      setLocation(`/coop/${r.sessionId}`);
+      onDone?.(r.sessionId);
     },
     onError: (e) => toast.error(e.message || "发起失败"),
   });
@@ -104,11 +118,9 @@ export default function CoopNew() {
     if (matched.length > 0) setSelected(matched);
     if (missing.length > 0) toast.warning(`部分成员未在候选列表中: ${missing.join(", ")}`);
     setPendingPrefillMembers(undefined);
-    // originMessage 此时已通过上一个 useEffect 设好；matched 的 subtask 跟随 originMessage
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawCandidates, pendingPrefillMembers]);
 
-  // 收集 group 列表做筛选 tabs
   const groups = useMemo(() => {
     const map = new Map<number, string>();
     (rawCandidates || []).forEach((c: Candidate) => {
@@ -117,11 +129,9 @@ export default function CoopNew() {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [rawCandidates]);
 
-  // 候选人（按 group 筛选 + 排除已选）
   const candidates = useMemo(() => {
     const excludedIds = new Set(selected.map((s) => s.cand.userId));
     const list = (rawCandidates || []).filter((c: Candidate) => !excludedIds.has(c.userId));
-    // 发起人置顶
     if (selfUserId !== undefined) {
       list.sort((a, b) => (a.userId === selfUserId ? -1 : b.userId === selfUserId ? 1 : 0));
     }
@@ -138,7 +148,7 @@ export default function CoopNew() {
     setSelected((prev) => prev.map((s) => (s.cand.userId === uid ? { ...s, subtask: v } : s)));
   };
 
-  // originMessage 变化时，未手动改过子任务的成员跟随更新（粗略：只更新等于上一个 originMessage 的）
+  // origin 变化时，未手动改过的子任务跟随更新
   const [prevOrigin, setPrevOrigin] = useState(originMessage);
   useEffect(() => {
     if (prevOrigin === originMessage) return;
@@ -146,7 +156,6 @@ export default function CoopNew() {
     setPrevOrigin(originMessage);
   }, [originMessage, prevOrigin]);
 
-  // 当前发起人的 adoptId（取第一个 active；真实演示可从现有登录态取）
   const { data: myClawData } = trpc.claw.me.useQuery(undefined, { retry: false });
   const creatorAdoptId = (myClawData as any)?.adoptId || "lgc-creator";
 
@@ -157,9 +166,11 @@ export default function CoopNew() {
     selected.every((s) => s.subtask.trim().length > 0);
 
   const handleSubmit = () => {
+    const preset = consolidationPromptPreset.trim();
     createMut.mutate({
       title: title.trim(),
       originMessage: originMessage.trim(),
+      consolidationPromptPreset: preset ? preset : undefined,
       creatorAdoptId,
       members: selected.map((s) => ({
         userId: s.cand.userId,
@@ -169,156 +180,264 @@ export default function CoopNew() {
     });
   };
 
-  // 白名单拦截
+  const selfCand = useMemo(
+    () => (rawCandidates as Candidate[] | undefined)?.find((c) => c.userId === selfUserId),
+    [rawCandidates, selfUserId]
+  );
+
+  // 应用模板 — 整块重置，不走 prevOrigin 跟随逻辑
+  const applyTemplate = (id: string) => {
+    if (id === templateId) return;
+    const tpl = getTemplateById(id);
+    if (!tpl) return;
+
+    const hasAnyInput =
+      title.trim().length > 0 ||
+      originMessage.trim().length > 0 ||
+      consolidationPromptPreset.trim().length > 0 ||
+      selected.some((s) => s.subtask.trim().length > 0);
+    if (hasAnyInput && id !== "blank") {
+      const ok = window.confirm(
+        `切换到「${tpl.name}」模板会覆盖当前的标题、原始描述、子任务和汇总指令。确定继续？`
+      );
+      if (!ok) return;
+    }
+
+    const vars = {
+      creatorName: user?.name || user?.email || undefined,
+      orgName: selfCand?.orgName || undefined,
+      groupName: selfCand?.groupName || undefined,
+    };
+    const renderedTitle = renderVars(tpl.title, vars);
+    const renderedOrigin = renderVars(tpl.originMessage, vars);
+    const renderedMemberPrompt = renderVars(tpl.memberPrompt, vars);
+    const renderedConsolidation = renderVars(tpl.consolidationPrompt, vars);
+
+    setTemplateId(id);
+    setTitle(renderedTitle);
+    setOriginMessage(renderedOrigin);
+    setConsolidationPromptPreset(renderedConsolidation);
+    setSelected((prev) => prev.map((s) => ({ ...s, subtask: renderedMemberPrompt || renderedOrigin })));
+    setPrevOrigin(renderedOrigin);
+  };
+
+  // 白名单拦截（嵌入 / 独立 都走这个；无 wrapper 高度，适配两种场景）
   if (wlQ.isLoading) {
-    return <div className="flex items-center justify-center h-screen"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+    return <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin" /></div>;
   }
   if (!wlQ.data?.whitelisted) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center">
+      <div className="flex flex-col items-center justify-center p-8 text-center">
         <div className="text-xl font-semibold text-foreground mb-2">协作功能灰度中</div>
         <div className="text-sm text-muted-foreground mb-6">当前版本仅对内部用户开放测试，请联系管理员加入白名单</div>
-        <Button variant="outline" onClick={() => setLocation("/")}><ArrowLeft className="w-4 h-4 mr-1" /> 返回首页</Button>
+        {onCancel ? (
+          <Button variant="outline" onClick={onCancel}><ArrowLeft className="w-4 h-4 mr-1" /> 返回</Button>
+        ) : null}
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50/30">
-      {/* 顶部 */}
+    <div className="max-w-5xl mx-auto space-y-5">
+      {/* 1. 协作描述 */}
+      <Card className="p-5 bg-card border-border/50">
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs text-foreground mb-1 block flex items-center gap-1.5">
+              <Sparkles className="w-3 h-3 text-primary" /> 场景模板
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              {COOP_TEMPLATES.map((t) => {
+                const active = templateId === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => applyTemplate(t.id)}
+                    className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                      active
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card text-foreground border-border hover:border-primary/60"
+                    }`}
+                    title={t.description}
+                  >
+                    {t.name}
+                  </button>
+                );
+              })}
+            </div>
+            {templateId !== "blank" ? (
+              <div className="text-[11px] text-muted-foreground mt-1.5">
+                💡 {getTemplateById(templateId)?.description}。切模板会整块覆盖下方内容。
+              </div>
+            ) : null}
+          </div>
+          <div>
+            <Label className="text-xs text-foreground mb-1 block">协作标题</Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如：Q1 合规报告" className="text-sm" />
+          </div>
+          <div>
+            <Label className="text-xs text-foreground mb-1 block">原始任务描述</Label>
+            <Textarea
+              value={originMessage}
+              onChange={(e) => setOriginMessage(e.target.value)}
+              placeholder="详细说明要协作完成的事情，未被手动修改的子任务会跟随这里更新"
+              className="min-h-[80px] text-sm"
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-foreground mb-1 block">
+              汇总指令（可选 · 发起时预设，汇总阶段仍可改）
+            </Label>
+            <Textarea
+              value={consolidationPromptPreset}
+              onChange={(e) => setConsolidationPromptPreset(e.target.value)}
+              placeholder="例如：按人员分组列出 / 篇末追加下周重点 / 严禁套话必须带数字..."
+              className="min-h-[60px] text-sm"
+              maxLength={1000}
+            />
+            <div className="text-[10px] text-muted-foreground mt-0.5 text-right">
+              {consolidationPromptPreset.length}/1000
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 2. 选人 */}
+      <Card className="p-5 bg-card border-border/50">
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-sm font-semibold text-foreground">选择协作成员</div>
+          <div className="text-xs text-muted-foreground">已选 {selected.length} 人</div>
+        </div>
+        <div className="text-[11px] text-muted-foreground mb-3">
+          💡 发起人（你）默认只负责最终整合。若<strong className="text-foreground">也想让自己的 agent 干一部分活</strong>，在候选列表里选中「你（我）」即可。
+        </div>
+
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative flex-1">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜索姓名/部门..." className="pl-8 text-sm h-8" />
+          </div>
+        </div>
+
+        {/* group 筛选 */}
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          <button onClick={() => setGroupFilter(undefined)} className={`text-[11px] px-2 py-0.5 rounded-full border ${groupFilter === undefined ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border"}`}>全部</button>
+          {groups.map((g) => (
+            <button key={g.id} onClick={() => setGroupFilter(g.id)} className={`text-[11px] px-2 py-0.5 rounded-full border ${groupFilter === g.id ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border"}`}>
+              {g.name}
+            </button>
+          ))}
+        </div>
+
+        {/* 候选人列表 */}
+        <div className="max-h-[240px] overflow-auto border border-border/40 rounded">
+          {candLoading ? (
+            <div className="p-4 text-center text-xs text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin inline mr-1" /> 加载中</div>
+          ) : candidates.length === 0 ? (
+            <div className="p-4 text-center text-xs text-muted-foreground">{(rawCandidates || []).length === 0 ? "没有候选人（需要 groupId > 0 的内部用户）" : "已全部选完 / 筛选无结果"}</div>
+          ) : (
+            candidates.map((c: Candidate) => (
+              <button key={c.userId} onClick={() => pickCandidate(c)} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-primary/5 border-b border-border/30 last:border-b-0 text-left">
+                <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center text-xs font-medium text-primary shrink-0">
+                  {(c.userName || "?").slice(0, 1)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
+                    {c.userName || "(未命名)"}
+                    {c.userId === selfUserId ? <span className="text-[10px] px-1.5 py-0 rounded-full bg-primary/15 text-primary font-normal">我 · 发起人</span> : null}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground truncate">
+                    {c.orgName || "—"}
+                    {c.groupName ? <><span className="mx-1">·</span><span className="text-primary">{c.groupName}</span></> : null}
+                    {c.adoptId ? <><span className="mx-1">·</span>🟢 Agent: {c.adoptId.slice(0, 12)}</> : <><span className="mx-1">·</span>⚪ 无灵虾</>}
+                  </div>
+                </div>
+                <UserPlus className="w-4 h-4 text-primary shrink-0" />
+              </button>
+            ))
+          )}
+        </div>
+      </Card>
+
+      {/* 3. 每人子任务（可编辑） */}
+      {selected.length > 0 ? (
+        <Card className="p-5 bg-card border-border/50">
+          <div className="text-sm font-semibold text-foreground mb-3">给每位成员的子任务（可分别调整）</div>
+          <div className="space-y-3">
+            {selected.map((s) => (
+              <div key={s.cand.userId} className="flex gap-3">
+                <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center text-xs font-medium text-primary shrink-0 mt-1">
+                  {(s.cand.userName || "?").slice(0, 1)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs">
+                      <span className="font-medium">{s.cand.userName}</span>
+                      <span className="mx-1">·</span>
+                      <span className="text-primary">{s.cand.groupName}</span>
+                      {(s.cand.adoptionStatus || s.cand.adoptId) ? <span className="ml-1">🤖</span> : <span className="ml-1 text-muted-foreground">（模拟 agent）</span>}
+                    </div>
+                    <button onClick={() => unpickCandidate(s.cand.userId)} className="text-muted-foreground hover:text-destructive">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <Textarea
+                    value={s.subtask}
+                    onChange={(e) => updateSubtask(s.cand.userId, e.target.value)}
+                    className="text-xs min-h-[60px]"
+                    placeholder="分配给该成员的具体子任务"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
+      {/* 4. 提交 */}
+      <div className="flex justify-end gap-2 pb-4">
+        {onCancel ? (
+          <Button variant="ghost" onClick={onCancel}>取消</Button>
+        ) : null}
+        <Button
+          onClick={handleSubmit}
+          disabled={!canSubmit || createMut.isPending}
+          className="bg-primary text-primary-foreground hover:bg-primary/90"
+        >
+          {createMut.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+          <Sparkles className="w-3 h-3 mr-1" /> 发起协作
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// 独立路由 /coop/new 的薄壳：sticky header + 默认 navigation
+export default function CoopNew() {
+  const [, setLocation] = useLocation();
+  const goBack = () => {
+    if (window.history.length > 1) window.history.back();
+    else setLocation("/");
+  };
+  return (
+    <div className="min-h-screen">
       <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border/50">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="sm" className="text-foreground" onClick={() => window.history.length > 1 ? window.history.back() : setLocation("/")}>
+          <Button variant="ghost" size="sm" className="text-foreground" onClick={goBack}>
             <ArrowLeft className="w-4 h-4 mr-1" /> 返回
           </Button>
           <div className="flex-1 flex items-center gap-2">
-            <UsersIcon className="w-5 h-5 text-blue-600" />
+            <UsersIcon className="w-5 h-5 text-primary" />
             <h1 className="text-lg font-semibold text-foreground">发起多人协作</h1>
             <span className="text-xs text-muted-foreground">·  多智能体并行 · 自动汇总</span>
           </div>
         </div>
       </div>
-
-      <div className="max-w-5xl mx-auto px-6 py-6 space-y-5">
-        {/* 1. 协作描述 */}
-        <Card className="p-5 bg-card border-border/50">
-          <div className="space-y-3">
-            <div>
-              <Label className="text-xs text-foreground mb-1 block">协作标题</Label>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如：Q1 合规报告" className="text-sm" />
-            </div>
-            <div>
-              <Label className="text-xs text-foreground mb-1 block">原始任务描述</Label>
-              <Textarea
-                value={originMessage}
-                onChange={(e) => setOriginMessage(e.target.value)}
-                placeholder="详细说明要协作完成的事情，未被手动修改的子任务会跟随这里更新"
-                className="min-h-[80px] text-sm"
-              />
-            </div>
-          </div>
-        </Card>
-
-        {/* 2. 选人 */}
-        <Card className="p-5 bg-card border-border/50">
-          <div className="flex items-center justify-between mb-1">
-            <div className="text-sm font-semibold text-foreground">选择协作成员</div>
-            <div className="text-xs text-muted-foreground">已选 {selected.length} 人</div>
-          </div>
-          <div className="text-[11px] text-muted-foreground mb-3">
-            💡 发起人（你）默认只负责最终整合。若<strong className="text-foreground">也想让自己的 agent 干一部分活</strong>，在候选列表里选中「你（我）」即可。
-          </div>
-          
-          <div className="flex items-center gap-2 mb-3">
-            <div className="relative flex-1">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜索姓名/部门..." className="pl-8 text-sm h-8" />
-            </div>
-          </div>
-
-          {/* group 筛选 */}
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            <button onClick={() => setGroupFilter(undefined)} className={`text-[11px] px-2 py-0.5 rounded-full border ${groupFilter === undefined ? "bg-blue-600 text-white border-blue-600" : "bg-card text-foreground border-border"}`}>全部</button>
-            {groups.map((g) => (
-              <button key={g.id} onClick={() => setGroupFilter(g.id)} className={`text-[11px] px-2 py-0.5 rounded-full border ${groupFilter === g.id ? "bg-blue-600 text-white border-blue-600" : "bg-card text-foreground border-border"}`}>
-                {g.name}
-              </button>
-            ))}
-          </div>
-
-          {/* 候选人列表 */}
-          <div className="max-h-[240px] overflow-auto border border-border/40 rounded">
-            {candLoading ? (
-              <div className="p-4 text-center text-xs text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin inline mr-1" /> 加载中</div>
-            ) : candidates.length === 0 ? (
-              <div className="p-4 text-center text-xs text-muted-foreground">{(rawCandidates || []).length === 0 ? "没有候选人（需要 groupId > 0 的内部用户）" : "已全部选完 / 筛选无结果"}</div>
-            ) : (
-              candidates.map((c: Candidate) => (
-                <button key={c.userId} onClick={() => pickCandidate(c)} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-blue-50 border-b border-border/30 last:border-b-0 text-left">
-                  <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-foreground shrink-0">
-                    {(c.userName || "?").slice(0, 1)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
-                      {c.userName || "(未命名)"}
-                      {c.userId === selfUserId ? <span className="text-[10px] px-1.5 py-0 rounded-full bg-blue-100 text-blue-700 font-normal">我 · 发起人</span> : null}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground truncate">
-                      {c.orgName || "—"}
-                      {c.groupName ? <><span className="mx-1">·</span><span className="text-blue-600">{c.groupName}</span></> : null}
-                      {c.adoptId ? <><span className="mx-1">·</span>🟢 Agent: {c.adoptId.slice(0, 12)}</> : <><span className="mx-1">·</span>⚪ 无灵虾</>}
-                    </div>
-                  </div>
-                  <UserPlus className="w-4 h-4 text-blue-600 shrink-0" />
-                </button>
-              ))
-            )}
-          </div>
-        </Card>
-
-        {/* 3. 每人子任务（可编辑） */}
-        {selected.length > 0 ? (
-          <Card className="p-5 bg-card border-border/50">
-            <div className="text-sm font-semibold text-foreground mb-3">给每位成员的子任务（可分别调整）</div>
-            <div className="space-y-3">
-              {selected.map((s) => (
-                <div key={s.cand.userId} className="flex gap-3">
-                  <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-xs font-medium text-blue-700 shrink-0 mt-1">
-                    {(s.cand.userName || "?").slice(0, 1)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="text-xs">
-                        <span className="font-medium">{s.cand.userName}</span>
-                        <span className="mx-1">·</span>
-                        <span className="text-blue-600">{s.cand.groupName}</span>
-                        {(s.cand.adoptionStatus || s.cand.adoptId) ? <span className="ml-1 text-green-600">🤖</span> : <span className="ml-1 text-muted-foreground">（模拟 agent）</span>}
-                      </div>
-                      <button onClick={() => unpickCandidate(s.cand.userId)} className="text-muted-foreground hover:text-red-600">
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <Textarea
-                      value={s.subtask}
-                      onChange={(e) => updateSubtask(s.cand.userId, e.target.value)}
-                      className="text-xs min-h-[60px]"
-                      placeholder="分配给该成员的具体子任务"
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        ) : null}
-
-        {/* 4. 提交 */}
-        <div className="flex justify-end gap-2 pb-8">
-          <Button variant="ghost" onClick={() => setLocation("/")}>取消</Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit || createMut.isPending} className="bg-blue-600 hover:bg-blue-700">
-            {createMut.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-            <Sparkles className="w-3 h-3 mr-1" /> 发起协作
-          </Button>
-        </div>
+      <div className="px-6 py-6">
+        <CoopNewForm
+          onDone={(sid) => setLocation(`/coop/${sid}`)}
+          onCancel={goBack}
+        />
       </div>
     </div>
   );

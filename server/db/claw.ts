@@ -39,6 +39,35 @@ export async function getCurrentClawByUserId(userId: number): Promise<ClawAdopti
 }
 
 /**
+ * 列出用户所有活跃的虾（支持多 runtime: OpenClaw lgc-* / Hermes lgh-*）
+ * orderBy: OpenClaw (lgc-) 优先，其次按 id 升序（老虾在前）
+ */
+export async function listClawsByUserId(userId: number): Promise<ClawAdoption[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  try {
+    const rows = await db
+      .select()
+      .from(clawAdoptions)
+      .where(and(eq(clawAdoptions.userId, userId), inArray(clawAdoptions.status, ["creating", "active", "expiring"])))
+      .orderBy(clawAdoptions.id);
+
+    // Stable sort: lgc-* 先（老 runtime），lgh-* 后
+    return rows.sort((a, b) => {
+      const aIsOpenClaw = a.adoptId.startsWith("lgc-");
+      const bIsOpenClaw = b.adoptId.startsWith("lgc-");
+      if (aIsOpenClaw && !bIsOpenClaw) return -1;
+      if (!aIsOpenClaw && bIsOpenClaw) return 1;
+      return Number(a.id) - Number(b.id);
+    });
+  } catch (error) {
+    console.error("[Database] Failed to list claws by userId:", error);
+    return [];
+  }
+}
+
+/**
  * 按 adoptId 获取领养记录
  */
 export async function getClawByAdoptId(adoptId: string): Promise<ClawAdoption | null> {

@@ -6,6 +6,7 @@ import { execSync } from "child_process";
 import { existsSync } from "fs";
 import {
   getCurrentClawByUserId,
+  listClawsByUserId,
   getClawByAdoptId,
   createClawAdoption,
   updateClawAdoptionStatus,
@@ -47,18 +48,24 @@ import {
 export const clawRouter = router({
     me: protectedProcedure.query(async ({ ctx }) => {
       const userId = ctx.user!.id;
-      const current = await getCurrentClawByUserId(userId);
-      const normalized = current
-        ? {
-            ...current,
-            entryUrl: String((current as any).entryUrl || "")
-              .replace("http://", "https://")
-              .replace(".demo.linggantest.top", ".demo.linggan.top"),
-          }
-        : null;
+      const all = await listClawsByUserId(userId);
+
+      const normalizeEntry = (c: any) => ({
+        ...c,
+        entryUrl: String(c?.entryUrl || "")
+          .replace("http://", "https://")
+          .replace(".demo.linggantest.top", ".demo.linggan.top"),
+        runtime: String(c?.adoptId || "").startsWith("lgh-") ? "hermes" : "openclaw",
+      });
+
+      const adoptions = all.map(normalizeEntry);
+      // 向后兼容：老前端读 adoption 取第一张（sort 保证 lgc-* 在前，行为跟 getCurrentClawByUserId 一致）
+      const primary = adoptions[0] || null;
+
       return {
-        hasClaw: !!normalized,
-        adoption: normalized,
+        hasClaw: adoptions.length > 0,
+        adoption: primary,  // 保留老字段供未升级前端使用
+        adoptions,          // 新字段，多 runtime 场景
       };
     }),
 
@@ -173,6 +180,41 @@ export const clawRouter = router({
         return { ok: true, count: input.ids.length };
       }),
 
+    // ── Hermes runtime 专属虾 provisioning（admin 手动发放） ──
+    // 灰度期给指定用户开一张 lgh-* 虾，跑本机 Hermes profile。
+    // 内部调 /root/linggan-platform/scripts/provision-hermes-claw.sh
+    // 脚本做：创 profile + 分配端口 + 启 systemd + INSERT claw_adoptions
+    adminProvisionHermesClaw: adminProcedure
+      .input(z.object({
+        userId: z.number().int().positive(),
+        // Regex 严格限死 profileName 字符范围，execFileSync 再兜底不走 shell
+        profileName: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9_-]{0,63}$/),
+      }))
+      .mutation(async ({ input }) => {
+        const { execFileSync } = await import("child_process");
+        const scriptPath = "/root/linggan-platform/scripts/provision-hermes-claw.sh";
+        if (!existsSync(scriptPath)) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "provisioning script not found" });
+        }
+        try {
+          const out = execFileSync(
+            "bash",
+            [scriptPath, input.profileName, String(input.userId)],
+            { encoding: "utf8", timeout: 60_000 },
+          );
+          return {
+            ok: true,
+            adoptId: `lgh-${input.profileName}`,
+            log: out.slice(-2000),
+          };
+        } catch (err: any) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `provisioning failed: ${String(err?.stdout || err?.stderr || err?.message || err).slice(0, 500)}`,
+          });
+        }
+      }),
+
     // ── 技能市场管理 ──
 
     // 管理员列表（从 DB + 文件系统）
@@ -276,6 +318,14 @@ export const clawRouter = router({
     marketInstall: protectedProcedure
       .input(z.object({ marketId: z.number(), adoptId: z.string().min(1).max(64) }))
       .mutation(async ({ input }) => {
+        // Hermes runtime 虾（lgh-*）的技能由 Hermes 自动管理，不支持手动安装市场技能。
+        // 相关 cp 路径对 Hermes 无效，前端也应该隐藏安装按钮；这里做硬拦截防止走到后面制造脏目录。
+        if (String(input.adoptId).startsWith("lgh-")) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Hermes 虾的技能由 Hermes 自动管理，暂不支持手动安装市场技能。请在 OpenClaw 虾中使用此功能。",
+          });
+        }
         const item = await getSkillMarketItem(input.marketId);
         if (!item || item.status !== "approved") throw new TRPCError({ code: "NOT_FOUND", message: "技能不存在或未上架" });
         const claw = await getClawByAdoptId(input.adoptId);
@@ -359,7 +409,7 @@ export const clawRouter = router({
         }
         if (input.defaultProfile) {
           await upsertSystemConfig(
-            { key: "claw_default_profile", value: input.defaultProfile, description: "新领养灵虾默认套餐：starter/plus/internal" },
+            { key: "claw_default_profile", value: input.defaultProfile, description: "新领养灵虾默认套餐（对外叫 Trial/Pro/Debug，内部值 starter/plus/internal）" },
             ctx.user!.id
           );
         }
@@ -764,6 +814,57 @@ export const clawRouter = router({
       .query(async ({ input }) => {
         const claw = await getClawByAdoptId(input.adoptId);
         if (!claw) throw new Error("灵虾实例不存在");
+
+        // Hermes runtime (lgh-*) 走专属 skill provider，读 /root/.hermes/profiles/<name>/skills/
+        if (String(input.adoptId).startsWith("lgh-")) {
+          const profileName = String(claw.agentId || "").replace(/^hermes:/, "").trim();
+          if (!profileName) {
+            return { shared: [], system: [], private: [], privateNotInstalled: [] };
+          }
+          const { listHermesSkills } = await import("../_core/hermes-skills");
+          const hermesSkills = listHermesSkills(profileName);
+          // 复用 SkillsPage 现有 UI 三栏（shared/system/private）：
+          //   bundled Hermes skills → system（"系统/平台技能"）
+          //   auto-generated skills → private（"我的技能"，强调"自进化"卖点）
+          const system = hermesSkills
+            .filter((s) => !s.meta?.createdByLLM)
+            .map((s) => ({
+              id: s.id,
+              label: s.name,
+              desc: s.description || "Hermes 自带技能",
+              emoji: s.emoji || "🧩",
+              source: "system" as const,
+              scope: "system" as const,
+              sourcePath: `/root/.hermes/profiles/${profileName}/skills/${s.id}`,
+              visible: true,
+              runnable: true,
+              reason: "",
+              active: true,
+              category: s.category,
+            }));
+          const privateSkills = hermesSkills
+            .filter((s) => s.meta?.createdByLLM)
+            .map((s) => ({
+              id: s.id,
+              label: `🌱 ${s.name}`,
+              desc: s.description || "Hermes 自动沉淀",
+              emoji: "🌱",
+              source: "private" as const,
+              scope: "private" as const,
+              sourcePath: `/root/.hermes/profiles/${profileName}/skills/${s.id}`,
+              visible: true,
+              runnable: true,
+              reason: "",
+              active: true,
+              category: s.category,
+            }));
+          return {
+            shared: [],
+            system,
+            private: privateSkills,
+            privateNotInstalled: [],
+          };
+        }
 
         const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
         const remoteUser = process.env.CLAW_REMOTE_USER || "root";
