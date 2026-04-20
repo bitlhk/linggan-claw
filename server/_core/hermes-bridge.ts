@@ -25,6 +25,8 @@
 
 import type { Request, Response } from "express";
 import * as httpMod from "node:http";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 export type HermesClaw = {
   adoptId: string;
@@ -48,7 +50,33 @@ const FRONTEND_TO_HERMES_PROVIDER: Record<string, string> = {
 // ── 坑 1 + 坑 3 辅助：每个 adoptId 的"当前 session 基线" ─────────────
 // - 坑 1（无记忆）：同一 adoptId 所有请求用同一 session_id，Hermes state.db 会累积 history
 // - 坑 3（/new reset）：/new 后把这个 map 的值换掉，下次请求就落到新 session_id
-const newSessionMarkers = new Map<string, string>();
+// 2026-04-20 review fix: 持久化到文件，避免 pm2 restart 后 /new 基线丢失、老 session 重接
+const APP_ROOT_BRIDGE = process.env.APP_ROOT || "/root/linggan-platform";
+const MARKERS_PATH = `${APP_ROOT_BRIDGE}/data/hermes-session-markers.json`;
+
+function loadMarkers(): Map<string, string> {
+  try {
+    if (!existsSync(MARKERS_PATH)) return new Map();
+    const j = JSON.parse(readFileSync(MARKERS_PATH, "utf8") || "{}");
+    return new Map(Object.entries(j).filter(([, v]) => typeof v === "string")) as Map<string, string>;
+  } catch {
+    return new Map();
+  }
+}
+
+function saveMarkers() {
+  try {
+    mkdirSync(dirname(MARKERS_PATH), { recursive: true });
+    const obj: Record<string, string> = {};
+    newSessionMarkers.forEach((v, k) => { obj[k] = v; });
+    writeFileSync(MARKERS_PATH, JSON.stringify(obj, null, 2), "utf8");
+  } catch (e) {
+    console.error("[HERMES-BRIDGE] failed to save session markers:", (e as any)?.message || e);
+  }
+}
+
+const newSessionMarkers: Map<string, string> = loadMarkers();
+
 function makeSessionId(adoptId: string): string {
   const marker = newSessionMarkers.get(adoptId) || "default";
   return `main-${adoptId}-${marker}`;
@@ -103,6 +131,7 @@ export async function forwardToHermes(
     res.end();
     // 把"当前 session"标记作废：下次请求自动使用新 main-session-id（见下方 makeSessionId）
     newSessionMarkers.set(claw.adoptId, Date.now().toString(36));
+    saveMarkers();  // 2026-04-20 持久化
     return;
   }
 

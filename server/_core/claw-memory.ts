@@ -12,7 +12,7 @@ export function registerMemoryRoutes(app: express.Express) {
 
   // ── Memory Write API (starter-safe, gateway-independent) ──
   const MEMORY_BUDGET_PATH = `${APP_ROOT}/data/claw-memory-budget.json`;
-  const LIMIT_SINGLE_WRITE = 64 * 1024; // 64KB
+  const LIMIT_SINGLE_WRITE = 256 * 1024; // 256KB (2026-04-20 提到 per-file 上限, 64KB 挡住了用户 80KB+ 记忆文件 replace 写入)
   const LIMIT_MEMORY_FILE = 256 * 1024; // MEMORY.md
   const LIMIT_DAILY_FILE = 128 * 1024; // memory/YYYY-MM-DD.md
   const LIMIT_NOTES_FILE = 256 * 1024; // notes/*.md
@@ -45,7 +45,7 @@ export function registerMemoryRoutes(app: express.Express) {
     if (row.d.k !== dayKey) row.d = { k: dayKey, c: 0, b: 0 };
 
     if (row.m.c >= 10) return { ok: false, reason: "rate_limited_minute" };
-    if (row.h.b + bytes > 2 * 1024 * 1024) return { ok: false, reason: "rate_limited_hour_bytes" };
+    if (row.h.b + bytes > 3 * 1024 * 1024) return { ok: false, reason: "rate_limited_hour_bytes" };  // 2026-04-20 2MB→3MB 对应 LIMIT_SINGLE_WRITE 提高
     if (row.d.b + bytes > 5 * 1024 * 1024) return { ok: false, reason: "storage_budget_exceeded" };
 
     row.m.c += 1; row.m.b += bytes;
