@@ -4,9 +4,11 @@ import type { ReactNode } from "react";
 const PAGE_LABELS: Record<string, string> = {
   chat: "聊天",
   skills: "技能",
-  agent: "代理",
+  weixin: "微信",
+  agent: "记忆",
+  workspace: "工作空间",
+  collab: "协作",
   schedule: "定时任务",
-  collab: "智能体协作",
   settings: "设置",
   docs: "文档",
 };

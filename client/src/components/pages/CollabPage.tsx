@@ -23,7 +23,7 @@ export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
   // 发起模式：占满 PageContainer 内容区，复用 CoopNewForm
   if (mode === "create") {
     return (
-      <PageContainer title="我的协作" icon={<Users size={18} />}>
+      <PageContainer title="协作" icon={<Users size={18} />}>
         <div className="flex items-center gap-2 mb-4">
           <Button variant="ghost" size="sm" onClick={() => setMode("list")} className="text-foreground">
             <ArrowLeft className="w-4 h-4 mr-1" /> 返回协作群组
@@ -40,7 +40,7 @@ export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
   }
 
   return (
-    <PageContainer title="我的协作" icon={<Users size={18} />}>
+    <PageContainer title="协作" icon={<Users size={18} />}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 }}>
         <div style={{ flex: 1 }} />
         <button

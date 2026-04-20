@@ -5,9 +5,9 @@ const items: { key: PageKey; label: string; icon: any }[] = [
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "weixin", label: "微信", icon: MessageCircle },
   { key: "agent", label: "记忆", icon: Brain },
+  { key: "collab", label: "协作", icon: Users },
   { key: "workspace", label: "工作空间", icon: FolderTree },
   { key: "schedule", label: "定时任务", icon: CalendarClock },
-  { key: "collab", label: "我的协作", icon: Users },
   { key: "settings", label: "设置", icon: Settings2 },
   { key: "docs", label: "文档", icon: BookOpen },
 ];
