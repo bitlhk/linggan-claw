@@ -89,11 +89,13 @@ export async function forwardToHermes(
   // 并返回本次不走 LLM，直接响应确认
   const msgTrim = String(message || "").trim();
   if (msgTrim === "/new" || msgTrim === "/reset") {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders?.();
+    if (!res.headersSent) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders?.();
+    }
     res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "✅ 已开始新对话（Hermes 会保留长期记忆，不过会话上下文已切换）。" } }] })}\n\n`);
     res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`);
     res.write(`data: ${JSON.stringify({ __stream_end: true })}\n\n`);
@@ -105,11 +107,13 @@ export async function forwardToHermes(
   }
 
   // SSE headers to the linggan client (same as claw-chat.ts openclaw path)
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.flushHeaders?.();
+  if (!res.headersSent) {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+  }
   if (res.socket) res.socket.setNoDelay(true);
 
   const writeData = (obj: any) => {

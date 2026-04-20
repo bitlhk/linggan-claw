@@ -1,6 +1,7 @@
 import { SkillsPage } from "@/components/pages/SkillsPage";
 import { WeixinPage } from "@/components/pages/WeixinPage";
 import { AgentPage } from "@/components/pages/AgentPage";
+import { WorkspacePage } from "@/components/pages/WorkspacePage";
 import { SchedulePage } from "@/components/pages/SchedulePage";
 import { SettingsPage } from "@/components/pages/SettingsPage";
 import { DocsPage } from "@/components/pages/DocsPage";
@@ -54,6 +55,7 @@ export function MainPanel({
     return <SkillsPage skills={safeSkills.data} canEdit={safeSkills.canEdit} pending={safeSkills.pending} onToggle={safeSkills.onToggle} adoptId={safeSkills.adoptId} />;
   }
   if (activePage === "agent") return <AgentPage adoptId={adoptId || ""} skills={safeSkills.data as any} />;
+  if (activePage === "workspace") return <WorkspacePage adoptId={adoptId || ""} />;
   if (activePage === "schedule") return <SchedulePage adoptId={adoptId || ""} />;
   if (activePage === "docs") return <DocsPage />;
   if (activePage === "collab") return <CollabPage adoptId={adoptId || ""} />;

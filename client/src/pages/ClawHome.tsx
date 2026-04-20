@@ -308,8 +308,12 @@ export default function ClawHome() {
                 <div className="space-y-3">
                   {adoptions.map((a: any) => {
                     const isHermes = String(a.adoptId || "").startsWith("lgh-");
-                    const runtimeLabel = isHermes ? "Hermes · 专业版" : `${brand.name}`;
-                    const runtimeBadge = isHermes ? "⚡ Hermes" : "🦐 OpenClaw";
+                    const runtimeLabel = isHermes ? "灵马" : `${brand.name}`;
+                    const runtimeBadge = isHermes ? (
+                      <><img src="/uploads/Hermes.png" alt="" className="w-3 h-3 inline-block mr-0.5 align-text-bottom" /> Hermes</>
+                    ) : (
+                      <>🦐 OpenClaw</>
+                    );
                     return (
                       <Card key={a.adoptId} className="border-border/50 bg-white/80 backdrop-blur-sm overflow-hidden">
                         <div className="p-5">

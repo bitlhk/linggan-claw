@@ -112,6 +112,10 @@ systemctl enable --now "hermes-http@${PROFILE}"
 sleep 2
 systemctl status "hermes-http@${PROFILE}" --no-pager | head -5
 
+echo "=== 3.5) systemctl enable --now hermes-cron@$PROFILE.timer (P0.3a addition 2026-04-20) ==="
+systemctl enable --now "hermes-cron@${PROFILE}.timer"
+systemctl is-active "hermes-cron@${PROFILE}.timer"
+
 # 4) Health probe
 echo "=== 4) curl /health ==="
 HEALTH=$(curl -sS -m 5 "http://127.0.0.1:${PORT}/health" || echo "FAILED")
