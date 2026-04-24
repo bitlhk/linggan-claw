@@ -317,7 +317,10 @@ export function registerWSProxy(server: Server) {
     gw.on("open", () => { console.log("[WS-GW] opened for", meta.adoptId); startHeartbeat(); });
     gw.on("error", (e) => { console.error("[WS] gw error:", meta.adoptId, e.message); });
     gw.on("close", (code) => {
-      if (client.readyState === WebSocket.OPEN) client.close(code);
+      if (client.readyState === WebSocket.OPEN) {
+        const safeCode = (typeof code === "number" && code >= 1000 && code <= 4999 && code !== 1005 && code !== 1006) ? code : 1011;
+        try { client.close(safeCode); } catch { /* swallow: invalid code / already closed */ }
+      }
     });
 
     // ── 浏览器消息 ──

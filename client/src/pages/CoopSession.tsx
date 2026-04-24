@@ -136,7 +136,7 @@ export default function CoopSession() {
   const sessionStatus = sessionStatusMeta(session.status);
 
   return (
-    <div className="min-h-screen bg-muted/40">
+    <div className="min-h-screen coop-session-themed">
       {/* 顶部 Header */}
       <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border/50">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-4">

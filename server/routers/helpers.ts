@@ -96,10 +96,12 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
       }
     }
 
-    // 去重（按 id）
+    // 去重（按 id）— 后续 isDefault 可覆盖先前条目的 flag，保留原 name/desc
     const uniq = new Map<string, ClawModelOption>();
     for (const item of out) {
-      if (!uniq.has(item.id)) uniq.set(item.id, item);
+      const prev = uniq.get(item.id);
+      if (!prev) uniq.set(item.id, item);
+      else if (item.isDefault && !prev.isDefault) uniq.set(item.id, { ...prev, isDefault: true });
     }
 
     if (uniq.size === 0) {

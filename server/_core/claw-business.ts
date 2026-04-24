@@ -1496,7 +1496,10 @@ export function registerBusinessRoutes(app: express.Express) {
         const runBody = JSON.stringify({ goal: msgStr, task_family: "quick_task", risk_level: "low" });
         const createResp = await fetch(`${traceUrl}/runs`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${process.env.HI_AGENT_API_KEY || ""}`,
+          },
           body: runBody,
         });
         const runData = await createResp.json();
@@ -1526,7 +1529,9 @@ export function registerBusinessRoutes(app: express.Express) {
           }
 
           try {
-            const statusResp = await fetch(`${traceUrl}/runs/${runId}`);
+            const statusResp = await fetch(`${traceUrl}/runs/${runId}`, {
+              headers: { "Authorization": `Bearer ${process.env.HI_AGENT_API_KEY || ""}` },
+            });
             const statusData = await statusResp.json();
             const state = statusData.state || "unknown";
 
@@ -1545,17 +1550,23 @@ export function registerBusinessRoutes(app: express.Express) {
                 return;
               }
 
-              // TRACE 完成后，直接调 DeepSeek 生成回答（不发额外提示）
+              // TRACE 完成后，调华为 MaaS GLM-5.1 生成回答
+              if (!process.env.HUAWEI_MAAS_API_KEY) {
+                sseDelta("❌ 未配置华为 MaaS 密钥（HUAWEI_MAAS_API_KEY），请联系管理员");
+                res.write(`data: [DONE]\n\n`);
+                res.end();
+                return;
+              }
 
               try {
-                const llmResp = await fetch("https://api.deepseek.com/v1/chat/completions", {
+                const llmResp = await fetch("https://api.modelarts-maas.com/v2/chat/completions", {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
-                    "Authorization": `Bearer ${process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY || ""}`,
+                    "Authorization": `Bearer ${process.env.HUAWEI_MAAS_API_KEY || ""}`,
                   },
                   body: JSON.stringify({
-                    model: "deepseek-chat",
+                    model: "glm-5.1",
                     messages: [
                       { role: "system", content: "你是灵枢·深度求索，一个专业的AI分析助手。请对用户的问题进行深入、结构化的分析，给出全面而有深度的回答。使用 markdown 格式，包含标题、要点、表格等。" },
                       { role: "user", content: msgStr },
@@ -2007,7 +2018,7 @@ export function registerBusinessRoutes(app: express.Express) {
     const gatewayPort = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
     const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";
 
-    const ALLOWED_MODELS = new Set(["glm5/glm-5", "glm5/glm-5.1", "deepseek/deepseek-chat", "hermes/hermes-agent"]);
+    const ALLOWED_MODELS = new Set(["glm5/glm-5.1", "deepseek/deepseek-chat", "hermes/hermes-agent", "maas/deepseek-v4-flash"]);
     const backendModel = (typeof model === "string" && ALLOWED_MODELS.has(model.trim())) ? model.trim() : "";
 
     const body = JSON.stringify({

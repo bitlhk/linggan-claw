@@ -40,6 +40,9 @@ function prettyModelName(modelId: string) {
   const m = String(modelId || "").trim();
   if (!m) return "default";
   if (m === "modelarts-maas/glm-5" || m === "glm5/glm-5" || m === "glm5/glm-5.1" || m === "modelarts-maas/glm-5.1") return "GLM-5.1";
+  if (m === "maas/deepseek-v4-flash") return "DeepSeek-V4-Flash";
+  if (m === "deepseek/deepseek-chat") return "DeepSeek-V4-Flash";
+  if (m === "deepseek/deepseek-v4-pro") return "DeepSeek-V4-Pro";
   if (m.includes("/")) return m.split("/").pop() || m;
   return m;
 }

@@ -41,6 +41,7 @@ import {
   assertClawOwnerOrThrow,
   bumpClawSessionEpochBestEffort,
   applyClawSessionModelViaGatewayCommand,
+  setAgentModelInOpenclawConfig,
   provisionLingganClawInstance,
   writeClawExecAudit,
 } from "./helpers";
@@ -121,6 +122,19 @@ export const clawRouter = router({
           sessionKey,
           modelId: input.modelId,
         });
+
+        // 2.5) 持久化到 openclaw.json agents.list[].model —— gateway 热加载后路由才真正切过来
+        const cfgApplied = setAgentModelInOpenclawConfig(String((claw as any).agentId || ""), input.modelId);
+
+        // 2.6) 持久化到 claw-model-overrides.json —— 刷新后下拉能记住用户选择
+        try {
+          const { readFileSync, writeFileSync, existsSync } = await import("fs");
+          const op = APP_ROOT + "/data/claw-model-overrides.json";
+          let obj: any = {};
+          if (existsSync(op)) { try { obj = JSON.parse(readFileSync(op, "utf8") || "{}"); } catch {} }
+          obj[input.adoptId] = input.modelId;
+          writeFileSync(op, JSON.stringify(obj, null, 2), "utf8");
+        } catch (e) { console.warn("[switchModel] overrides persist failed:", e); }
 
         return {
           ok: true,

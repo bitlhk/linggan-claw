@@ -4,7 +4,7 @@
  */
 import express from "express";
 import path from "path";
-import { existsSync, statSync, readdirSync, readFileSync, createReadStream, mkdirSync, writeFileSync, unlinkSync } from "fs";
+import { existsSync, statSync, readdirSync, readFileSync, createReadStream, mkdirSync, writeFileSync, unlinkSync, rmSync } from "fs";
 import { requireClawOwner, resolveRuntimeAgentId } from "./helpers";
 import { hermesFiles, type LinggFileNode, type FilesProviderCapabilities, type FilesProviderHandle, adoptIdToWorkspace } from "./hermes-files";
 
@@ -21,7 +21,7 @@ const MAX_LIST_DEPTH = 4;
 const MAX_FILES_PER_LIST = 500;
 const MAX_READ_BYTES = 10 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const MAX_FILES_PER_WORKSPACE = 200;
+const MAX_FILES_PER_WORKSPACE = 2000;
 
 // File type whitelist (defense against agent prompt-injection-via-uploaded-file)
 const ALLOWED_EXTENSIONS = new Set([
@@ -224,13 +224,18 @@ export function registerFilesRoutes(app: express.Express) {
     }
   });
 
-  // DELETE file — body { adoptId, path }
+  // DELETE file or directory — body { adoptId, path }
+  // 目录递归删除；safeJoin + workspace-root 防护避免越界
   app.delete("/api/claw/files/delete", async (req, res) => {
     try {
       const body = (req.body || {}) as any;
       const adoptId = String(body.adoptId || "").trim();
       const relPath = String(body.path || "").trim();
       if (!adoptId || !relPath) return res.status(400).json({ error: "adoptId and path required" });
+      const normalized = path.posix.normalize(relPath.replace(/\\/g, "/"));
+      if (normalized === "" || normalized === "." || normalized === "/" || normalized === ".." || normalized.startsWith("../")) {
+        return res.status(400).json({ error: "refuse to delete workspace root" });
+      }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       if (isHermesAdopt(adoptId)) {
@@ -241,11 +246,15 @@ export function registerFilesRoutes(app: express.Express) {
       const ws = openclawWorkspace(claw, adoptId);
       const abs = safeJoin(ws, relPath);
       if (!abs || !existsSync(abs)) return res.status(404).json({ error: "file not found" });
+      if (path.resolve(abs) === path.resolve(ws)) return res.status(400).json({ error: "refuse to delete workspace root" });
       const st = statSync(abs);
-      if (!st.isFile()) return res.status(400).json({ error: "not a file (refuse rmdir)" });
       try {
+        if (st.isDirectory()) {
+          rmSync(abs, { recursive: true, force: true });
+          return res.json({ runtime: "openclaw", ok: true, deleted: "directory" });
+        }
         unlinkSync(abs);
-        return res.json({ runtime: "openclaw", ok: true });
+        return res.json({ runtime: "openclaw", ok: true, deleted: "file" });
       } catch (e: any) {
         return res.status(500).json({ error: `delete failed: ${e?.message || e}` });
       }

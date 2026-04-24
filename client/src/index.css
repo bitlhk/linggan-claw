@@ -2732,3 +2732,29 @@ html:has(:root[data-theme-mode="light"]) body {
 :root[data-theme-mode="light"] .marketplace-grid .settings-card:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.04);
 }
+
+/* ──────────────────────────────────────────────────────────────
+   2026-04-23: /coop/:sessionId 页面主题对齐
+   
+   CoopSession.tsx 大量用 shadcn token（bg-muted / bg-card / text-foreground
+   / text-muted-foreground / border-border / bg-primary），但项目里 --muted
+   在 light 下被定义为文本色 #6e6e73（Apple secondaryLabel 风格），作为背景
+   会呈现为深灰，跟首页 CollabDrawer / CoopSubmitModal 的 --oc-* 体系不一致。
+   
+   此 scope 把 shadcn token 重映射到 --oc-* 品牌体系，不影响站内其它
+   使用 shadcn token 的组件（如 ui/table、ui/card 等）。
+   light/dark 双模式自动跟随 --oc-* 变量。
+   ────────────────────────────────────────────────────────────── */
+.coop-session-themed {
+  background: var(--oc-bg);
+  color: var(--oc-text-primary);
+  --background: var(--oc-bg);
+  --foreground: var(--oc-text-primary);
+  --card: var(--oc-card);
+  --card-foreground: var(--oc-text-primary);
+  --muted: var(--oc-bg);
+  --muted-foreground: var(--oc-text-secondary);
+  --border: var(--oc-border);
+  --primary: var(--oc-accent);
+  --primary-foreground: var(--oc-text-on-accent);
+}

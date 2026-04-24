@@ -265,7 +265,7 @@ export function registerChatStreamRoutes(app: express.Express) {
       rawProfile === "plus" || rawProfile === "internal" ? rawProfile : "starter";
 
     // 前端传入的模型 ID，白名单校验后通过 x-openclaw-model header 生效
-    const ALLOWED_CLAW_MODELS = new Set(["glm5/glm-5", "glm5/glm-5.1", "deepseek/deepseek-chat"]);
+    const ALLOWED_CLAW_MODELS = new Set(["glm5/glm-5", "glm5/glm-5.1", "deepseek/deepseek-chat", "maas/deepseek-v4-flash", "deepseek/deepseek-v4-pro"]);
     const reqModel = (typeof model === "string" && model.trim()) ? model.trim() : "";
     const backendModel = (reqModel && ALLOWED_CLAW_MODELS.has(reqModel)) ? reqModel : "";
 

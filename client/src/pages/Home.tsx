@@ -44,12 +44,15 @@ return s ? JSON.parse(s) : []; } catch { return []; }
     const m = String(modelId || "").trim();
     if (!m) return "default";
     if (m === "modelarts-maas/glm-5" || m === "glm5/glm-5" || m === "glm5/glm-5.1" || m === "modelarts-maas/glm-5.1") return "GLM-5.1";
+    if (m === "maas/deepseek-v4-flash") return "DeepSeek-V4-Flash";
+    if (m === "deepseek/deepseek-chat") return "DeepSeek-V4-Flash";
+    if (m === "deepseek/deepseek-v4-pro") return "DeepSeek-V4-Pro";
     if (m.includes("/")) return m.split("/").pop() || m;
     return m;
   };
     const [lingxiaMemoryEnabled, setLingxiaMemoryEnabled] = useState<"yes" | "no">("yes");
   const [lingxiaContextTurns, setLingxiaContextTurns] = useState(20);
-  const [lingxiaModelId, setLingxiaModelId] = useState("glm5/glm-5.1");
+  const [lingxiaModelId, setLingxiaModelId] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768);
   const [openclawVersion, setOpenclawVersion] = useState("v2026.3.27");

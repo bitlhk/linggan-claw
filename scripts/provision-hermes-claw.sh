@@ -88,13 +88,23 @@ if [[ "$PORT" -lt 8644 ]]; then PORT=8644; fi
 echo "allocated port = $PORT"
 
 # 1) Create Hermes profile
-echo "=== 1) hermes profile create $PROFILE --clone ==="
+echo "=== 1) hermes profile create $PROFILE ==="
 cd "$HERMES_ROOT"
-HERMES_HOME="$HERMES_HOME_ROOT" ./venv/bin/hermes profile create "$PROFILE" --clone
+HERMES_HOME="$HERMES_HOME_ROOT" ./venv/bin/hermes profile create "$PROFILE"
 if [[ ! -d "$PROFILE_DIR" ]]; then
   echo "ERROR: profile create did not produce $PROFILE_DIR"
   exit 1
 fi
+
+# 1.5) Apply canonical template (glm-5.1 + docker terminal sandbox)
+# 2026-04-20: replaces the old `hermes profile create --clone` path, which
+# inherited the stale default config (DeepSeek-only, no docker sandbox).
+# Template: /root/linggan-platform/configs/hermes-profile-template.yaml
+echo "=== 1.5) apply canonical template ==="
+cp /root/linggan-platform/configs/hermes-profile-template.yaml "$PROFILE_DIR/config.yaml"
+grep "^HUAWEI_MAAS_API_KEY=" /root/.hermes/profiles/lihongkun/.env >> "$PROFILE_DIR/.env"
+echo "  wrote $PROFILE_DIR/config.yaml (glm-5.1 + docker sandbox)"
+echo "  appended HUAWEI_MAAS_API_KEY to $PROFILE_DIR/.env"
 
 # 2) Write per-profile env (port)
 echo "=== 2) write $PROFILE_DIR/hermes-http.env ==="

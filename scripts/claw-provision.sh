@@ -49,8 +49,13 @@ if ! command -v openclaw >/dev/null 2>&1; then
 fi
 
 OPENCLAW_HOME_DIR="${CLAW_OPENCLAW_HOME:-$HOME/.openclaw}"
-WORKSPACE_ROOT="${CLAW_WORKSPACE_ROOT:-$OPENCLAW_HOME_DIR/workspace-}"
-WORKSPACE_DIR="$WORKSPACE_ROOT/$AGENT_ID"
+# 2026-04-23 fix: CLAW_OPENCLAW_HOME 在 .env 被设为 /root（非 $HOME/.openclaw 默认），
+# 原写法 $OPENCLAW_HOME_DIR/workspace-/$AGENT_ID 产出 /root/workspace-/trial_lgc-X，
+# 与 Node 侧读的 /root/.openclaw/workspace-X 不一致，导致前端看不到文件 + 技能安装失效
+# 规范化：不论 env 设为 $HOME 还是 $HOME/.openclaw，都产出 <.openclaw>/workspace-<AGENT_ID>
+_OC_DOTDIR="${OPENCLAW_HOME_DIR%/.openclaw}/.openclaw"
+WORKSPACE_ROOT="${CLAW_WORKSPACE_ROOT:-$_OC_DOTDIR/workspace}"
+WORKSPACE_DIR="$WORKSPACE_ROOT-$AGENT_ID"
 AGENT_MODEL="${CLAW_AGENT_MODEL:-}"
 
 mkdir -p "$WORKSPACE_DIR"
@@ -179,9 +184,13 @@ fi
 
 
 # === 写入 tools profile 到 openclaw.json（按套餐）===
-OPENCLAW_JSON="${OPENCLAW_HOME_DIR}/openclaw.json"
+# 2026-04-23 fix: 与 workspace 路径同根问题，OPENCLAW_HOME_DIR=/root 时原路径
+# /root/openclaw.json 不存在，Python 块永远 skip，导致 --profile 参数失效、
+# trial 用户实际跑在无 deny 的全权限下。
+OPENCLAW_JSON="${_OC_DOTDIR}/openclaw.json"
 if [[ -f "$OPENCLAW_JSON" ]]; then
-  python3 - "$OPENCLAW_JSON" "$AGENT_ID" "$PROFILE" <<'PY'
+  # || echo: 写失败只警告不中断 provision（openclaw.json 被并发改动的极端情况）
+  python3 - "$OPENCLAW_JSON" "$AGENT_ID" "$PROFILE" <<'PY' || echo "[WARN] tools profile write failed for $AGENT_ID" >&2
 import json, sys
 path, agent_id, profile = sys.argv[1], sys.argv[2], sys.argv[3]
 

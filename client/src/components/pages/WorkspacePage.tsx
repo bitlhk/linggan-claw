@@ -15,6 +15,23 @@ type FileNode = { name: string; path: string; type: "file" | "directory"; size?:
 type Capabilities = { supportsList: boolean; supportsRead: boolean; supportsDownload: boolean; supportsUpload: boolean; supportsDelete: boolean; maxUploadBytes: number };
 type ListResp = { runtime: string; capabilities: Capabilities; files: FileNode[] };
 
+// Parse response safely: 当上游反代（nginx 413/502 等）返回 HTML 错误页时，
+// 避免 r.json() 抛 "Unexpected token '<'"，改为提取可读信息。
+async function readResponse(r: Response): Promise<{ data: any; errorText: string | null }> {
+  const ct = r.headers.get("content-type") || "";
+  if (ct.includes("application/json")) {
+    try {
+      return { data: await r.json(), errorText: null };
+    } catch {
+      return { data: null, errorText: `响应解析失败 (${r.status})` };
+    }
+  }
+  const text = (await r.text().catch(() => "")).trim();
+  const titleMatch = text.match(/<title>([^<]+)<\/title>/i);
+  const preview = titleMatch ? titleMatch[1] : (text.slice(0, 80) || r.statusText || "unknown");
+  return { data: null, errorText: `${r.status} ${preview}` };
+}
+
 function formatSize(bytes?: number): string {
   if (bytes === undefined || bytes === null) return "-";
   if (bytes < 1024) return `${bytes}B`;
@@ -120,9 +137,9 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
           contentBase64: base64,
         }),
       });
-      const d = await r.json();
+      const { data: d, errorText } = await readResponse(r);
       if (!r.ok) {
-        setUploadError(d?.error || `upload ${r.status}`);
+        setUploadError(d?.error || errorText || `upload ${r.status}`);
         return;
       }
       await load();
@@ -135,7 +152,10 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
 
   const deleteFile = async (file: FileNode) => {
     if (!caps?.supportsDelete) return;
-    if (!window.confirm(`确定删除 ${file.path}?`)) return;
+    const prompt = file.type === "directory"
+      ? `确定删除文件夹 ${file.path}/ 及其所有内容？此操作不可撤销。`
+      : `确定删除 ${file.path}?`;
+    if (!window.confirm(prompt)) return;
     try {
       const r = await fetch("/api/claw/files/delete", {
         method: "DELETE",
@@ -143,9 +163,9 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ adoptId, path: file.path }),
       });
-      const d = await r.json();
+      const { data: d, errorText } = await readResponse(r);
       if (!r.ok) {
-        setError(d?.error || `delete ${r.status}`);
+        setError(d?.error || errorText || `delete ${r.status}`);
         return;
       }
       await load();
@@ -276,27 +296,25 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
                   <td className="text-right px-3 py-2 text-xs text-muted-foreground">{f.type === "directory" ? "-" : formatSize(f.size)}</td>
                   <td className="text-left px-3 py-2 text-xs text-muted-foreground">{formatTime(f.modifiedAt)}</td>
                   <td className="text-right px-3 py-2">
-                    {f.type === "file" && (
-                      <div className="inline-flex gap-1">
-                        {isPreviewable(f.name) && caps?.supportsRead && (
-                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); previewFile(f); }} className="h-7 px-2 text-xs gap-1">
-                            <Eye className="w-3 h-3" /> 预览
+                    <div className="inline-flex gap-1">
+                      {f.type === "file" && isPreviewable(f.name) && caps?.supportsRead && (
+                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); previewFile(f); }} className="h-7 px-2 text-xs gap-1">
+                          <Eye className="w-3 h-3" /> 预览
+                        </Button>
+                      )}
+                      {f.type === "file" && caps?.supportsDownload && (
+                        <a href={downloadUrl(f)} download={f.name} onClick={(e) => e.stopPropagation()}>
+                          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1">
+                            <Download className="w-3 h-3" /> 下载
                           </Button>
-                        )}
-                        {caps?.supportsDownload && (
-                          <a href={downloadUrl(f)} download={f.name} onClick={(e) => e.stopPropagation()}>
-                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1">
-                              <Download className="w-3 h-3" /> 下载
-                            </Button>
-                          </a>
-                        )}
-                        {caps?.supportsDelete && (
-                          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); deleteFile(f); }} className="h-7 px-2 text-xs gap-1 text-red-500 hover:text-red-700 hover:bg-red-50">
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                        </a>
+                      )}
+                      {caps?.supportsDelete && (
+                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); deleteFile(f); }} className="h-7 px-2 text-xs gap-1 text-red-500 hover:text-red-700 hover:bg-red-50">
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

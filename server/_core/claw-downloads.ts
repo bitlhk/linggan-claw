@@ -134,10 +134,10 @@ export function registerDownloadRoutes(app: express.Express) {
 
   // GET /api/claw/files/download?token=xxx
   // 验证签名 token，不查 session，直接返回文件
-  app.get("/api/claw/files/download", async (req, res) => {
+  app.get("/api/claw/files/download", async (req, res, next) => {
     try {
       const rawToken = String(req.query.token || "");
-      if (!rawToken) return sendError(res, "BAD_REQUEST", "token required");
+      if (!rawToken) return next();
 
       const dotIdx = rawToken.lastIndexOf(".");
       if (dotIdx < 0) return sendError(res, "BAD_REQUEST", "invalid token format");

@@ -43,6 +43,7 @@ const DEFAULT_HERMES_PORT = 8643;
 // MiniMax 暂无 key，返回 null 让 bridge 回退到默认 provider。
 const FRONTEND_TO_HERMES_PROVIDER: Record<string, string> = {
   "glm5": "huawei-maas",
+  "maas": "huawei-maas",
   "deepseek": "deepseek",
   // "minimax-portal": 需要 MiniMax API key，暂未配
 };
