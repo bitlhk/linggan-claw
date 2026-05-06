@@ -19,6 +19,7 @@ import {
   Shield,
   Ban,
   Settings,
+  Building2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useLocation } from "wouter";
@@ -44,6 +45,7 @@ import { IpLogsTab } from "./IpLogsTab";
 import { SecurityTab } from "./SecurityTab";
 import { IpManagementTab } from "./IpManagementTab";
 import { SettingsTab } from "./SettingsTab";
+import { CollaborationTab } from "./CollaborationTab";
 
 export default function Admin() {
   const [, setLocation] = useLocation();
@@ -317,6 +319,10 @@ export default function Admin() {
                   <Zap className="w-4 h-4" />
                   业务能力
                 </TabsTrigger>
+                <TabsTrigger value="collaboration" className="gap-2">
+                  <Building2 className="w-4 h-4" />
+                  组织协作
+                </TabsTrigger>
                 <TabsTrigger value="settings" className="gap-2">
                   <Settings className="w-4 h-4" />
                   设置
@@ -367,6 +373,10 @@ export default function Admin() {
 
               <TabsContent value="biz-agents" className="space-y-4">
                 <BizAgentsPanel />
+              </TabsContent>
+
+              <TabsContent value="collaboration" className="space-y-4">
+                <CollaborationTab />
               </TabsContent>
 
               <TabsContent value="settings">

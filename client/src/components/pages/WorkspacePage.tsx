@@ -206,14 +206,14 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
   return (
     <PageContainer title="工作空间">
       <div className="flex items-center gap-2 mb-3">
-        <Button size="sm" variant="outline" onClick={load} disabled={loading} className="gap-1.5">
+        <Button size="sm" variant="outline" onClick={load} disabled={loading} className="gap-1.5 lingxia-soft-action">
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           刷新
         </Button>
         {caps?.supportsUpload && (
           <label className="inline-flex">
             <input type="file" className="hidden" onChange={handleFilePick} disabled={uploading} />
-            <Button size="sm" variant="outline" disabled={uploading} className="gap-1.5" asChild>
+            <Button size="sm" variant="outline" disabled={uploading} className="gap-1.5 lingxia-soft-action" asChild>
               <span>
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                 {uploading ? "上传中" : "上传文件"}
@@ -238,8 +238,7 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
           <button
             type="button"
             onClick={() => setCurrentPath("")}
-            className="px-1.5 py-0.5 rounded hover:bg-muted"
-            style={{ color: currentPath ? "var(--oc-accent)" : "var(--oc-text-secondary)" }}
+            className={`px-1.5 py-0.5 lingxia-soft-link ${currentPath ? "lingxia-soft-link--accent" : ""}`}
           >
             workspace
           </button>
@@ -249,7 +248,7 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
               <button
                 type="button"
                 onClick={() => setCurrentPath(c.path)}
-                className="px-1.5 py-0.5 rounded hover:bg-muted font-mono"
+                className="px-1.5 py-0.5 lingxia-soft-link font-mono"
               >
                 {c.name}
               </button>
@@ -285,7 +284,7 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
             </thead>
             <tbody>
               {sorted.map((f) => (
-                <tr key={f.path} className={`border-t hover:bg-muted/30 ${f.type === "directory" ? "cursor-pointer" : ""}`} style={{ borderColor: "var(--border)" }} onClick={() => f.type === "directory" && setCurrentPath(f.path)}>
+                <tr key={f.path} className={`border-t lingxia-soft-row ${f.type === "directory" ? "cursor-pointer" : ""}`} style={{ borderColor: "var(--border)" }} onClick={() => f.type === "directory" && setCurrentPath(f.path)}>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       {f.type === "directory" ? <Folder className="w-4 h-4 text-blue-500" /> : <FileText className="w-4 h-4 text-gray-500" />}
@@ -298,19 +297,19 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
                   <td className="text-right px-3 py-2">
                     <div className="inline-flex gap-1">
                       {f.type === "file" && isPreviewable(f.name) && caps?.supportsRead && (
-                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); previewFile(f); }} className="h-7 px-2 text-xs gap-1">
+                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); previewFile(f); }} className="h-7 px-2 text-xs gap-1 lingxia-soft-action">
                           <Eye className="w-3 h-3" /> 预览
                         </Button>
                       )}
                       {f.type === "file" && caps?.supportsDownload && (
                         <a href={downloadUrl(f)} download={f.name} onClick={(e) => e.stopPropagation()}>
-                          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1">
+                          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1 lingxia-soft-action">
                             <Download className="w-3 h-3" /> 下载
                           </Button>
                         </a>
                       )}
                       {caps?.supportsDelete && (
-                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); deleteFile(f); }} className="h-7 px-2 text-xs gap-1 text-red-500 hover:text-red-700 hover:bg-red-50">
+                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); deleteFile(f); }} className="h-7 px-2 text-xs gap-1 lingxia-soft-action lingxia-soft-action--danger">
                           <Trash2 className="w-3 h-3" />
                         </Button>
                       )}

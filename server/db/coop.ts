@@ -5,7 +5,7 @@
  * - 老 1:1 协作（collab_requests.sessionId IS NULL）零影响
  * - 新 N 人协作（sessionId 存在）走这里
  */
-import { and, eq, desc, sql, inArray } from "drizzle-orm";
+import { and, eq, desc, sql, inArray, ne } from 'drizzle-orm';
 import {
   lxCoopSessions,
   lxCoopEvents,
@@ -14,8 +14,10 @@ import {
   users,
   lxGroups,
   registrations,
+  lxCollabUserProfiles,
 } from "../../drizzle/schema";
 import { getDb } from "./connection";
+import { canCollaborate, canViewCoopSession, requireActiveCoopProfile } from "./coop-identity";
 
 function genShortId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -43,12 +45,28 @@ export async function createCoopSession(params: CreateCoopSessionParams) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
 
+  const creatorProfile = await requireActiveCoopProfile(params.creatorUserId);
+  if (!creatorProfile.ok || !creatorProfile.value.spaceId) {
+    const reason = !creatorProfile.ok ? creatorProfile.error.kind : "space_missing";
+    throw new Error(`forbidden: creator collaboration profile is not active (${reason})`);
+  }
+
+  for (const member of params.members) {
+    const isAuto = await isAutoAgentUser(member.userId);
+    if (isAuto) continue;
+    const allowed = await canCollaborate(params.creatorUserId, member.userId);
+    if (!allowed.ok) {
+      throw new Error(`forbidden: user ${member.userId} cannot collaborate with ${params.creatorUserId} (${allowed.error.kind})`);
+    }
+  }
+
   const sessionId = "cs-" + genShortId();
 
   // 1) 父 session
   await db.insert(lxCoopSessions).values({
     id: sessionId,
     creatorUserId: params.creatorUserId,
+    spaceId: creatorProfile.value.spaceId,
     creatorAdoptId: params.creatorAdoptId,
     title: params.title,
     originMessage: params.originMessage,
@@ -149,6 +167,9 @@ export async function getCoopSession(sessionId: string, viewerUserId: number) {
   const db = await getDb();
   if (!db) return null;
 
+  const access = await canViewCoopSession(viewerUserId, sessionId);
+  if (!access.ok) return null;
+
   const sessionRows = await db
     .select()
     .from(lxCoopSessions)
@@ -183,7 +204,6 @@ export async function getCoopSession(sessionId: string, viewerUserId: number) {
 
   const isCreator = session.creatorUserId === viewerUserId;
   const isMember = members.some((m) => m.targetUserId === viewerUserId);
-  if (!isCreator && !isMember) return null;
 
   const events = await db
     .select()
@@ -196,7 +216,7 @@ export async function getCoopSession(sessionId: string, viewerUserId: number) {
     session,
     members,
     events: events.reverse(),
-    viewerRole: (isCreator ? "creator" : "member") as "creator" | "member",
+    viewerRole: access.value.role as "creator" | "member" | "admin",
     viewerUserId: viewerUserId,
     viewerIsCreator: isCreator,
     viewerIsMember: isMember,
@@ -256,10 +276,13 @@ export async function countPendingCoop(userId: number) {
 
 /**
  * @user mention 候选池
- * - 只列 users.groupId > 0（内部用户）
+ * - 仅返回 lx_collab_user_profiles.status = 'active' 的用户
+ * - 通过 collaboration space 过滤跨 space / null space
  * - 带活跃 adoption 的会返回 adoptId，没活跃 adoption 的 adoptId 为 null
+ * - 旧 users.groupId 仅作为展示字段，不再参与权限判断
  */
 export async function listMentionCandidates(params: {
+  viewerUserId: number;
   keyword?: string;
   groupId?: number;
   limit?: number;
@@ -270,6 +293,9 @@ export async function listMentionCandidates(params: {
   const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
 
   try {
+    const viewerProfile = await requireActiveCoopProfile(params.viewerUserId);
+    if (!viewerProfile.ok || !viewerProfile.value.spaceId) return [];
+
     let rows = await db
       .select({
         userId: users.id,
@@ -285,15 +311,23 @@ export async function listMentionCandidates(params: {
       .from(users)
       .leftJoin(lxGroups, eq(lxGroups.id, users.groupId))
       .leftJoin(registrations, eq(registrations.email, users.email))
+      .innerJoin(
+        lxCollabUserProfiles,
+        and(
+          eq(lxCollabUserProfiles.userId, users.id),
+          eq(lxCollabUserProfiles.status, 'active'),
+          eq(lxCollabUserProfiles.spaceId, viewerProfile.value.spaceId),
+        )
+      )
       .leftJoin(
         clawAdoptions,
         and(
           eq(clawAdoptions.userId, users.id),
-          inArray(clawAdoptions.status, ["creating", "active", "expiring"])
+          inArray(clawAdoptions.status, ['creating', 'active', 'expiring'])
         )
       )
-      .where(sql`${users.groupId} > 0`)
-      .limit(limit);
+      .where(ne(users.id, params.viewerUserId))
+      .limit(Math.max(limit * 4, 50));
 
     if (params.keyword?.trim()) {
       const q = params.keyword.trim().toLowerCase();
@@ -308,7 +342,8 @@ export async function listMentionCandidates(params: {
     if (params.groupId !== undefined && params.groupId !== null) {
       rows = rows.filter((r) => r.groupId === params.groupId);
     }
-    return rows;
+
+    return rows.slice(0, limit);
   } catch (err) {
     console.error("[coop] listMentionCandidates failed:", err);
     return [];
@@ -817,5 +852,14 @@ export async function listMyCoopSessions(userId: number, limit: number = 50) {
   `);
   // mysql2 返回 [rows, fields]; drizzle sql 包装后 rows 就是 array
   const data = (rows as any)[0] || rows;
-  return Array.isArray(data) ? data : [];
+  if (!Array.isArray(data)) return [];
+
+  const visibleRows = [];
+  for (const row of data) {
+    const sessionId = String(row.id || "");
+    if (!sessionId) continue;
+    const access = await canViewCoopSession(userId, sessionId);
+    if (access.ok) visibleRows.push(row);
+  }
+  return visibleRows;
 }

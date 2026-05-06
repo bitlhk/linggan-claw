@@ -23,7 +23,6 @@ import { LingxiaIcon } from "@/components/LingxiaIcon";
 
 // ── 引擎图标映射（只有用外部引擎的才显示动画）────────────────────────
 const ENGINE_ICON: Record<string, string> = {
-  "task-evolve": "/uploads/jiuwenclaw.png",
   "task-code":   "/uploads/claudecode.png",
   "task-slides": "/uploads/claudecode.png",
 };
@@ -32,7 +31,6 @@ function agentIcon(id: string, size = 16) {
   const style = { color: "var(--oc-accent)" };
   if (id === "task-ppt") return <Presentation size={size} style={style} />;
   if (id === "task-code") return <Code2 size={size} style={style} />;
-  if (id === "task-finance") return <TrendingUp size={size} style={style} />;
   if (id === "task-hermes") return <Dna size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-trace") return <Bot size={size} style={{ color: "#be1e2d" }} />;
   if (id === "task-stock") return <BarChart3 size={size} style={{ color: "var(--oc-danger)" }} />;
@@ -49,7 +47,7 @@ function AgentHeroAnimation({ agentId }: { agentId: string }) {
   if (!engineSrc) return null;
 
   // 引擎目标色
-  const targetColor = agentId === "task-evolve" ? "#7c3aed" : "#d97754";
+  const targetColor = "#d97754";
   // 5 个粒子，错开出发
   const dots = [0, 1, 2, 3, 4];
 
@@ -563,61 +561,6 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
                 共享空间 · 对话将沉淀为团队记忆
               </p>
             </>
-          ) : agent.id === "task-trading" ? (
-            <>
-              <div className="flex items-center justify-center" style={{ marginBottom: 4 }}>
-                <div style={{ position: "relative", width: 180, height: 80 }}>
-                  {[
-                    { x: 10, y: 0, label: "基本面", delay: "0s", emoji: "📊" },
-                    { x: 130, y: 0, label: "技术面", delay: "0.3s", emoji: "📈" },
-                    { x: 10, y: 50, label: "情绪面", delay: "0.6s", emoji: "💬" },
-                    { x: 130, y: 50, label: "新闻面", delay: "0.9s", emoji: "📰" },
-                  ].map((n, i) => (
-                    <div key={i} style={{
-                      position: "absolute", left: n.x, top: n.y,
-                      width: 44, height: 28, borderRadius: "var(--oc-radius-sm)",
-                      background: "rgba(201,100,66,0.08)", border: "1px solid rgba(201,100,66,0.2)",
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 2,
-                      fontSize: "var(--oc-text-2xs)", color: "var(--oc-text-secondary)",
-                      animation: `fadeInUp 0.5s ease-out ${n.delay} both`,
-                    }}>
-                      <span style={{ fontSize: "var(--oc-text-xs)" }}>{n.emoji}</span>
-                      <span>{n.label}</span>
-                    </div>
-                  ))}
-                  <div style={{
-                    position: "absolute", left: 62, top: 18,
-                    width: 56, height: 44, borderRadius: "var(--oc-radius-md)",
-                    background: "rgba(201,100,66,0.15)", border: "1px solid rgba(201,100,66,0.35)",
-                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                    animation: "fadeInUp 0.5s ease-out 1.2s both",
-                  }}>
-                    <span style={{ fontSize: 16 }}>{"⚖️"}</span>
-                    <span style={{ fontSize: 8, color: "var(--oc-text-secondary)" }}>多空辩论</span>
-                  </div>
-                </div>
-              </div>
-              <style>{`@keyframes fadeInUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }`}</style>
-              <p className="text-sm mt-2 font-semibold" style={{ color: "var(--oc-text-primary)" }}>灵犀 · 智能交易分析</p>
-              <p className="text-xs mt-1 max-w-[280px] mx-auto leading-relaxed" style={{ color: "var(--oc-text-secondary)" }}>多 Agent 辩论框架：4 层分析师 → 多空辩论 → 交易决策 → 风控评估</p>
-              <div className="mt-3 mx-auto max-w-[260px] rounded-lg px-3 py-2.5 text-left" style={{ background: "rgba(201,100,66,0.04)", border: "1px solid rgba(201,100,66,0.12)" }}>
-                <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
-                {[
-                  { q: "分析某大行股票", icon: "🏦" },
-                  { q: "分析贵州茅台 600519", icon: "🍶" },
-                  { q: "分析比亚迪 002594", icon: "🚗" },
-                  { q: "分析宁德时代 300750", icon: "🔋" },
-                ].map(({ q, icon }) => (
-                  <p key={q} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-center gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.7 }} onClick={() => { setInput(q); }}><span>{icon}</span>{q}</p>
-                ))}
-              </div>
-              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-                {["基本面", "技术面", "情绪面", "新闻面", "多空辩论", "风控评估"].map(s => (
-                  <span key={s} className="px-2 py-0.5 rounded-full text-[10px]" style={{ background: "rgba(201,100,66,0.08)", color: "#c96442", border: "1px solid rgba(201,100,66,0.15)" }}>{s}</span>
-                ))}
-              </div>
-              <p className="text-[10px] mt-3" style={{ color: "var(--oc-text-secondary)", opacity: 0.4 }}>A股/港股/美股 · AkShare 数据 · DeepSeek 驱动</p>
-            </>
           ) : agent.id === "task-stock" ? (
             <>
               <div className="flex items-center justify-center text-3xl">📈</div>
@@ -853,10 +796,13 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
           if (m.role === "user") return <div key={i} className="flex justify-end"><div className="max-w-[80%] rounded-2xl rounded-tr-sm px-3 py-2 text-sm lingxia-bubble-user lingxia-user-msg-text">{m.text}</div></div>;
           if (isPlaceholder) return <div key={i} className="flex items-start gap-2 lingxia-msg-fade"><span className="shrink-0 mt-1 flex items-center">{agentIcon(agent.id, 16)}</span><div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm flex items-center gap-2 lingxia-bubble-ai" style={{ color: "var(--oc-text-tertiary)" }}><span className="animate-pulse">●</span><span className="animate-pulse" style={{ animationDelay: "0.2s" }}>●</span><span className="animate-pulse" style={{ animationDelay: "0.4s" }}>●</span>{m.status && <span className="text-xs ml-1" style={{ opacity: 0.8 }}>{m.status}</span>}</div></div>;
           {
-            // Parse __files marker from remote agent output
-            const filesMatch = m.text.match(/<!-- __files:(\[.*?\]) -->/);
+            // Parse __files marker — 2026-04-27 fix double-encode bug (agent-side claude-code-proxy URL-encodes filenames; server-side keeps raw Chinese; take LAST = server-side authoritative)
+            const allFilesMatches = [...m.text.matchAll(/<!-- __files:(\[.*?\]) -->/g)];
+            const filesMatch = allFilesMatches.length > 0 ? allFilesMatches[allFilesMatches.length - 1] : null;
             const remoteFiles = filesMatch ? (() => { try { return JSON.parse(filesMatch[1]); } catch { return []; } })() : [];
             const cleanText = m.text.replace(/\n*<!-- __files:.*? -->/g, "").trim();
+            // Defensive: filename may already be URL-encoded (agent-side variant); decode once before re-encoding to avoid %25 double-encode
+            const tryDecodeName = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
             return <div key={i} className="flex items-start gap-2"><span className="shrink-0 mt-1 flex items-center">{agentIcon(agent.id, 16)}</span><div className="rounded-2xl rounded-tl-sm px-3 py-2 text-sm min-w-0 lingxia-bubble-ai" style={{ maxWidth: "85%" }}>
               {/* Hermes reasoning — 仅当内容与正文不同且足够长时折叠显示 */}
               {m.reasoning && m.reasoning.length > 20 && !m.text.includes(m.reasoning.slice(0, 30)) && <details className="mb-2" style={{ fontSize: 12 }}><summary style={{ color: "var(--oc-text-secondary)", cursor: "pointer", userSelect: "none" }}>💭 思考过程</summary><pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--oc-text-secondary)", opacity: 0.7, fontSize: "var(--oc-text-xs)", marginTop: 4, maxHeight: 200, overflow: "auto" }}>{m.reasoning}</pre></details>}
@@ -914,8 +860,8 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
                     {groups.map((g: any, fi: number) => {
                       const rf = g.preview;
                       const pptxFile = g.pptx || rf;
-                      const previewUrl = "/api/claw/remote-file?agentId=" + encodeURIComponent(agent.id) + "&file=" + encodeURIComponent(rf.url?.split("/").pop() || rf.name) + "&preview=1";
-                      const dlName = pptxFile.url?.split("/").pop() || pptxFile.name;
+                      const previewUrl = "/api/claw/remote-file?agentId=" + encodeURIComponent(agent.id) + "&file=" + encodeURIComponent(tryDecodeName(rf.url?.split("/").pop() || rf.name)) + "&preview=1";
+                      const dlName = tryDecodeName(pptxFile.url?.split("/").pop() || pptxFile.name);
                       const dlUrl = "/api/claw/business-files/download?agentId=" + encodeURIComponent(agent.id) + "&file=" + encodeURIComponent(dlName);
                       const displayName = String(pptxFile.name).replace(/\.pptx$/i, "");
                       const openFullscreen = () => setPreviewModalData({ previewUrl, downloadUrl: dlUrl, fileName: pptxFile.name });
@@ -959,7 +905,7 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
                       );
                     })}
                     {orphans.map((rf: any, oi: number) => {
-                      const dlUrl = "/api/claw/business-files/download?agentId=" + encodeURIComponent(agent.id) + "&file=" + encodeURIComponent(rf.url?.split("/").pop() || rf.name);
+                      const dlUrl = "/api/claw/business-files/download?agentId=" + encodeURIComponent(agent.id) + "&file=" + encodeURIComponent(tryDecodeName(rf.url?.split("/").pop() || rf.name));
                       return (
                         <div key={"orph-" + oi} className="rounded-xl px-3 py-2 flex items-center gap-2" style={{ border: "1px solid rgba(199,0,11,0.3)", background: "rgba(199,0,11,0.04)" }}>
                           <Presentation className="w-4 h-4 shrink-0" style={{ color: "#c7000b" }} />
@@ -1240,7 +1186,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                     {bizLoading ? <div className="flex items-center gap-2 py-3 justify-center"><Loader2 size={13} className="animate-spin" style={{ color: "var(--oc-text-secondary)" }} /><span className="text-xs" style={{ color: "var(--oc-text-secondary)" }}>加载中...</span></div> : (
                       <>
                         {/* 灵枢 · 核心引擎 */}
-                        {(() => { const items = bizAgents.filter(a => ["task-hermes","task-trace","task-evolve"].includes(a.id)); return items.length > 0 ? (
+                        {(() => { const items = bizAgents.filter(a => ["task-hermes","task-trace"].includes(a.id)); return items.length > 0 ? (
                           <CollabGroup id="lingshu" title="灵枢 · 核心引擎" icon={<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#be1e2d" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
@@ -1262,7 +1208,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                         ) : null; })()}
 
                         {/* 灵犀 · 分析研判 */}
-                        {(() => { const items = bizAgents.filter(a => ["task-stock","task-trading","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"].includes(a.id)); return items.length > 0 ? (
+                        {(() => { const items = bizAgents.filter(a => ["task-stock","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"].includes(a.id)); return items.length > 0 ? (
                           <CollabGroup id="lingxi" title="灵犀 · 分析研判" icon={<TrendingUp size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>
@@ -1273,7 +1219,7 @@ export function CollabDrawer({ onClose, adoptId }: { onClose: () => void; adoptI
                         ) : null; })()}
 
                         {/* 未分类 */}
-                        {(() => { const categorized = new Set(["task-hermes","task-trace","task-evolve","task-ppt","task-code","task-slides","task-stock","task-trading","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"]); const items = bizAgents.filter(a => !categorized.has(a.id)); return items.length > 0 ? (
+                        {(() => { const categorized = new Set(["task-hermes","task-trace","task-ppt","task-code","task-slides","task-stock","task-claim-ev","task-my-wealth","task-bond","task-credit-risk"]); const items = bizAgents.filter(a => !categorized.has(a.id)); return items.length > 0 ? (
                           <CollabGroup id="other" title="其他" icon={<Bot size={12} />} count={items.length} collapsed={collapsed} setCollapsed={setCollapsed}>
                             <div className="space-y-1.5">{items.map((a) => (<button key={a.id} onClick={() => setActiveAgent(a)} className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:opacity-80 active:scale-[0.99]" style={{ background: "var(--oc-bg-hover)", border: "1px solid var(--oc-border)", cursor: "pointer" }}>
                               <span className="flex items-center justify-center" style={{ width: 20, height: 20 }}>{agentIcon(a.id, 20)}</span>

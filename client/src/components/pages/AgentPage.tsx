@@ -1,35 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { PageContainer } from "@/components/console/PageContainer";
 import { FilesPanel } from "@/components/pages/agent/FilesPanel";
-import { OverviewPanel } from "@/components/pages/agent/OverviewPanel";
-import type { AgentPanel, CoreFileMeta, EffectiveResp, ToolPolicy } from "@/components/pages/agent/types";
-
-const PANELS: { id: AgentPanel; label: string }[] = [
-  { id: "overview", label: "概览" },
-  { id: "files", label: "文件" },
-];
-
-function getInitialPanel(): AgentPanel {
-  if (typeof window === "undefined") return "overview";
-  const q = new URLSearchParams(window.location.search).get("agentPanel");
-  if (q === "overview" || q === "files") return q;
-  const saved = localStorage.getItem("agent.activePanel") as AgentPanel | null;
-  if (saved && ["overview", "files"].includes(saved)) return saved;
-  return "overview";
-}
-
-function setPanelInUrl(panel: AgentPanel) {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  url.searchParams.set("agentPanel", panel);
-  window.history.replaceState({}, "", url.toString());
-  localStorage.setItem("agent.activePanel", panel);
-}
+import type { CoreFileMeta } from "@/components/pages/agent/types";
 
 export function AgentPage({ adoptId, skills }: { adoptId: string; skills?: { shared?: any[]; system?: any[]; private?: any[] } }) {
-  const [activePanel, setActivePanel] = useState<AgentPanel>(getInitialPanel());
-  const [policy, setPolicy] = useState<ToolPolicy | null>(null);
-  const [effective, setEffective] = useState<EffectiveResp | null>(null);
   const [coreFiles, setCoreFiles] = useState<CoreFileMeta[]>([]);
   const [loading, setLoading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -42,26 +16,15 @@ export function AgentPage({ adoptId, skills }: { adoptId: string; skills?: { sha
   const [fileLoading, setFileLoading] = useState(false);
   const [fileSaving, setFileSaving] = useState(false);
   const [fileFilter, setFileFilter] = useState("");
-
-  const sharedSkills = skills?.shared || [];
-  const systemSkills = skills?.system || [];
-  const privateSkills = skills?.private || [];
+  const [loadedFileKey, setLoadedFileKey] = useState("");
 
   const load = async () => {
     if (!adoptId) return;
     setLoading(true);
     setError("");
     try {
-      const [p, e, cf] = await Promise.all([
-        fetch(`/api/claw/tools/policy?adoptId=${encodeURIComponent(adoptId)}`),
-        fetch(`/api/claw/tools/effective?adoptId=${encodeURIComponent(adoptId)}`),
-        fetch(`/api/claw/core-files?adoptId=${encodeURIComponent(adoptId)}`),
-      ]);
-      if (!p.ok) throw new Error(`policy ${p.status}`);
-      if (!e.ok) throw new Error(`effective ${e.status}`);
+      const cf = await fetch(`/api/claw/core-files?adoptId=${encodeURIComponent(adoptId)}&t=${Date.now()}`, { cache: "no-store" });
       if (!cf.ok) throw new Error(`core-files ${cf.status}`);
-      setPolicy(await p.json());
-      setEffective(await e.json());
       const cfd = await cf.json();
       setCoreFiles(cfd?.files || []);
     } catch (err: any) {
@@ -71,26 +34,48 @@ export function AgentPage({ adoptId, skills }: { adoptId: string; skills?: { sha
     }
   };
 
+  useEffect(() => {
+    setCoreFiles([]);
+    setFileName("MEMORY.md");
+    setFileContent("");
+    setSavedContent("");
+    setFileEtag("");
+    setFileFilter("");
+    setPreviewOpen(false);
+    setLoadedFileKey("");
+  }, [adoptId]);
+
   useEffect(() => { load(); }, [adoptId]);
-  useEffect(() => { setPanelInUrl(activePanel); }, [activePanel]);
 
   const loadCoreFile = async (name: string) => {
     if (!adoptId) return;
+    setFileName(name);
     setFileLoading(true);
     try {
-      const r = await fetch(`/api/claw/core-files/read?adoptId=${encodeURIComponent(adoptId)}&name=${encodeURIComponent(name)}`);
+      const r = await fetch(`/api/claw/core-files/read?adoptId=${encodeURIComponent(adoptId)}&name=${encodeURIComponent(name)}&t=${Date.now()}`, { cache: "no-store" });
       if (!r.ok) throw new Error(`read ${r.status}`);
       const d = await r.json();
-      setFileName(name);
       setFileContent(d?.content || "");
       setSavedContent(d?.content || "");
       setFileEtag(d?.etag || "");
+      setLoadedFileKey(`${adoptId}:${name}`);
     } catch (e: any) {
       setError(e?.message || "读取文件失败");
     } finally {
       setFileLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!adoptId || fileLoading || coreFiles.length === 0) return;
+    const target =
+      coreFiles.find((f) => f.name === fileName)?.name ||
+      coreFiles.find((f) => f.name === "MEMORY.md")?.name ||
+      coreFiles[0]?.name;
+    if (!target) return;
+    if (loadedFileKey === `${adoptId}:${target}`) return;
+    void loadCoreFile(target);
+  }, [adoptId, coreFiles, fileName, loadedFileKey, fileLoading]);
 
   const saveCoreFile = async () => {
     if (!adoptId || !fileName) return;
@@ -147,59 +132,34 @@ export function AgentPage({ adoptId, skills }: { adoptId: string; skills?: { sha
     }
   };
 
-  const flatTools = useMemo(() => (effective?.groups || []).flatMap((g) => g.tools), [effective]);
-  const enabledTools = flatTools.filter((t) => t.runtimeAvailable).length;
+  const refreshAll = async () => {
+    await load();
+    if (fileName) await loadCoreFile(fileName);
+  };
+
   const dirty = fileContent !== savedContent;
 
   return (
     <PageContainer title="记忆">
-      <div className="console-tabs">
-        {PANELS.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => setActivePanel(p.id)}
-            className={`console-tab ${activePanel === p.id ? "active" : ""}`}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
+      {error && <div className="settings-card text-xs" style={{ color: "var(--banking-danger)" }}>{error}</div>}
 
-      {error && <div className="settings-card text-xs" style={{ color: "#ef4444" }}>{error}</div>}
-
-      {activePanel === "overview" && (
-        <OverviewPanel
-          adoptId={adoptId}
-          effective={effective}
-          policy={policy}
-          coreFiles={coreFiles}
-          sharedSkills={sharedSkills}
-          systemSkills={systemSkills}
-          privateSkills={privateSkills}
-          visibleTools={flatTools.length}
-          runnableTools={enabledTools}
-        />
-      )}
-
-      {activePanel === "files" && (
-        <FilesPanel
-          coreFiles={coreFiles}
-          fileFilter={fileFilter}
-          setFileFilter={setFileFilter}
-          refreshAll={load}
-          previewOpen={previewOpen}
-          setPreviewOpen={setPreviewOpen}
-          fileName={fileName}
-          loadCoreFile={loadCoreFile}
-          fileContent={fileContent}
-          setFileContent={setFileContent}
-          saveCoreFile={saveCoreFile}
-          fileSaving={fileSaving}
-          fileLoading={fileLoading}
-          dirty={dirty}
-          resetLocal={() => setFileContent(savedContent)}
-        />
-      )}
+      <FilesPanel
+        coreFiles={coreFiles}
+        fileFilter={fileFilter}
+        setFileFilter={setFileFilter}
+        refreshAll={refreshAll}
+        previewOpen={previewOpen}
+        setPreviewOpen={setPreviewOpen}
+        fileName={fileName}
+        loadCoreFile={loadCoreFile}
+        fileContent={fileContent}
+        setFileContent={setFileContent}
+        saveCoreFile={saveCoreFile}
+        fileSaving={fileSaving}
+        fileLoading={fileLoading}
+        dirty={dirty}
+        resetLocal={() => setFileContent(savedContent)}
+      />
 
     </PageContainer>
   );

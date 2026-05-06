@@ -1,4 +1,4 @@
-import { bigint, boolean, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { bigint, boolean, index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/mysql-core';
 
 /**
  * Core user table backing auth flow.
@@ -28,6 +28,50 @@ export const users = mysqlTable("users", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+
+/**
+ * Lingxia collaboration - collaboration space (v1 hard isolation boundary)
+ */
+export const lxCollabSpaces = mysqlTable('lx_collab_spaces', {
+  id: int('id').autoincrement().primaryKey(),
+  name: varchar('name', { length: 100 }).notNull(),
+  description: text('description'),
+  status: mysqlEnum('status', ['active', 'disabled']).default('active').notNull(),
+  sortOrder: int('sort_order').default(99).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow().notNull(),
+  updatedBy: int('updated_by'),
+}, (table) => ({
+  nameUniqueIdx: uniqueIndex('uk_lx_collab_spaces_name').on(table.name),
+}));
+
+export type LxCollabSpace = typeof lxCollabSpaces.$inferSelect;
+export type InsertLxCollabSpace = typeof lxCollabSpaces.$inferInsert;
+
+/**
+ * Lingxia collaboration - user collaboration identity profile
+ */
+export const lxCollabUserProfiles = mysqlTable('lx_collab_user_profiles', {
+  userId: int('user_id').primaryKey(),
+  realName: varchar('real_name', { length: 100 }),
+  organizationName: varchar('organization_name', { length: 200 }),
+  departmentName: varchar('department_name', { length: 200 }),
+  teamName: varchar('team_name', { length: 200 }),
+  spaceId: int('space_id'),
+  status: mysqlEnum('status', ['pending', 'active', 'disabled']).default('pending').notNull(),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow().notNull(),
+  updatedBy: int('updated_by'),
+}, (table) => ({
+  spaceStatusIdx: index('idx_lx_collab_user_profiles_space_status').on(table.spaceId, table.status),
+  organizationIdx: index('idx_lx_collab_user_profiles_org').on(table.organizationName),
+  departmentIdx: index('idx_lx_collab_user_profiles_dept').on(table.departmentName),
+  teamIdx: index('idx_lx_collab_user_profiles_team').on(table.teamName),
+}));
+
+export type LxCollabUserProfile = typeof lxCollabUserProfiles.$inferSelect;
+export type InsertLxCollabUserProfile = typeof lxCollabUserProfiles.$inferInsert;
 
 /**
  * 注册用户表 - 存储通过落地页注册的用户信息
@@ -415,7 +459,8 @@ export type InsertClawCollabRequest = typeof clawCollabRequests.$inferInsert;
  */
 export const lxCoopSessions = mysqlTable("lx_coop_sessions", {
   id: varchar("id", { length: 64 }).primaryKey(),
-  creatorUserId: int("creator_user_id").notNull(),
+  creatorUserId: int('creator_user_id').notNull(),
+  spaceId: int('space_id'),
   creatorAdoptId: varchar("creator_adopt_id", { length: 64 }).notNull(),
   title: varchar("title", { length: 200 }),
   originMessage: text("origin_message"),

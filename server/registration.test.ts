@@ -10,13 +10,17 @@ vi.mock("./db", () => ({
   recordVisit: vi.fn(),
   getAllVisitStats: vi.fn(),
   getVisitStatsByScenario: vi.fn(),
+  verifyEmailCode: vi.fn(),
 }));
 
-import { createRegistration, getRegistrationByEmail, getAllRegistrations, recordVisit } from "./db";
+import { createRegistration, getRegistrationByEmail, getAllRegistrations, recordVisit, verifyEmailCode } from "./db";
 
-function createMockContext(): TrpcContext {
+function createMockContext(opts?: { admin?: boolean }): TrpcContext {
+  const user: any = opts?.admin
+    ? { id: 1, role: "admin", name: "admin", email: "admin@test.com" }
+    : null;
   return {
-    user: null,
+    user,
     req: {
       protocol: "https",
       headers: {},
@@ -36,6 +40,7 @@ describe("registration.create", () => {
     const ctx = createMockContext();
     const caller = appRouter.createCaller(ctx);
 
+    vi.mocked(verifyEmailCode).mockResolvedValue(true);
     vi.mocked(getRegistrationByEmail).mockResolvedValue(undefined);
     vi.mocked(createRegistration).mockResolvedValue(1);
 
@@ -43,6 +48,7 @@ describe("registration.create", () => {
       name: "张三",
       company: "测试公司",
       email: "test@example.com",
+      verificationCode: "123456",
     });
 
     expect(result).toEqual({
@@ -61,6 +67,7 @@ describe("registration.create", () => {
     const ctx = createMockContext();
     const caller = appRouter.createCaller(ctx);
 
+    vi.mocked(verifyEmailCode).mockResolvedValue(true);
     vi.mocked(getRegistrationByEmail).mockResolvedValue({
       id: 5,
       name: "张三",
@@ -73,6 +80,7 @@ describe("registration.create", () => {
       name: "张三",
       company: "测试公司",
       email: "test@example.com",
+      verificationCode: "123456",
     });
 
     expect(result).toEqual({
@@ -149,7 +157,7 @@ describe("registration.list", () => {
   });
 
   it("returns all registrations", async () => {
-    const ctx = createMockContext();
+    const ctx = createMockContext({ admin: true });
     const caller = appRouter.createCaller(ctx);
 
     const mockRegistrations = [

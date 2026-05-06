@@ -194,7 +194,7 @@ if [[ -f "$OPENCLAW_JSON" ]]; then
 import json, sys
 path, agent_id, profile = sys.argv[1], sys.argv[2], sys.argv[3]
 
-DEFAULT_MODEL = "glm5/glm-5"
+DEFAULT_MODEL = "glm5/glm-5.1"  # 2026-04-27: 升级到当前生产版本，glm5/glm-5 已废弃
 
 profile_map = {
     # trial: 预备档位，给未来公网/培训客户用，此轮不默认触发

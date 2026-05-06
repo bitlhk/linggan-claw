@@ -222,7 +222,7 @@ export default function ClawHome() {
           </div>
           <div className="flex items-center gap-2">
             {user && (user as any)?.role === "admin" && (
-              <Button variant="ghost" size="sm" onClick={() => setLocation("/admin")} className="text-muted-foreground">
+              <Button variant="ghost" size="sm" onClick={() => setLocation("/admin")} className="lingxia-soft-action gap-1.5 px-3">
                 <Settings className="w-4 h-4 mr-1.5" />
                 管理
               </Button>
@@ -230,7 +230,7 @@ export default function ClawHome() {
             {user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="gap-2">
+                  <Button variant="ghost" size="sm" className="gap-2 lingxia-soft-action px-2.5">
                     <Avatar className="w-6 h-6">
                       <AvatarFallback className="text-xs bg-primary/10 text-primary">
                         {((user as any)?.name || "U")[0].toUpperCase()}

@@ -1,24 +1,18 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { PageContainer } from "@/components/console/PageContainer";
-import { Users, ArrowLeft } from "lucide-react";
+import { Users, ArrowLeft, Plus } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { sessionStatusMeta } from "@/lib/coopStatus";
 import { CoopNewForm } from "@/pages/CoopNew";
 import { Button } from "@/components/ui/button";
 
-type CollabTab = "coop";
 type PageMode = "list" | "create";
 
 export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
   const [, setLocationCoop] = useLocation();
-  const [activeTab, setActiveTab] = useState<CollabTab>("coop");
   const [mode, setMode] = useState<PageMode>("list");
-
-  const tabs: { key: CollabTab; label: string; icon: any }[] = [
-    { key: "coop", label: "协作群组", icon: Users },
-  ];
 
   // 发起模式：占满 PageContainer 内容区，复用 CoopNewForm
   if (mode === "create") {
@@ -41,46 +35,22 @@ export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
 
   return (
     <PageContainer title="协作" icon={<Users size={18} />}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 }}>
-        <div style={{ flex: 1 }} />
+      <div className="page-section-toolbar">
+        <div className="page-section-title">
+          <h2 className="page-section-title__main">协作群组</h2>
+          <p className="page-section-title__desc">多人协作、任务分发和自动汇总</p>
+        </div>
         <button
           onClick={() => setMode("create")}
-          className="inline-flex items-center gap-1.5 rounded-full text-xs text-white transition-opacity hover:opacity-90"
-          style={{
-            background: "var(--oc-accent)",
-            border: "1px solid var(--oc-accent)",
-            padding: "7px 16px",
-            fontWeight: 500,
-            boxShadow: "0 2px 6px color-mix(in oklab, var(--oc-accent) 30%, transparent)",
-          }}
+          className="page-primary-action"
           title="发起多人协作"
         >
-          + 发起多人协作
+          <Plus size={15} aria-hidden="true" />
+          发起多人协作
         </button>
       </div>
-      <div className="console-tabs">
-        {tabs.map(t => {
-          const Icon = t.icon;
-          const active = activeTab === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setActiveTab(t.key)}
-              className={`console-tab ${activeTab === t.key ? "active" : ""}`}
-              style={{
-                border: "1px solid var(--oc-border)",
-                background: active ? "var(--accent-subtle)" : "rgba(255,255,255,0.04)",
-                color: active ? "var(--oc-accent)" : "var(--oc-text-secondary)",
-              }}
-            >
-              <Icon size={12} />
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
 
-      {activeTab === "coop" && <CoopSessionsList onCreate={() => setMode("create")} />}
+      <CoopSessionsList onCreate={() => setMode("create")} />
     </PageContainer>
   );
 }

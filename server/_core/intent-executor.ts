@@ -4,35 +4,81 @@
  * 接收已分类的 intent + StreamWriter，执行具体操作。
  * 不做分类（分类在 intent-agent.ts），不关心传输协议（StreamWriter 抽象）。
  */
+import path from "path";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
 import type { StreamWriter } from "./stream-writer";
 
 const BASE = "http://127.0.0.1:5180";
 import { INTERNAL_API_KEY as INTERNAL_KEY } from "./constants";
+import type { ChannelId } from "@shared/types/cron";
+import type { SkillSource } from "@shared/types/skill";
+import { getBoundChannelsForAdopt, type BoundChannel } from "./cron/channel-binding-query";
+import { getChannelProvider, normalizeChannelId } from "./cron/channel-provider-registry";
+import { normalizeScheduleToolArgs } from "./cron/schedule-intent";
+import { APP_ROOT, sanitizeRelPath } from "./helpers";
+import { skillRegistry } from "./skills/skill-registry";
+import { parseSkillSourceFiles, sanitizeSkillId, type SkillSourceFile } from "./skills/skill-source";
 
-async function getUserChannels(adoptId: string): Promise<string[]> {
-  const channels: string[] = ["conversation"];
+function channelName(channelId: string): string {
+  if (channelId === "wechat" || channelId === "weixin") return "微信";
+  if (channelId === "feishu") return "飞书";
+  if (channelId === "wecom") return "企业微信";
+  return channelId;
+}
+
+function findBoundChannel(channels: BoundChannel[], channelId: ChannelId): BoundChannel | undefined {
+  return channels.find((channel) => channel.channelId === channelId);
+}
+
+async function resolveAdoptUserId(adoptId: string): Promise<number> {
   try {
-    const wxResp = await fetch(`${BASE}/api/claw/weixin/status?adoptId=${encodeURIComponent(adoptId)}`, { headers: { "X-Internal-Key": INTERNAL_KEY } });
-    const wxData = await wxResp.json() as any;
-    if (wxData?.bound) channels.push("weixin");
-  } catch {}
-  try {
-    const nResp = await fetch(`${BASE}/api/claw/notify/config?adoptId=${encodeURIComponent(adoptId)}`, { headers: { "X-Internal-Key": INTERNAL_KEY } });
-    const nData = await nResp.json() as any;
-    const cfg = nData?.config || {};
-    // config 是扁平结构: { type, corpId, agentId, secret, webhook }
-    // type="wecom" 且 corpId 非空 → 企业微信已配置
-    // type="feishu" 或 webhook 非空 → 飞书/Webhook 已配置
-    const cfgType = String(cfg.type || "none");
-    if ((cfgType === "wecom" || cfgType === "wechat_work") && cfg.corpId) channels.push("wecom");
-    if (cfgType === "feishu" && cfg.webhook) channels.push("feishu");
-    if (cfgType === "webhook" && cfg.webhook) channels.push("webhook");
-    // 兼容: 如果 type 不是 none 且有 webhook，也算可用
-    if (cfgType !== "none" && cfg.webhook && !channels.includes("webhook") && !channels.includes("feishu")) {
-      channels.push(cfgType as any);
+    const { getClawByAdoptId } = await import("../db");
+    const claw = await getClawByAdoptId(adoptId);
+    return Number((claw as any)?.userId || 0);
+  } catch {
+    return 0;
+  }
+}
+
+function normalizeGeneratedFiles(files: any[]): SkillSourceFile[] {
+  const raw = (Array.isArray(files) ? files : [])
+    .map((file) => ({
+      path: sanitizeRelPath(String(file?.path || "")) || "",
+      content: String(file?.content || ""),
+    }))
+    .filter((file) => file.path && file.content.length > 0);
+  const skillMdPaths = raw.map((file) => file.path).filter((p) => p.toLowerCase().endsWith("skill.md"));
+  if (skillMdPaths.length !== 1 || skillMdPaths[0].toLowerCase() === "skill.md") return raw;
+  const prefix = path.posix.dirname(skillMdPaths[0]);
+  return raw
+    .filter((file) => file.path === prefix || file.path.startsWith(prefix + "/"))
+    .map((file) => ({ path: file.path.slice(prefix.length).replace(/^\/+/, "") || file.path, content: file.content }));
+}
+
+async function makeUniqueGeneratedSkillId(adoptId: string, base: string): Promise<string> {
+  const rows = await skillRegistry.listSkills(adoptId);
+  const existing = new Set(rows.ok ? rows.value.map((skill) => skill.id) : []);
+  let id = sanitizeSkillId(base);
+  if (!existing.has(id)) return id;
+  const suffix = Date.now().toString(36).slice(-6);
+  id = sanitizeSkillId(`${id}-${suffix}`);
+  let i = 2;
+  while (existing.has(id)) id = sanitizeSkillId(`${base}-${suffix}-${i++}`);
+  return id;
+}
+
+function writeGeneratedSkillSource(sourceDir: string, files: SkillSourceFile[]): void {
+  mkdirSync(sourceDir, { recursive: true });
+  for (const file of files) {
+    const rel = sanitizeRelPath(file.path);
+    if (!rel) throw new Error(`非法文件路径: ${file.path}`);
+    const target = path.join(sourceDir, rel);
+    if (!target.startsWith(sourceDir + path.sep) && target !== sourceDir) {
+      throw new Error(`文件路径越界: ${file.path}`);
     }
-  } catch {}
-  return channels;
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, String(file.content || ""), "utf-8");
+  }
 }
 
 export async function executePlatformIntent(
@@ -41,27 +87,147 @@ export async function executePlatformIntent(
   writer: StreamWriter,
 ): Promise<void> {
 
+  // ── 生成技能 ──
+  if (intent.type === "skill_create") {
+    const name = String(intent.name || "").trim();
+    const description = String(intent.description || "").trim();
+    const files = normalizeGeneratedFiles(intent.files || []);
+    if (!name || name.length < 2) {
+      writer.writeText("⚠️ 技能名称至少需要 2 个字。你想把这个技能叫做什么？\n");
+      writer.writeEnd();
+      return;
+    }
+    if (files.length === 0) {
+      writer.writeError("技能生成失败：没有生成任何文件");
+      return;
+    }
+    if (!files.some((file) => file.path.toLowerCase() === "skill.md")) {
+      writer.writeError("技能生成失败：缺少 SKILL.md");
+      return;
+    }
+
+    const skillId = await makeUniqueGeneratedSkillId(adoptId, name);
+    const sourceDir = path.join(APP_ROOT, "data", "generated-skills", adoptId, skillId);
+    try {
+      const parsed = parseSkillSourceFiles(files, skillId);
+      writeGeneratedSkillSource(sourceDir, files);
+      const source: SkillSource = {
+        kind: "generated",
+        skillId,
+        displayName: name,
+        description: description || parsed.description,
+        sourcePath: sourceDir,
+        version: String(parsed.manifest?.version || ""),
+      };
+      const installed = await skillRegistry.install(adoptId, source);
+      if (!installed.ok) {
+        rmSync(sourceDir, { recursive: true, force: true });
+        writer.writeError(`技能生成失败：${installed.error.detail}`);
+        return;
+      }
+      await skillRegistry.updateScan(adoptId, skillId, {
+        warnings: parsed.warnings,
+        scannedAt: new Date().toISOString(),
+      });
+      const reconciled = await skillRegistry.reconcile(adoptId, { skillId });
+      if (!reconciled.ok || reconciled.value.failed > 0) {
+        writer.writeText(`⚠️ 技能「${name}」已生成，但同步到运行环境失败。已暂存在工作空间，可在「技能」页点击「重新同步」。\n`);
+        writer.writeEnd();
+        return;
+      }
+      writer.writeText(`✅ 技能「${name}」已生成并同步，可以直接在对话里使用。\n`);
+      if (description || parsed.description) writer.writeText(`\n> ${description || parsed.description}\n`);
+      if (parsed.warnings.length > 0) {
+        writer.writeText(`\n> 静态扫描提示：${parsed.warnings.slice(0, 3).join("；")}\n`);
+      }
+      writer.writeEnd();
+      return;
+    } catch (e: any) {
+      rmSync(sourceDir, { recursive: true, force: true });
+      writer.writeError(`技能生成失败：${e?.message || String(e)}`);
+      return;
+    }
+  }
+
   // ── 创建定时任务 ──
   if (intent.type === "schedule_create") {
-    const channels = await getUserChannels(adoptId);
-    let channel = intent.channel || "conversation";
-    if (channel !== "conversation" && !channels.includes(channel)) {
-      const chName = channel === "weixin" ? "微信" : channel;
-      writer.writeText(`⚠️ ${chName}未绑定，改为推送到主聊天。可在侧边栏绑定后修改。\n\n`);
-      channel = "conversation";
+    const channels = await getBoundChannelsForAdopt(adoptId);
+    if (intent.schedule) {
+      const normalized = normalizeScheduleToolArgs(intent, channels.map((channel) => channel.channelId));
+      if (!normalized.ok) {
+        writer.writeText(`⚠️ ${normalized.question}\n`);
+        writer.writeEnd();
+        return;
+      }
+      const bound = findBoundChannel(channels, normalized.value.channel);
+      const job = {
+        name: normalized.value.name,
+        description: normalized.value.prompt.slice(0, 100),
+        enabled: true,
+        schedule: normalized.value.schedule,
+        prompt: normalized.value.prompt,
+        delivery: {
+          targets: normalized.value.delivery.targets.map((target) => ({
+            ...target,
+            targetLabel: bound?.targetLabel || target.targetLabel,
+          })),
+        },
+        meta: { sessionTarget: "isolated" },
+      };
+      try {
+        const resp = await fetch(`${BASE}/api/claw/cron/add`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Internal-Key": INTERNAL_KEY },
+          body: JSON.stringify({ adoptId, job }),
+        });
+        const data = await resp.json() as any;
+        if (!resp.ok) { writer.writeError(`创建失败: ${data?.error || resp.status}`); return; }
+        writer.writeText(`✅ **定时任务已创建**\n\n`);
+        writer.writeText(`| 项目 | 内容 |\n|------|------|\n`);
+        writer.writeText(`| 任务名称 | ${job.name} |\n`);
+        writer.writeText(`| 执行内容 | ${job.prompt} |\n`);
+        writer.writeText(`| 计划 | ${job.schedule.display} |\n`);
+        writer.writeText(`| 推送渠道 | ${channelName(normalized.value.channel)} |\n\n`);
+        writer.writeText(`> 可在侧边栏「定时任务」页面管理。\n`);
+      } catch (e: any) { writer.writeError(e?.message || String(e)); return; }
+      writer.writeEnd();
+      return;
     }
-    // Gateway 不认识灵虾的渠道（weixin/feishu等），delivery 设为 none
-    // 灵虾平台层负责轮询 cron runs 并投递到用户渠道
+    if (process.env.SCHEDULE_TOOL_V2_ALLOWLIST) {
+      console.warn(`[SCHEDULE-V2] LLM fell back to V1 path for ${adoptId}, intent=`, JSON.stringify(intent).slice(0, 200));
+    }
+
+    const requested = intent.channel ? normalizeChannelId(String(intent.channel)) : undefined;
+    const selected = requested || channels[0]?.channelId;
+    if (!selected) {
+      writer.writeText("⚠️ 还没有可用推送频道。请先在侧边栏「频道」里绑定微信或飞书，再创建定时任务。\n");
+      writer.writeEnd();
+      return;
+    }
+    const bound = findBoundChannel(channels, selected);
+    if (!bound) {
+      writer.writeText(`⚠️ ${channelName(selected)}还未绑定。请先在侧边栏「频道」里绑定后再创建定时任务。\n`);
+      writer.writeEnd();
+      return;
+    }
     const job = {
       name: String(intent.name || "定时任务"),
       description: String(intent.task || "").slice(0, 100),
       enabled: true,
-      schedule: { kind: "cron", expr: String(intent.cron_expr || "0 9 * * *") },
-      payload: { kind: "agentTurn", message: String(intent.task || "") },
-      sessionTarget: "isolated",
-      delivery: channel === "conversation"
-        ? { mode: "announce", to: "conversation" }
-        : { mode: "none" },
+      schedule: {
+        kind: "cron",
+        cronExpr: String(intent.cron_expr || "0 9 * * *"),
+        display: String(intent.cron_expr || "0 9 * * *"),
+      },
+      prompt: String(intent.task || ""),
+      delivery: {
+        targets: [{
+          channelId: selected,
+          channelLabel: channelName(selected),
+          targetLabel: bound.targetLabel,
+        }],
+      },
+      meta: { sessionTarget: "isolated" },
     };
     try {
       const resp = await fetch(`${BASE}/api/claw/cron/add`, {
@@ -71,20 +237,7 @@ export async function executePlatformIntent(
       });
       const data = await resp.json() as any;
       if (!resp.ok) { writer.writeError(`创建失败: ${data?.error || resp.status}`); return; }
-      // create 成功后用返回的 jobId 记录灵虾侧投递配置（Gateway 不管这部分）
-      if (channel !== "conversation") {
-        const newJobId = String(data?.id || data?.job?.id || "").trim();
-        try {
-          const { saveCronDeliveryConfig } = await import("./cron-delivery");
-          await saveCronDeliveryConfig(
-            adoptId,
-            String(intent.name || "定时任务"),
-            channel,
-            newJobId || undefined,
-          );
-        } catch {}
-      }
-      const chName = channel === "weixin" ? "微信" : channel === "wecom" ? "企业微信" : channel === "feishu" ? "飞书" : "主聊天";
+      const chName = channelName(selected);
       writer.writeText(`✅ **定时任务已创建**\n\n`);
       writer.writeText(`| 项目 | 内容 |\n|------|------|\n`);
       writer.writeText(`| 任务名称 | ${job.name} |\n`);
@@ -115,6 +268,7 @@ export async function executePlatformIntent(
         } catch {}
         const chLabel = (ch: string) =>
           ch === "weixin" ? "微信" :
+          ch === "wechat" ? "微信" :
           ch === "wecom" ? "企业微信" :
           ch === "feishu" ? "飞书" :
           ch === "webhook" ? "Webhook" :
@@ -123,9 +277,9 @@ export async function executePlatformIntent(
         writer.writeText(`| # | 名称 | 状态 | 计划 | 渠道 |\n|---|------|------|------|------|\n`);
         jobs.forEach((j: any, i: number) => {
           const status = j.enabled ? "✅ 启用" : "⏸ 暂停";
-          const sched = j.schedule?.expr || (j.schedule?.everyMs ? `每${Math.round(j.schedule.everyMs / 60000)}分钟` : "—");
+          const sched = j.schedule?.display || j.schedule?.cronExpr || j.schedule?.expr || (j.schedule?.everyMs ? `每${Math.round(j.schedule.everyMs / 60000)}分钟` : "—");
           const sidecar = getChannel ? getChannel(String(j.id || ""), String(j.name || "")) : undefined;
-          const raw = sidecar || j.delivery?.to || j.delivery?.channel || "conversation";
+          const raw = sidecar || j.delivery?.targets?.[0]?.channelId || j.delivery?.to || j.delivery?.channel || "—";
           writer.writeText(`| ${i + 1} | ${j.name || "—"} | ${status} | ${sched} | ${chLabel(raw)} |\n`);
         });
         writer.writeText(`\n> 在侧边栏「定时任务」页面可以编辑或删除。\n`);
@@ -175,45 +329,41 @@ export async function executePlatformIntent(
 
   // ── 查询渠道 ──
   if (intent.type === "channels_query") {
-    const channels = await getUserChannels(adoptId);
+    const channels = await getBoundChannelsForAdopt(adoptId);
     writer.writeText(`📡 **你的可用推送渠道**\n\n`);
-    for (const ch of channels) {
-      const name = ch === "conversation" ? "💬 主聊天（默认）" :
-        ch === "weixin" ? "📱 微信（已绑定）" :
-        ch === "wecom" ? "🏢 企业微信（已配置）" :
-        ch === "feishu" ? "🐦 飞书（已配置）" :
-        ch === "webhook" ? "🔗 Webhook（已配置）" : ch;
-      writer.writeText(`- ${name}\n`);
+    if (channels.length === 0) {
+      writer.writeText("- 暂无已绑定频道。请先在侧边栏「频道」绑定微信或飞书。\n");
     }
-    writer.writeText(`\n> 在侧边栏「微信」和「设置」页面可以绑定更多渠道。\n`);
+    for (const ch of channels) {
+      writer.writeText(`- ${channelName(ch.channelId)}${ch.targetLabel ? `（${ch.targetLabel}）` : ""}\n`);
+    }
+    writer.writeText(`\n> 在侧边栏「频道」页面可以绑定更多渠道。\n`);
     writer.writeEnd();
     return;
   }
 
   // ── 立即发送通知 ──
   if (intent.type === "send") {
-    const channel = String(intent.channel || "weixin");
+    const channel = normalizeChannelId(String(intent.channel || "wechat"));
     const content = String(intent.content || "");
     if (!content) { writer.writeError("发送内容不能为空"); return; }
-    const channels = await getUserChannels(adoptId);
-    if (!channels.includes(channel)) { writer.writeError(`${channel === "weixin" ? "微信" : channel} 未绑定`); return; }
+    if (!channel) { writer.writeError("不支持的频道"); return; }
+    const channels = await getBoundChannelsForAdopt(adoptId);
+    if (!findBoundChannel(channels, channel)) { writer.writeError(`${channelName(channel)} 未绑定`); return; }
     writer.writeText(`📤 正在发送...\n\n`);
-    if (channel === "weixin") {
-      try {
-        const { sendMessageToWeixin } = await import("./claw-weixin-bridge");
-        await sendMessageToWeixin(adoptId, content);
-        writer.writeText(`✅ 已发送到微信\n`);
-      } catch (e: any) { writer.writeError(`微信发送失败: ${e?.message}`); return; }
-    } else {
-      try {
-        const resp = await fetch(`${BASE}/api/claw/notify/test`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Internal-Key": INTERNAL_KEY },
-          body: JSON.stringify({ adoptId, channel, message: content }),
-        });
-        if (!resp.ok) { writer.writeError("发送失败"); return; }
-        writer.writeText(`✅ 已通过${channel}发送\n`);
-      } catch (e: any) { writer.writeError(e?.message || String(e)); return; }
+    try {
+      const provider = getChannelProvider(channel);
+      if (!provider) { writer.writeError(`${channelName(channel)}暂不支持发送`); return; }
+      const userId = await resolveAdoptUserId(adoptId);
+      const result = await provider.send(
+        { adoptId, channelId: channel, userId },
+        { text: content, format: "text", metadata: { source: "intent_executor" } },
+      );
+      if (!result.ok) { writer.writeError(`${channelName(channel)}发送失败: ${result.error.detail || result.error.kind}`); return; }
+      writer.writeText(`✅ 已发送到${channelName(channel)}\n`);
+    } catch (e: any) {
+      writer.writeError(e?.message || String(e));
+      return;
     }
     writer.writeEnd();
     return;

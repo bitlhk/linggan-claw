@@ -185,12 +185,14 @@ export class OpenClawWSClient {
     }
   }
 
-  sendChat(message: string, sessionKey?: string) {
+  sendChat(message: string, sessionKey?: string, meta?: { clientRunId?: string; userMessageId?: string }) {
     if (!this.ws || this._state !== "connected") return false;
     this.ws.send(JSON.stringify({
       type: "chat",
       message,
       sessionKey,
+      clientRunId: meta?.clientRunId,
+      userMessageId: meta?.userMessageId,
     }));
     return true;
   }

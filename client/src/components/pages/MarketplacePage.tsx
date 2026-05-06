@@ -1,14 +1,33 @@
-import { useState, useEffect } from "react";
-import { Search, Download, Check, Package, Loader2, Store } from "lucide-react";
+﻿import { useEffect, useState, type ComponentType } from "react";
+import {
+  BarChart3,
+  BriefcaseBusiness,
+  Check,
+  Database,
+  Download,
+  FileText,
+  Layers,
+  Loader2,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Store,
+  Trash2,
+  Wrench,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 
-const CATEGORY_MAP: Record<string, { label: string; emoji: string }> = {
-  all:     { label: "全部",     emoji: "🔮" },
-  writing: { label: "办公效率", emoji: "📄" },
-  finance: { label: "金融专业", emoji: "💰" },
-  dev:     { label: "开发工具", emoji: "🛠" },
-  general: { label: "通用",     emoji: "🎨" },
-  data:    { label: "数据分析", emoji: "📊" },
+type CategoryKey = "all" | "writing" | "finance" | "dev" | "general" | "data";
+
+const CATEGORY_MAP: Record<string, { label: string; Icon: ComponentType<{ size?: number; className?: string }> }> = {
+  all: { label: "全部", Icon: Layers },
+  writing: { label: "办公效率", Icon: FileText },
+  office: { label: "办公效率", Icon: FileText },
+  finance: { label: "金融专业", Icon: BarChart3 },
+  dev: { label: "开发工具", Icon: Wrench },
+  general: { label: "通用", Icon: Sparkles },
+  data: { label: "数据分析", Icon: Database },
 };
 
 interface MarketSkill {
@@ -23,12 +42,18 @@ interface MarketSkill {
   license: string;
 }
 
+function categoryMeta(category: string) {
+  return CATEGORY_MAP[category] || { label: category || "其他", Icon: BriefcaseBusiness };
+}
+
 export function MarketplacePage({ adoptId }: { adoptId?: string }) {
   const [items, setItems] = useState<MarketSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState<number | null>(null);
   const [q, setQ] = useState("");
-  const [activeCat, setActiveCat] = useState("all");
+  const [activeCat, setActiveCat] = useState<CategoryKey | string>("all");
+  const [installedMarket, setInstalledMarket] = useState<Record<string, { skillId: string; version?: string }>>({});
+  const [selectedSkill, setSelectedSkill] = useState<MarketSkill | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -41,18 +66,48 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
             id: s.id,
             skillId: s.skillId,
             title: s.name || s.skillId,
-            description: s.description || "",
+            description: s.description || "暂无说明",
             author: s.author || "官方",
             installCount: s.downloadCount || 0,
             version: s.version || "1.0.0",
             category: s.category || "general",
             license: s.license || "MIT",
-          }))
+          })),
         );
       })
       .catch(() => setItems([]))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!adoptId) {
+      setInstalledMarket({});
+      return;
+    }
+    fetch(`/api/claw/skills/registry?adoptId=${encodeURIComponent(adoptId)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const rows = Array.isArray(d?.items) ? d.items : [];
+        const next: Record<string, { skillId: string; version?: string }> = {};
+        for (const skill of rows) {
+          if (skill?.source?.kind !== "marketplace") continue;
+          const state = String(skill?.state || "");
+          if (skill?.enabled === false || state === "disabled" || state === "source_missing") continue;
+          const marketId = String(skill?.source?.marketplaceId || "").trim();
+          if (!marketId) continue;
+          next[marketId] = { skillId: String(skill?.id || skill?.source?.skillId || ""), version: String(skill?.source?.version || "") };
+        }
+        setInstalledMarket(next);
+      })
+      .catch(() => setInstalledMarket({}));
+  }, [adoptId]);
+
+  const installState = (item: MarketSkill) => {
+    const installed = installedMarket[String(item.id)];
+    const installedVersion = installed?.version || "";
+    const canUpdate = !!installed && !!installedVersion && installedVersion !== item.version;
+    return { installed, installedVersion, canUpdate };
+  };
 
   const onInstall = async (item: MarketSkill) => {
     if (!adoptId || installing) return;
@@ -66,321 +121,233 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
       const d = await r.json();
       if (d?.error) throw new Error(d.error?.message || "安装失败");
       toast.success(`已安装：${item.title}`);
-      setItems((prev) =>
-        prev.map((x) =>
-          x.id === item.id
-            ? { ...x, installCount: (x.installCount || 0) + 1 }
-            : x
-        )
-      );
+      const installedSkillId = String(d?.result?.data?.json?.skillId || d?.result?.data?.skillId || item.skillId);
+      setInstalledMarket((prev) => ({ ...prev, [String(item.id)]: { skillId: installedSkillId, version: item.version } }));
+      setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, installCount: (x.installCount || 0) + 1 } : x)));
     } catch (e: any) {
-      toast.error(`安装失败${e?.message ? `: ${e.message}` : ""}`);
+      toast.error(`安装失败${e?.message ? `：${e.message}` : ""}`);
+    } finally {
+      setInstalling(null);
+    }
+  };
+
+  const onUninstall = async (item: MarketSkill) => {
+    if (!adoptId || installing) return;
+    const installed = installedMarket[String(item.id)];
+    if (!installed?.skillId) return;
+    if (!confirm(`确认卸载 ${item.title}？市场源不会删除，可重新安装。`)) return;
+    setInstalling(item.id);
+    try {
+      const r = await fetch("/api/claw/skills/uninstall", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adoptId, skillId: installed.skillId }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d?.error) throw new Error(d?.error || "卸载失败");
+      toast.success(`已卸载：${item.title}`);
+      setInstalledMarket((prev) => {
+        const next = { ...prev };
+        delete next[String(item.id)];
+        return next;
+      });
+    } catch (e: any) {
+      toast.error(`卸载失败${e?.message ? `：${e.message}` : ""}`);
     } finally {
       setInstalling(null);
     }
   };
 
   const categories = ["all", ...new Set(items.map((x) => x.category))];
-
   const filtered = items.filter((x) => {
     const matchCat = activeCat === "all" || x.category === activeCat;
-    const matchQ =
-      !q.trim() ||
-      `${x.title} ${x.description} ${x.skillId}`
-        .toLowerCase()
-        .includes(q.toLowerCase());
+    const matchQ = !q.trim() || `${x.title} ${x.description} ${x.skillId}`.toLowerCase().includes(q.toLowerCase());
     return matchCat && matchQ;
   });
-
   const catCounts = items.reduce<Record<string, number>>((acc, x) => {
     acc[x.category] = (acc[x.category] || 0) + 1;
     return acc;
   }, {});
 
   return (
-    <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 stealth-scrollbar">
-        {/* Header */}
-        <div style={{ marginBottom: 24 }}>
-          <h1
-            className="text-lg"
-            style={{
-              color: "var(--oc-text-primary)",
-              fontWeight: "var(--oc-weight-bold)",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <Store size={20} style={{ color: "var(--oc-accent)" }} />
-            技能市场
-          </h1>
-          <p
-            className="text-xs"
-            style={{ color: "var(--oc-text-secondary)", marginTop: 4 }}
-          >
-            浏览和安装技能，让你的虾拥有更多专业能力
-          </p>
-        </div>
-
-        {/* Search + Category Tabs */}
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            marginBottom: 20,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
-          <div
-            className="skills-search"
-            style={{ flex: "1 1 200px", maxWidth: 320 }}
-          >
-            <Search
-              size={14}
-              style={{ color: "var(--oc-text-secondary)", flexShrink: 0 }}
-            />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索技能..."
-              style={{ flex: 1 }}
-            />
-          </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {categories.map((cat) => {
-              const meta = CATEGORY_MAP[cat] || {
-                label: cat,
-                emoji: "📦",
-              };
-              const active = activeCat === cat;
-              const count =
-                cat === "all" ? items.length : catCounts[cat] || 0;
-              return (
-                <button
-                  key={cat}
-                  onClick={() => setActiveCat(cat)}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "6px 14px",
-                    fontSize: "var(--oc-text-base)",
-                    fontWeight: active ? 600 : 400,
-                    borderRadius: 999,
-                    border: "1px solid",
-                    borderColor: active
-                      ? "var(--oc-accent)"
-                      : "var(--oc-border)",
-                    background: active
-                      ? "var(--oc-accent-subtle, rgba(59,130,246,0.08))"
-                      : "transparent",
-                    color: active
-                      ? "var(--oc-accent)"
-                      : "var(--oc-text-secondary)",
-                    cursor: "pointer",
-                    transition: "all .15s ease",
-                  }}
-                >
-                  {meta.emoji} {meta.label}
-                  <span
-                    style={{
-                      fontSize: "var(--oc-text-xs)",
-                      opacity: 0.7,
-                      marginLeft: 2,
-                    }}
-                  >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
+    <div className="skills-market">
+      <div className="skills-market-hero settings-card">
+        <div className="skills-market-hero__icon"><Store size={18} /></div>
+        <div className="min-w-0">
+          <div className="skills-market-hero__title">技能市场</div>
+          <div className="skills-market-hero__desc">
+            从市场安装的技能会进入“我的技能”，并通过 SkillRegistry 同步到当前灵虾运行时。
           </div>
         </div>
+      </div>
 
-        {/* Loading */}
-        {loading && (
-          <div
-            style={{
-              textAlign: "center",
-              padding: 48,
-              color: "var(--oc-text-secondary)",
-            }}
-          >
-            <Loader2
-              size={24}
-              className="animate-spin"
-              style={{ margin: "0 auto 8px" }}
-            />
-            <div className="text-sm">加载中...</div>
-          </div>
-        )}
+      <div className="skills-market-toolbar">
+        <div className="skills-search skills-market-search">
+          <Search size={14} className="skills-search-icon" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索技能..." />
+        </div>
+        <div className="skills-market-categories" aria-label="技能市场分类">
+          {categories.map((cat) => {
+            const meta = categoryMeta(cat);
+            const Icon = meta.Icon;
+            const active = activeCat === cat;
+            const count = cat === "all" ? items.length : catCounts[cat] || 0;
+            return (
+              <button key={cat} className={`skills-tab ${active ? "active" : ""}`} onClick={() => setActiveCat(cat)}>
+                <Icon size={13} />
+                {meta.label}
+                <span className="skills-market-count">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-        {/* Empty state */}
-        {!loading && filtered.length === 0 && (
-          <div
-            className="settings-card"
-            style={{ textAlign: "center", padding: 48 }}
-          >
-            <div style={{ fontSize: 40, marginBottom: 12 }}>🏪</div>
-            <div
-              className="text-sm"
-              style={{ color: "var(--oc-text-secondary)" }}
-            >
-              {items.length === 0
-                ? "技能市场暂无技能"
-                : "没有匹配的技能"}
-            </div>
-          </div>
-        )}
+      {loading && (
+        <div className="settings-card skills-market-empty">
+          <Loader2 size={20} className="animate-spin" />
+          <div>正在加载技能市场...</div>
+        </div>
+      )}
 
-        {/* Skill Cards Grid */}
-        {!loading && filtered.length > 0 && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fill, minmax(280px, 1fr))",
-              gap: 12,
-            }}
-          >
-            {filtered.map((item) => {
-              const catMeta = CATEGORY_MAP[item.category] || {
-                label: item.category,
-                emoji: "📦",
-              };
-              return (
-                <div
-                  key={item.id}
-                  className="settings-card"
-                  style={{
-                    padding: "16px 18px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                    transition: "box-shadow .15s ease",
-                  }}
-                >
-                  {/* Top: title + category badge */}
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 8,
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        className="text-sm"
-                        style={{
-                          color: "var(--oc-text-primary)",
-                          fontWeight: "var(--oc-weight-semibold)",
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {catMeta.emoji} {item.title}
-                      </div>
-                      <div
-                        className="text-xs"
-                        style={{
-                          color: "var(--oc-text-secondary)",
-                          marginTop: 2,
-                        }}
-                      >
-                        {item.author} · v{item.version}
-                      </div>
+      {!loading && filtered.length === 0 && (
+        <div className="settings-card skills-market-empty">
+          <Store size={22} />
+          <div>{items.length === 0 ? "技能市场暂无技能" : "没有匹配的技能"}</div>
+        </div>
+      )}
+
+      {!loading && filtered.length > 0 && (
+        <div className="skills-market-grid">
+          {filtered.map((item) => {
+            const meta = categoryMeta(item.category);
+            const Icon = meta.Icon;
+            const { installed, canUpdate } = installState(item);
+            const installLabel = canUpdate ? "更新" : installed ? "已安装" : "安装";
+            return (
+              <div
+                key={item.id}
+                className="skills-market-card settings-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedSkill(item)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedSkill(item);
+                  }
+                }}
+              >
+                <div className="skills-market-card__head">
+                  <div className="skills-market-card__title-wrap">
+                    <div className="skills-market-card__title">
+                      <Icon size={15} />
+                      <span>{item.title}</span>
                     </div>
-                    <span
-                      style={{
-                        fontSize: "var(--oc-text-xs)",
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                        background:
-                          "var(--oc-accent-subtle, rgba(59,130,246,0.08))",
-                        color: "var(--oc-accent)",
-                        fontWeight: "var(--oc-weight-medium)",
-                        whiteSpace: "nowrap",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {catMeta.label}
-                    </span>
+                    <div className="skills-market-card__meta">{item.author} · v{item.version}</div>
                   </div>
+                  <span className="skills-chip skills-chip--neutral">{meta.label}</span>
+                </div>
 
-                  {/* Description */}
-                  <div
-                    className="text-xs"
-                    style={{
-                      color: "var(--oc-text-secondary)",
-                      lineHeight: 1.6,
-                      flex: 1,
-                      display: "-webkit-box",
-                      WebkitLineClamp: 3,
-                      WebkitBoxOrient: "vertical",
-                      overflow: "hidden",
+                <div className="skills-market-card__desc">{item.description}</div>
+
+                <div className="skills-market-card__foot">
+                  <span className="skills-market-card__installs"><Download size={12} />{item.installCount} 次安装</span>
+                  <button
+                    className="skills-btn"
+                    disabled={!adoptId || installing === item.id || (!!installed && !canUpdate)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onInstall(item);
                     }}
                   >
-                    {item.description}
-                  </div>
+                    {installing === item.id ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : installed && !canUpdate ? (
+                      <Check size={12} />
+                    ) : (
+                      <Download size={12} />
+                    )}
+                    {installing === item.id ? "安装中" : installLabel}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-                  {/* Bottom: install count + button */}
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <span
-                      className="text-xs"
-                      style={{ color: "var(--oc-text-secondary)" }}
-                    >
-                      <Download
-                        size={12}
-                        style={{
-                          display: "inline",
-                          marginRight: 3,
-                          verticalAlign: -1,
-                        }}
-                      />
-                      {item.installCount} 次安装
-                    </span>
-                    <button
-                      className="btn-primary-soft"
-                      style={{
-                        fontSize: "var(--oc-text-sm)",
-                        padding: "5px 14px",
-                        borderRadius: "var(--oc-radius-sm)",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                      disabled={installing === item.id}
-                      onClick={() => onInstall(item)}
-                    >
-                      {installing === item.id ? (
-                        <>
-                          <Loader2
-                            size={12}
-                            className="animate-spin"
-                          />{" "}
-                          安装中
-                        </>
-                      ) : (
-                        <>
-                          <Download size={12} /> 安装
-                        </>
-                      )}
+      {selectedSkill && (
+        <div className="skills-market-detail" role="dialog" aria-modal="true" aria-label={`${selectedSkill.title} 详情`}>
+          <button className="skills-market-detail__backdrop" type="button" aria-label="关闭详情" onClick={() => setSelectedSkill(null)} />
+          <div className="skills-market-detail__panel settings-card">
+            {(() => {
+              const meta = categoryMeta(selectedSkill.category);
+              const Icon = meta.Icon;
+              const { installed, installedVersion, canUpdate } = installState(selectedSkill);
+              const installLabel = canUpdate ? "更新" : installed ? "已安装" : "安装";
+              return (
+                <>
+                  <div className="skills-market-detail__head">
+                    <div className="skills-market-detail__icon"><Icon size={18} /></div>
+                    <div className="min-w-0">
+                      <div className="skills-market-detail__title">{selectedSkill.title}</div>
+                      <div className="skills-market-detail__meta">{selectedSkill.author} · v{selectedSkill.version}</div>
+                    </div>
+                    <button className="skills-icon-btn" type="button" aria-label="关闭详情" onClick={() => setSelectedSkill(null)}>
+                      <X size={15} />
                     </button>
                   </div>
-                </div>
+
+                  <div className="skills-market-detail__chips">
+                    <span className="skills-chip skills-chip--neutral">{meta.label}</span>
+                    <span className="skills-chip skills-chip--neutral">{selectedSkill.license}</span>
+                    {installed ? (
+                      <span className="skills-chip skills-chip--ok"><Check size={12} />已安装{installedVersion ? ` v${installedVersion}` : ""}</span>
+                    ) : (
+                      <span className="skills-chip skills-chip--neutral">未安装</span>
+                    )}
+                    {canUpdate && <span className="skills-chip skills-chip--warn">可更新</span>}
+                  </div>
+
+                  <div className="skills-market-detail__section">
+                    <div className="skills-market-detail__label">说明</div>
+                    <div className="skills-market-detail__body">{selectedSkill.description || "暂无说明"}</div>
+                  </div>
+
+                  <div className="skills-market-detail__facts">
+                    <div><span>安装次数</span><strong>{selectedSkill.installCount}</strong></div>
+                    <div><span>市场 ID</span><strong>{selectedSkill.skillId}</strong></div>
+                    <div><span>审核</span><strong><ShieldCheck size={12} />静态扫描通过</strong></div>
+                  </div>
+
+                  <div className="skills-market-detail__actions">
+                    <div className="skills-market-detail__action-buttons">
+                      <button
+                        className="skills-btn"
+                        disabled={!adoptId || installing === selectedSkill.id || (!!installed && !canUpdate)}
+                        onClick={() => onInstall(selectedSkill)}
+                      >
+                        {installing === selectedSkill.id ? <Loader2 size={12} className="animate-spin" /> : installed && !canUpdate ? <Check size={12} /> : <Download size={12} />}
+                        {installing === selectedSkill.id ? "安装中" : installLabel}
+                      </button>
+                      {installed && (
+                        <button className="skills-btn skills-btn--ghost" disabled={!adoptId || installing === selectedSkill.id} onClick={() => onUninstall(selectedSkill)}>
+                          {installing === selectedSkill.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                          卸载
+                        </button>
+                      )}
+                    </div>
+                    <span className="skills-market-detail__hint">
+                      安装后会进入“我的技能”，并同步到当前灵虾运行时。
+                    </span>
+                  </div>
+                </>
               );
-            })}
+            })()}
           </div>
-        )}
-      </div>
-    </main>
+        </div>
+      )}
+    </div>
   );
 }

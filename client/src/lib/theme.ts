@@ -13,6 +13,7 @@ export function applyResolvedTheme(settings: UiSettings): void {
   root.dataset.theme = settings.theme;
   root.dataset.themeMode = resolvedMode;
   root.style.colorScheme = resolvedMode;
+  root.classList.toggle("dark", resolvedMode === "dark");
 }
 
 export function applyBorderRadius(value: number): void {

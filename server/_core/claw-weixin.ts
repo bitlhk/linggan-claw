@@ -133,6 +133,15 @@ export async function sendWeixinMessage(adoptId: string, chatId: string, text: s
   }
 }
 
+export function getWeixinStatus(adoptId: string): { bound: boolean; targetLabel?: string; needsReactivation?: boolean } {
+  const acct = loadAccount(adoptId);
+  return {
+    bound: !!(acct && acct.token),
+    targetLabel: acct?.userId || "",
+    needsReactivation: !!acct?.needsReactivation,
+  };
+}
+
 export function registerWeixinRoutes(app: express.Express) {
   // Internal key for platform tool access
   const WEIXIN_INTERNAL_KEY = process.env.INTERNAL_API_KEY || "lingxia-bridge-2026";

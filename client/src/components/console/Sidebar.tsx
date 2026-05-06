@@ -1,9 +1,9 @@
-import { MessageSquareText, Brain, Sparkles, MessageCircle, CalendarClock, Settings2, BookOpen, Users, FolderTree } from "lucide-react";
+import { MessageSquareText, Brain, Sparkles, Radio, CalendarClock, Settings2, BookOpen, Users, FolderTree } from "lucide-react";
 export type PageKey = "chat" | "skills" | "weixin" | "agent" | "workspace" | "schedule" | "collab" | "settings" | "docs";
-const items: { key: PageKey; label: string; icon: any }[] = [
+const items: { key: PageKey; label: string; icon: any; adminOnly?: boolean }[] = [
   { key: "chat", label: "聊天", icon: MessageSquareText },
   { key: "skills", label: "技能", icon: Sparkles },
-  { key: "weixin", label: "微信", icon: MessageCircle },
+  { key: "weixin", label: "频道", icon: Radio },
   { key: "agent", label: "记忆", icon: Brain },
   { key: "collab", label: "协作", icon: Users },
   { key: "workspace", label: "工作空间", icon: FolderTree },

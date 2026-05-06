@@ -108,6 +108,27 @@ export const upsertSessionRegistry = (adoptId: string, runtimeAgentId: string, s
   } catch {}
 };
 
+// 2026-04-29 批次 2 A3：read-only sessionKey 解析（recover 端点用）
+// 抽自 claw-chat.ts L341-357 同样三档逻辑：epochLabel → registry → epoch fallback
+// 区别：**永不 upsert**（recover 不能污染 registry，避免它替正在等连接的 chat 写错的 key）
+// claw-chat.ts 主聊天路径保留自己的 upsert 行为不动
+export const resolveSessionKey = (
+  adoptId: string,
+  runtimeAgentId: string,
+  epoch: number,
+  epochLabel?: string,
+): string => {
+  if (epochLabel && typeof epochLabel === "string" && epochLabel.trim().length > 0) {
+    const safeLabel = epochLabel.trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+    return `agent:${runtimeAgentId}:main:${safeLabel}`;
+  }
+  const found = lookupSessionRegistry(adoptId, runtimeAgentId, epoch);
+  if (found) return found;
+  return epoch > 0
+    ? `agent:${runtimeAgentId}:main:e${epoch}`
+    : `agent:${runtimeAgentId}:main`;
+};
+
 export const invalidateSessionRegistry = (adoptId: string) => {
   try {
     const reg = readSessionRegistry();
@@ -171,8 +192,9 @@ export const resolveRuntimeAgentId = (adoptId: string, dbAgentIdRaw: any) => {
   return existsSync(trialAgentDir) ? trialAgentId : dbAgentId;
 };
 
-export const callClawGatewayRpc = (method: string, params: Record<string, any> = {}) => {
-  
+// Internal legacy RPC helper. New code must go through
+// createOpenClawRuntimeAdapter().callRpc() so OpenClaw access stays centralized.
+const callClawGatewayRpc = (method: string, params: Record<string, any> = {}) => {
   const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
   const gatewayPort = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
   const gatewayToken = process.env.CLAW_GATEWAY_TOKEN || "";

@@ -2,19 +2,70 @@ import express from "express";
 import { existsSync, statSync, readdirSync } from "fs";
 import { clawChatLimiter } from "./security";
 import { requireClawOwner, appendLogAsync, generateFileToken } from "./helpers";
+import { canViewCoopSession } from "../db/coop-identity";
+
+type LiveClient = {
+  res: express.Response;
+  userId: number;
+  sessionId: string;
+  kind: "stream" | "notify";
+};
+
+type CollabStreamEntry = {
+  chunks: string[];
+  done: boolean;
+  finalStatus?: string;
+  finalResult?: string;
+  streamClients: Set<LiveClient>;
+  notifyClients: Set<LiveClient>;
+};
 
 // ── 协作任务实时流缓存（requestId -> SSE 订阅者）──────────────────────
-const collabStreamMap = new Map();
+const collabStreamMap = new Map<number, CollabStreamEntry>();
+const closeLiveClient = (entry: CollabStreamEntry, client: LiveClient) => {
+  entry.streamClients.delete(client);
+  entry.notifyClients.delete(client);
+};
+const writeForbiddenAndClose = (entry: CollabStreamEntry, client: LiveClient, reason: string) => {
+  try {
+    client.res.write("data: " + JSON.stringify({ done: true, forbidden: true, reason }) + "\n\n");
+    client.res.end();
+  } catch (_) {}
+  closeLiveClient(entry, client);
+};
+const ensureLiveClientAccess = async (entry: CollabStreamEntry, client: LiveClient): Promise<boolean> => {
+  const access = await canViewCoopSession(client.userId, client.sessionId);
+  if (!access.ok) {
+    writeForbiddenAndClose(entry, client, access.error.kind);
+    return false;
+  }
+  return true;
+};
+const writeLiveEventNow = async (entry: CollabStreamEntry, client: LiveClient, payload: unknown, end = false): Promise<boolean> => {
+  if (!(await ensureLiveClientAccess(entry, client))) return false;
+  try {
+    client.res.write("data: " + JSON.stringify(payload) + "\n\n");
+    if (end) client.res.end();
+  } catch (_) {
+    closeLiveClient(entry, client);
+    return false;
+  }
+  if (end) closeLiveClient(entry, client);
+  return true;
+};
+const writeLiveEvent = (entry: CollabStreamEntry, client: LiveClient, payload: unknown, end = false) => {
+  void writeLiveEventNow(entry, client, payload, end);
+};
 const _collabEmit = (id: number, chunk: string) => {
   const e = collabStreamMap.get(id); if (!e) return;
   e.chunks.push(chunk);
-  for (const r of e.streamClients) { try { r.write("data: " + JSON.stringify({ chunk }) + "\n\n"); } catch (_) {} }
+  for (const client of e.streamClients) writeLiveEvent(e, client, { chunk });
 };
 const _collabFinish = (id: number, status: string, result: string) => {
   const e = collabStreamMap.get(id); if (!e) return;
   e.done = true; e.finalStatus = status; e.finalResult = result;
-  for (const r of e.streamClients) { try { r.write("data: " + JSON.stringify({ done: true }) + "\n\n"); r.end(); } catch (_) {} }
-  for (const r of e.notifyClients) { try { r.write("data: " + JSON.stringify({ done: true, status, resultSummary: result }) + "\n\n"); r.end(); } catch (_) {} }
+  for (const client of e.streamClients) writeLiveEvent(e, client, { done: true }, true);
+  for (const client of e.notifyClients) writeLiveEvent(e, client, { done: true, status, resultSummary: result }, true);
   setTimeout(() => collabStreamMap.delete(id), 600000);
 };
 
@@ -236,6 +287,17 @@ export function registerCollabRoutes(app: express.Express) {
     if (!collabReq) { res.status(404).json({ error: "not found" }); return; }
     const claw = await requireClawOwner(req, res, String((collabReq as any).targetAdoptId));
     if (!claw) return;
+    const userId = Number((claw as any).userId || 0);
+    const sessionId = String((collabReq as any).sessionId || "");
+    if (!userId || !sessionId) {
+      res.status(403).json({ error: "coop_live_forbidden", reason: !sessionId ? "session_missing" : "profile_missing" });
+      return;
+    }
+    const access = await canViewCoopSession(userId, sessionId);
+    if (!access.ok) {
+      res.status(403).json({ error: "coop_live_forbidden", reason: access.error.kind });
+      return;
+    }
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -245,10 +307,16 @@ export function registerCollabRoutes(app: express.Express) {
       res.write("data: " + JSON.stringify({ done: true }) + "\n\n");
       res.end(); return;
     }
-    for (const ch of entry.chunks) { res.write("data: " + JSON.stringify({ chunk: ch }) + "\n\n"); }
-    if (entry.done) { res.write("data: " + JSON.stringify({ done: true }) + "\n\n"); res.end(); return; }
-    entry.streamClients.add(res);
-    req.on("close", () => { if (entry) entry.streamClients.delete(res); });
+    const client: LiveClient = { res, userId, sessionId, kind: "stream" };
+    for (const ch of entry.chunks) {
+      if (!(await writeLiveEventNow(entry, client, { chunk: ch }))) return;
+    }
+    if (entry.done) {
+      await writeLiveEventNow(entry, client, { done: true }, true);
+      return;
+    }
+    entry.streamClients.add(client);
+    req.on("close", () => { if (entry) closeLiveClient(entry, client); });
   });
 
   // GET /api/claw/collab-notify/:requestId — Agent 1 SSE 等待完成推送
@@ -260,21 +328,43 @@ export function registerCollabRoutes(app: express.Express) {
     if (!collabReq) { res.status(404).json({ error: "not found" }); return; }
     const claw = await requireClawOwner(req, res, String((collabReq as any).requesterAdoptId));
     if (!claw) return;
+    const userId = Number((claw as any).userId || 0);
+    const sessionId = String((collabReq as any).sessionId || "");
+    if (!userId || !sessionId) {
+      res.status(403).json({ error: "coop_live_forbidden", reason: !sessionId ? "session_missing" : "profile_missing" });
+      return;
+    }
+    const access = await canViewCoopSession(userId, sessionId);
+    if (!access.ok) {
+      res.status(403).json({ error: "coop_live_forbidden", reason: access.error.kind });
+      return;
+    }
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
     if ((res as any).flushHeaders) (res as any).flushHeaders();
+    const client: LiveClient = { res, userId, sessionId, kind: "notify" };
     if (["completed", "failed", "rejected", "cancelled"].includes((collabReq as any).status)) {
-      res.write("data: " + JSON.stringify({ done: true, status: (collabReq as any).status, resultSummary: (collabReq as any).resultSummary || "" }) + "\n\n");
-      res.end(); return;
+      await writeLiveEventNow(
+        { chunks: [], done: true, notifyClients: new Set(), streamClients: new Set() },
+        client,
+        { done: true, status: (collabReq as any).status, resultSummary: (collabReq as any).resultSummary || "" },
+        true,
+      );
+      return;
     }
     const entry = collabStreamMap.get(reqId);
     if (!entry || entry.done) {
       const latest = await getCollabRequest(reqId).catch(() => null);
-      res.write("data: " + JSON.stringify({ done: true, status: (latest as any)?.status || "unknown", resultSummary: (latest as any)?.resultSummary || "" }) + "\n\n");
-      res.end(); return;
+      await writeLiveEventNow(
+        { chunks: [], done: true, notifyClients: new Set(), streamClients: new Set() },
+        client,
+        { done: true, status: (latest as any)?.status || "unknown", resultSummary: (latest as any)?.resultSummary || "" },
+        true,
+      );
+      return;
     }
-    entry.notifyClients.add(res);
-    req.on("close", () => { if (entry) entry.notifyClients.delete(res); });
+    entry.notifyClients.add(client);
+    req.on("close", () => { if (entry) closeLiveClient(entry, client); });
   });
 }

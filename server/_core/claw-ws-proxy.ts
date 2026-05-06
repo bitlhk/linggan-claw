@@ -22,8 +22,15 @@ import { createHash, generateKeyPairSync, sign, randomUUID } from "crypto";
 import { WsStreamWriter } from "./stream-writer";
 import { routeMessage } from "./intent-agent";
 import { createContext } from "./context";
-import { readSessionEpoch } from "./helpers";
+import { readSessionEpoch, appendLogAsync } from "./helpers";
 import { ResponseAccumulator } from "./response-accumulator";
+import { normalizeWsEvent } from "./runtime";
+import {
+  markChatRunComplete,
+  markChatRunStarted,
+  normalizeClientRunId,
+  touchChatRun,
+} from "./chat-inflight";
 
 // ── Ed25519 设备身份（进程级复用）──
 const ED25519_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -88,12 +95,129 @@ export function registerWSProxy(server: Server) {
     let lastUserSendMs: number = 0;
     let memAcc: ResponseAccumulator | null = null;
 
+    // ── 2026-04-29 批次 b：WS 路径截断诊断 + recover trigger（同 HTTP claw-chat.ts 语义）──
+    // 完整设计见 memory project_sse_truncation_diag —— WS 路径裸 bug：lifecycle.end 是唯一
+    // 完成信号，gw close/error 异常时不通知前端。这里加 finalize guard + truncated 触发。
+    let chatStartedAt = 0;            // 当前 chat 起始（user 发消息时设置）
+    let sawLifecycleEnd = false;      // 见到 lifecycle.end 才算正常完成
+    let chatFinalized = false;        // 单一 finalize guard
+    let activeChat = false;           // 是否有 active chat 在跑（用于 gw close 是否触发 truncated）
+    let clientClosed = false;         // 浏览器主动断开（gw close 时用以区分 client_close vs gw_close）
+    let activeClientRunId: string | undefined;
+
+    // 正常完成 finalize：在 lifecycle.end 已发 __stream_end，这里只写日志
+    const finalizeChatNormal = () => {
+      if (chatFinalized) return;
+      chatFinalized = true;
+      activeChat = false;
+      markChatRunComplete(String(sessionKey || ""), activeClientRunId, "lifecycle_end");
+      appendLogAsync("claw-exec-detail.log", {
+        ts: new Date().toISOString(),
+        event: "ws_chat_response",
+        transport: "ws",
+        adoptId: meta.adoptId,
+        agentId: meta.agentId,
+        userId: meta.userId,
+        sessionKey,
+        durationMs: chatStartedAt > 0 ? Date.now() - chatStartedAt : 0,
+        sawLifecycleEnd,
+        endReason: "natural",
+        flag: process.env.SSE_TRUNCATE_DETECT || "off",
+      });
+    };
+
+    // 异常 finalize：发 __stream_truncated（前端复用 handleStreamTruncated 启动 recover）
+    const finalizeChatTruncated = (reason: string) => {
+      if (chatFinalized) return;
+      chatFinalized = true;
+      activeChat = false;
+      markChatRunComplete(String(sessionKey || ""), activeClientRunId, reason === "gw_error" ? "gateway_error" : "gateway_close");
+
+      const flagMode = String(process.env.SSE_TRUNCATE_DETECT || "off").toLowerCase();
+      const allowlist = String(process.env.SSE_TRUNCATE_DETECT_USERS || "")
+        .split(",").map(s => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0);
+      const flagOn = flagMode === "on"
+        || (flagMode === "allowlist" && allowlist.includes(Number(meta.userId)));
+
+      const streamEndMs = Date.now();
+      if (flagOn) {
+        sendToClient({
+          __stream_truncated: true,
+          adoptId: meta.adoptId,
+          sessionKey,
+          endReason: reason,
+          chatCompletionId: null,    // WS 路径无 OpenAI 兼容 chunk id
+          streamEndMs,
+          startedAt: chatStartedAt,
+          transport: "ws",
+          triggeredBy: reason,
+        });
+      } else {
+        // off 模式保持兼容旧行为：发 __stream_end + finish_reason stop（用户看到完成）
+        sendToClient({ __stream_end: true });
+        sendToClient({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] });
+      }
+
+      appendLogAsync("claw-exec-detail.log", {
+        ts: new Date().toISOString(),
+        event: "ws_chat_response_abnormal",
+        transport: "ws",
+        adoptId: meta.adoptId,
+        agentId: meta.agentId,
+        userId: meta.userId,
+        sessionKey,
+        durationMs: chatStartedAt > 0 ? streamEndMs - chatStartedAt : 0,
+        sawLifecycleEnd,
+        endReason: reason,
+        flag: flagMode,
+        triggeredBy: reason,
+      });
+    };
+
     // 追踪当前工具调用的命令输出（toolCallId → output buffer）
     const cmdOutputBuffers = new Map<string, string>();
 
     const sendToClient = (data: object) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify(data));
+      }
+    };
+
+    const emitWorkspaceFiles = () => {
+      try {
+        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+        const wsDir = `${remoteHome}/.openclaw/workspace-${meta.agentId}`;
+        if (!existsSync(wsDir) || lastUserSendMs <= 0) return;
+
+        const SKIP_DIRS = new Set(["skills", "memory", "node_modules", ".git", ".dreams", "dist", "build", ".openclaw"]);
+        const newFiles: Array<{ name: string; size: number; path: string }> = [];
+        const scanDir = (dir: string, relBase: string, depth: number) => {
+          if (depth > 3) return;
+          try {
+            for (const entry of readdirSync(dir)) {
+              if (entry.startsWith(".")) continue;
+              if (depth === 0 && SKIP_DIRS.has(entry)) continue;
+              const full = `${dir}/${entry}`;
+              const rel = relBase ? `${relBase}/${entry}` : entry;
+              try {
+                const s = statSync(full);
+                if (s.isFile()) {
+                  if (s.mtimeMs >= lastUserSendMs - 1000) {
+                    newFiles.push({ name: entry, size: s.size, path: rel });
+                  }
+                } else if (s.isDirectory()) {
+                  scanDir(full, rel, depth + 1);
+                }
+              } catch {}
+            }
+          } catch {}
+        };
+        scanDir(wsDir, "", 0);
+        if (newFiles.length > 0) {
+          sendToClient({ _event: "workspace_files", adoptId: meta.adoptId, files: newFiles });
+        }
+      } catch (e) {
+        console.error("[WS] workspace scan error:", e);
       }
     };
 
@@ -156,139 +280,130 @@ export function registerWSProxy(server: Server) {
         // ── 跳过噪声事件 ──
         if (msg.event === "health" || msg.event === "tick" || msg.event === "heartbeat") return;
 
-        // ── 转换 gateway agent 事件 → 前端格式 ──
-        if (msg.type === "event" && msg.event === "agent") {
-          const p = msg.payload || {};
-          const stream = p.stream || "";
-          const data = p.data || {};
-
-          // ── 流式文本 ──
-          if (stream === "assistant" && data.delta) {
-            if (memAcc) { memAcc.appendDelta(data.delta); if (memAcc.getBuffer().length === data.delta.length) console.log('[MEMORY-DEBUG] first delta received'); }
-            sendToClient({
-              choices: [{ index: 0, delta: { content: data.delta }, finish_reason: null }],
-            });
-            return;
+        const normalized = normalizeWsEvent(msg, sessionKey);
+        if (normalized.kind === "events") {
+          if (sessionKey && activeClientRunId) {
+            touchChatRun(sessionKey, activeClientRunId, "ws_event");
           }
-
-          // ── 工具调用开始（tool stream，唯一的 tool_call 卡片来源）──
-          if (stream === "tool" && data.phase === "start") {
-            const tcId = data.toolCallId || `tc_${Date.now()}`;
-            cmdOutputBuffers.set(tcId, ""); // 初始化输出缓冲
-            sendToClient({
-              _event: "tool_call",
-              id: tcId,
-              name: data.name || "tool",
-              arguments: JSON.stringify(data.args || {}),
-            });
-            return;
-          }
-
-          // ── 工具调用完成（tool stream result）──
-          // 注意：实际输出在 command_output.end 里，这里只标记完成
-          if (stream === "tool" && data.phase === "result") {
-            const tcId = data.toolCallId || "";
-            const buffered = cmdOutputBuffers.get(tcId) || "";
-            cmdOutputBuffers.delete(tcId);
-            sendToClient({
-              _event: "tool_result",
-              tool_call_id: tcId,
-              result: buffered || (typeof data.result === "string" ? data.result : ""),
-              is_error: Boolean(data.isError),
-            });
-            return;
-          }
-
-          // ── 命令输出流（增量）──
-          if (stream === "command_output" && data.phase === "delta") {
-            const tcId = data.toolCallId || "";
-            if (tcId && cmdOutputBuffers.has(tcId)) {
-              cmdOutputBuffers.set(tcId, (cmdOutputBuffers.get(tcId) || "") + (data.output || ""));
-            }
-            return;
-          }
-
-          // ── 命令输出结束（含完整结果）──
-          if (stream === "command_output" && data.phase === "end") {
-            const tcId = data.toolCallId || "";
-            // 用完整输出覆盖缓冲（如果有）
-            if (tcId && data.output) {
-              cmdOutputBuffers.set(tcId, data.output);
-            }
-            // 不在这里发 tool_result，等 tool.phase=result 统一发
-            return;
-          }
-
-          // ── item 事件：用于前端状态文字（不重复发 tool_call）──
-          if (stream === "item" && data.phase === "update" && data.progressText) {
-            sendToClient({ __status: data.progressText, _event: "agent_status", kind: "progress", label: data.progressText });
-            return;
-          }
-          // item start/end 不再发 tool_call/tool_result（已由 tool stream 处理）
-          if (stream === "item") return;
-
-          // ── tool update（忽略）──
-          if (stream === "tool" && data.phase === "update") return;
-
-          // ── 运行结束 ──
-          if (stream === "lifecycle" && data.phase === "end") {
-            // 扫描 workspace 目录，找出本次对话产生的新文件，触发前端预览/下载按钮
-            try {
-              const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-              const wsDir = `${remoteHome}/.openclaw/workspace-${meta.agentId}`;
-              if (existsSync(wsDir) && lastUserSendMs > 0) {
-                const SKIP_DIRS = new Set(["skills", "memory", "node_modules", ".git", ".dreams", "dist", "build", ".openclaw"]);
-                const newFiles: Array<{ name: string; size: number; path: string }> = [];
-                const scanDir = (dir: string, relBase: string, depth: number) => {
-                  if (depth > 3) return;
-                  try {
-                    for (const entry of readdirSync(dir)) {
-                      if (entry.startsWith(".")) continue;
-                      if (depth === 0 && SKIP_DIRS.has(entry)) continue;
-                      const full = `${dir}/${entry}`;
-                      const rel = relBase ? `${relBase}/${entry}` : entry;
-                      try {
-                        const s = statSync(full);
-                        if (s.isFile()) {
-                          if (s.mtimeMs >= lastUserSendMs - 1000) {
-                            newFiles.push({ name: entry, size: s.size, path: rel });
-                          }
-                        } else if (s.isDirectory()) {
-                          scanDir(full, rel, depth + 1);
-                        }
-                      } catch {}
-                    }
-                  } catch {}
-                };
-                scanDir(wsDir, "", 0);
-                if (newFiles.length > 0) {
-                  // 用 _event 标记，前端 Home.tsx 已经在监听 workspace_files
-                  sendToClient({ _event: "workspace_files", adoptId: meta.adoptId, files: newFiles });
+          for (const evt of normalized.events) {
+            switch (evt.type) {
+              case "delta":
+                if (memAcc) {
+                  memAcc.appendDelta(evt.content);
+                  if (memAcc.getBuffer().length === evt.content.length) {
+                    console.log("[MEMORY-DEBUG] first delta received");
+                  }
                 }
-              }
-            } catch (e) {
-              console.error("[WS] workspace scan error:", e);
-            }
+                sendToClient({
+                  choices: [{ index: 0, delta: { content: evt.content }, finish_reason: null }],
+                });
+                break;
 
-            sendToClient({ __stream_end: true });
-            sendToClient({
-              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-            });
-            return;
+              case "thinking":
+                sendToClient({
+                  choices: [{ index: 0, delta: { reasoning_content: evt.content }, finish_reason: null }],
+                });
+                break;
+
+              case "tool_call":
+                if (evt.phase === "start") {
+                  const tcId = evt.toolCallId || `tc_${Date.now()}`;
+                  cmdOutputBuffers.set(tcId, "");
+                  sendToClient({
+                    _event: "tool_call",
+                    id: tcId,
+                    name: evt.name || "tool",
+                    arguments: JSON.stringify(evt.args || {}),
+                  });
+                } else {
+                  const tcId = evt.toolCallId || "";
+                  const buffered = cmdOutputBuffers.get(tcId) || "";
+                  cmdOutputBuffers.delete(tcId);
+                  sendToClient({
+                    _event: "tool_result",
+                    tool_call_id: tcId,
+                    result: buffered || (typeof evt.result === "string" ? evt.result : ""),
+                    is_error: Boolean(evt.isError),
+                  });
+                }
+                break;
+
+              case "command_output":
+                if (evt.phase === "delta") {
+                  const tcId = evt.toolCallId || "";
+                  if (tcId && cmdOutputBuffers.has(tcId)) {
+                    cmdOutputBuffers.set(tcId, (cmdOutputBuffers.get(tcId) || "") + (evt.output || ""));
+                  }
+                } else {
+                  const tcId = evt.toolCallId || "";
+                  if (tcId && evt.output) {
+                    cmdOutputBuffers.set(tcId, evt.output);
+                  }
+                }
+                break;
+
+              case "item_status":
+                sendToClient({ __status: evt.progressText, _event: "agent_status", kind: "progress", label: evt.progressText });
+                break;
+
+              case "lifecycle_end":
+                emitWorkspaceFiles();
+                sawLifecycleEnd = true;
+                sendToClient({ __stream_end: true });
+                sendToClient({
+                  choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+                });
+                finalizeChatNormal();
+                break;
+
+              case "chat_final":
+                if (memAcc) {
+                  console.log("[MEMORY-DEBUG] chat final, flushing memAcc, buffer len:", memAcc.getBuffer().length);
+                  memAcc.flush();
+                  memAcc = null;
+                }
+                sendToClient({
+                  choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+                });
+                markChatRunComplete(String(sessionKey || ""), activeClientRunId, "chat_final");
+                break;
+
+              case "error":
+                sendToClient({ error: evt.message });
+                markChatRunComplete(String(sessionKey || ""), activeClientRunId, "gateway_error");
+                break;
+
+              default:
+                break;
+            }
           }
           return;
         }
 
-        // ── chat final 事件 ──
-        if (msg.type === "event" && msg.event === "chat" && msg.payload?.state === "final") {
-          if (memAcc) { console.log("[MEMORY-DEBUG] chat final, flushing memAcc, buffer len:", memAcc.getBuffer().length); memAcc.flush(); memAcc = null; }
-          sendToClient({
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        // ── 已知 no-op 事件短路（避免触发 unmatched warn 日志噪音）──
+        // 这两类事件被 normalizer (event-normalizer.ts) 显式 ignore（return []）：
+        //   - lifecycle.start: agent stream 启动信号，灵虾不消费
+        //   - chat.state=delta: cumulative message snapshot，灵虾文本来自 agent/assistant，不重复 append
+        //   - item.start/end: item 生命周期边界，灵虾只消费 item.update(progressText)
+        // 修改 normalizer 的 no-op 列表时记得同步这里——双层 ignore 必须保持同步，否则要么
+        // 出现"normalizer 漏覆盖" warn 噪音，要么"无声 drop"再次成 bug（参考 2026-04-29 教训）
+        if (normalized.kind === "noop" || normalized.kind === "ignored") {
+          return;
+        }
+        if (normalized.kind === "unmatched") {
+          console.warn("[WS] unmatched runtime event after normalizer:", {
+            event: msg.event,
+            stream: msg.payload?.stream,
+            state: msg.payload?.state,
+            phase: msg.payload?.data?.phase,
+            sessionKey: msg.payload?.sessionKey,
+            reason: normalized.reason,
           });
           return;
         }
 
-        // ── sessions.send 响应 ──
+        // Legacy agent/chat fallback removed: Runtime events are normalized by normalizeWsEvent above.
+        // RPC response handling remains below.
         if (msg.type === "res" && msg.ok === true && ready) return;
 
         // ── 其他 RPC 错误 ──
@@ -315,8 +430,41 @@ export function registerWSProxy(server: Server) {
     };
 
     gw.on("open", () => { console.log("[WS-GW] opened for", meta.adoptId); startHeartbeat(); });
-    gw.on("error", (e) => { console.error("[WS] gw error:", meta.adoptId, e.message); });
+    gw.on("error", (e) => {
+      console.error("[WS] gw error:", meta.adoptId, e.message);
+      // 2026-04-29 批次 b（GPT round-7 修正）：clientClosed 时跳过——用户已离开不该触发 recover
+      if (clientClosed) return;
+      if (activeChat && !chatFinalized) {
+        finalizeChatTruncated("gw_error");
+      }
+    });
     gw.on("close", (code) => {
+      // 2026-04-29 批次 b（GPT round-7 修正）：客户端主动断 vs Gateway 异常断要分开
+      // - clientClosed=true：用户关浏览器/断网，不发 __stream_truncated（用户已不可达），不算 abnormal 指标
+      //   只写一条 client_closed 诊断日志，cleanup state，guard 后续 gw.error 不再 finalize
+      // - clientClosed=false：真 Gateway 异常 → truncated → 前端启动 recover
+      if (clientClosed) {
+        if (activeChat && !chatFinalized) {
+          chatFinalized = true;
+          activeChat = false;
+          appendLogAsync("claw-exec-detail.log", {
+            ts: new Date().toISOString(),
+            event: "ws_chat_client_closed",
+            transport: "ws",
+            adoptId: meta.adoptId,
+            agentId: meta.agentId,
+            userId: meta.userId,
+            sessionKey,
+            durationMs: chatStartedAt > 0 ? Date.now() - chatStartedAt : 0,
+            sawLifecycleEnd,
+            flag: process.env.SSE_TRUNCATE_DETECT || "off",
+          });
+        }
+        return;
+      }
+      if (activeChat && !chatFinalized) {
+        finalizeChatTruncated("gw_close");
+      }
       if (client.readyState === WebSocket.OPEN) {
         const safeCode = (typeof code === "number" && code >= 1000 && code <= 4999 && code !== 1005 && code !== 1006) ? code : 1011;
         try { client.close(safeCode); } catch { /* swallow: invalid code / already closed */ }
@@ -329,6 +477,33 @@ export function registerWSProxy(server: Server) {
         const msg = JSON.parse(raw.toString());
         if (msg.type === "chat" && sessionKey) {
           lastUserSendMs = Date.now();
+          // 2026-04-29 批次 b：重置 chat-level state，准备追踪本轮 chat 完成态
+          chatStartedAt = lastUserSendMs;
+          sawLifecycleEnd = false;
+          chatFinalized = false;
+          activeChat = true;
+          activeClientRunId = normalizeClientRunId((msg as any).clientRunId);
+          if (sessionKey && activeClientRunId) {
+            const run = markChatRunStarted({
+              sessionKey,
+              clientRunId: activeClientRunId,
+              transport: "ws",
+              message: String(msg.message || ""),
+            });
+            if (run?.status === "in_flight") {
+              sendToClient({
+                __in_flight: true,
+                transport: "ws",
+                sessionKey,
+                clientRunId: activeClientRunId,
+                runId: run.run.runId,
+                startedAt: run.run.startedAt,
+                lastEventAt: run.run.lastEventAt,
+                reason: "duplicate_ws_send",
+              });
+              return;
+            }
+          }
           // 每次用户发消息，创建新的记忆缓冲器
           if (memAcc) memAcc.flush(); // flush 上一轮
           memAcc = new ResponseAccumulator(meta.userId, "main-chat", String(msg.message || ""));
@@ -338,14 +513,30 @@ export function registerWSProxy(server: Server) {
           try {
             const wsWriter = new WsStreamWriter(client, WebSocket.OPEN);
             console.log("[PM-DEBUG] routeMessage called, msg:", String(msg.message || "").slice(0, 50)); const handled = await routeMessage(meta.adoptId, String(msg.message || ""), wsWriter);
-            if (handled) return; // 平台已处理，不发 Gateway
+            if (handled) {
+              markChatRunComplete(String(sessionKey || ""), activeClientRunId, "platform_handled");
+              activeChat = false;
+              chatFinalized = true;
+              return;
+            } // 平台已处理，不发 Gateway
           } catch (e) {
             console.error("[WS] platform router error:", e);
           }
 
+          const chatRunId = activeClientRunId || randomUUID();
+          // OpenClaw 2026.4.29 routes WebChat through chat.send. sessions.send no
+          // longer carries WebChat-specific controls such as thinking/idempotency.
           const rpc = JSON.stringify({
-            type: "req", id: randomUUID(), method: "sessions.send",
-            params: { key: sessionKey, message: msg.message },
+            type: "req",
+            id: randomUUID(),
+            method: "chat.send",
+            params: {
+              sessionKey,
+              message: String(msg.message || ""),
+              idempotencyKey: chatRunId,
+              thinking: "off",
+              deliver: false,
+            },
           });
           if (ready && gw?.readyState === WebSocket.OPEN) gw.send(rpc);
           else pending.push(rpc);
@@ -353,8 +544,17 @@ export function registerWSProxy(server: Server) {
       } catch {}
     });
 
-    client.on("close", () => { console.log("[WS] disconnected:", meta.adoptId); stopHeartbeat(); gw?.close(); });
-    client.on("error", () => { stopHeartbeat(); gw?.close(); });
+    client.on("close", () => {
+      clientClosed = true;
+      console.log("[WS] disconnected:", meta.adoptId);
+      stopHeartbeat();
+      gw?.close();
+    });
+    client.on("error", () => {
+      clientClosed = true;
+      stopHeartbeat();
+      gw?.close();
+    });
   });
 
   console.log("[WS-PROXY] registered at /api/claw/ws");

@@ -38,6 +38,7 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [inputFocused, setInputFocused] = useState(false);
 
   // ── 语音录制状态 ──
   const [recording, setRecording] = useState(false);
@@ -356,15 +357,31 @@ export function ChatInput({
       {/* 主输入卡片 */}
       <div
         className={`lingxia-input-wrap ${streaming ? "is-streaming" : ""}`}
+        data-focused={inputFocused ? "true" : "false"}
+        onMouseDown={() => setInputFocused(true)}
+        onFocusCapture={() => setInputFocused(true)}
+        onBlurCapture={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setInputFocused(false);
+          }
+        }}
         style={{
           background: "var(--oc-card)",
-          border: recording ? "1px solid var(--oc-accent)" : "1px solid var(--oc-border)",
+          border: recording
+            ? "1px solid var(--oc-accent)"
+            : inputFocused
+              ? "1px solid color-mix(in oklab, var(--oc-accent) 72%, var(--oc-border))"
+              : "1px solid var(--oc-border)",
+          outline: "none",
+          outlineOffset: 0,
           borderRadius: 14,
           boxShadow: recording
             ? "0 0 0 2px rgba(255,92,92,0.2), 0 2px 16px rgba(0,0,0,0.14)"
-            : "0 2px 16px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08)",
+            : inputFocused
+              ? "0 0 0 3px rgba(255,92,92,0.16), 0 2px 14px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)"
+              : "0 2px 16px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08)",
           overflow: "hidden",
-          transition: "border-color 0.2s, box-shadow 0.2s",
+          transition: "border-color 0.2s, box-shadow 0.2s, outline-color 0.2s",
         }}
       >
         <div className="px-4 pt-3 pb-1">
@@ -401,10 +418,11 @@ export function ChatInput({
                 const ta = e.currentTarget;
                 detectMention(ta.value, ta.selectionStart ?? ta.value.length);
               }}
+              onFocus={() => setInputFocused(true)}
               onKeyDown={onKeyDown}
               placeholder={placeholder}
               rows={1}
-              className="w-full bg-transparent text-sm resize-none focus:outline-none"
+              className="w-full bg-transparent text-sm resize-none outline-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
               style={{
                 color: "var(--oc-text-primary)",
                 lineHeight: "22px",
@@ -412,6 +430,10 @@ export function ChatInput({
                 maxHeight: 144,
                 overflowY: "hidden",
                 display: "block",
+                border: "none",
+                outline: "none",
+                boxShadow: "none",
+                WebkitAppearance: "none",
               }}
             />
           )}

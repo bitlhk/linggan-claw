@@ -1,7 +1,7 @@
 /**
  * ClawAdmin — 灵虾管理控制台（独立页面）
  * 风格：白色主题，与灵感官网/ClawHome 一致
- * Tab: 实例管理 / 系统设置
+ * Tab: 实例管理 / 系统设置 / 组织协作
  */
 
 import { useState, useEffect } from "react";
@@ -15,10 +15,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck } from "lucide-react";
+import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck, Building2 } from "lucide-react";
 import { UsageStatsTab } from "@/components/pages/UsageStatsTab";
 import { TenantAuditTab } from "@/components/pages/TenantAuditTab";
 import { BizAgentsPanel } from "@/components/BizAgentsPanel";
+import { CollaborationTab } from "./admin/CollaborationTab";
 import { toast } from "sonner";
 import { useBrand, invalidateBrandClientCache } from "@/lib/useBrand";
 import { BRAND_PRESETS } from "@shared/brand";
@@ -371,6 +372,17 @@ export default function ClawAdmin() {
     else setSelectedIds(rows.map((r: any) => r.id));
   };
 
+  const navItems = [
+    { value: "instances", label: "实例管理", description: "子虾实例与权限", icon: Users },
+    { value: "collaboration", label: "组织协作", description: "空间、成员与准入", icon: Building2 },
+    { value: "skills", label: "技能市场", description: "上架、审核与市场", icon: Sparkles },
+    { value: "usage", label: "使用统计", description: "访问与使用趋势", icon: BarChart3 },
+    { value: "settings", label: "系统设置", description: "灵虾运行配置", icon: Settings },
+    { value: "brand", label: "品牌设置", description: "名称、视觉与身份", icon: Sparkles },
+    { value: "collab", label: "智能体协作", description: "协作能力管理", icon: Zap },
+    { value: "tenant-audit", label: "隔离审计", description: "租户隔离检查", icon: ShieldCheck },
+  ];
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50/80">
       {/* Header */}
@@ -391,37 +403,34 @@ export default function ClawAdmin() {
       </header>
 
       {/* Body */}
-      <main className="p-6 max-w-6xl mx-auto w-full">
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-6 bg-transparent border-b border-gray-200 rounded-none p-0 h-auto w-full justify-start gap-0">
-            <TabsTrigger value="instances" className="clawadmin-tab gap-1.5 data-[state=active]:clawadmin-tab-active">
-              <Users className="w-4 h-4" />
-              实例管理
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="clawadmin-tab gap-1.5">
-              <Settings className="w-4 h-4" />
-              系统设置
-            </TabsTrigger>
-            <TabsTrigger value="brand" className="clawadmin-tab gap-1.5">
-              <Sparkles size={14} /> 品牌设置
-            </TabsTrigger>
-            <TabsTrigger value="skills" className="clawadmin-tab gap-1.5">
-              <Sparkles className="w-4 h-4" />
-              技能市场
-            </TabsTrigger>
-            <TabsTrigger value="usage" className="clawadmin-tab gap-1.5">
-              <BarChart3 size={14} />
-              使用统计
-            </TabsTrigger>
-            <TabsTrigger value="collab" className="clawadmin-tab gap-1.5">
-              <Zap className="w-4 h-4" />
-              智能体协作
-            </TabsTrigger>
-            <TabsTrigger value="tenant-audit" className="clawadmin-tab gap-1.5">
-              <ShieldCheck className="w-4 h-4" />
-              隔离审计
-            </TabsTrigger>
-          </TabsList>
+      <main className="mx-auto w-full max-w-[1440px] p-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <aside className="sticky top-6 max-h-[calc(100vh-3rem)] self-start overflow-y-auto rounded-2xl border border-gray-200 bg-white/90 p-3 shadow-sm">
+            <div className="px-3 py-2">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-gray-400">Console</div>
+              <div className="mt-1 text-sm font-semibold text-gray-900">管理导航</div>
+            </div>
+            <TabsList className="mt-2 grid h-auto gap-1 bg-transparent p-0">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <TabsTrigger
+                    key={item.value}
+                    value={item.value}
+                    className="group h-auto justify-start rounded-xl border border-transparent px-3 py-3 text-left text-gray-600 transition hover:border-gray-200 hover:bg-gray-50 data-[state=active]:border-red-200 data-[state=active]:bg-red-50 data-[state=active]:text-red-700 data-[state=active]:shadow-sm"
+                  >
+                    <Icon className="mr-3 h-4 w-4 shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium leading-none">{item.label}</span>
+                      <span className="mt-1 block truncate text-[11px] font-normal text-gray-400 group-data-[state=active]:text-red-500">{item.description}</span>
+                    </span>
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+          </aside>
+
+          <section className="min-w-0">
 
           {/* ── 实例管理 ── */}
           <TabsContent value="instances" className="space-y-4">
@@ -821,8 +830,12 @@ export default function ClawAdmin() {
               <BizAgentsPanel />
             </Card>
           </TabsContent>
+          <TabsContent value="collaboration" className="space-y-4">
+            <CollaborationTab />
+          </TabsContent>
           <TabsContent value="usage" className="space-y-4">            <UsageStatsTab />          </TabsContent>
           <TabsContent value="tenant-audit" className="space-y-4">            <TenantAuditTab />          </TabsContent>
+          </section>
         </Tabs>
       </main>
     </div>

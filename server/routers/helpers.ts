@@ -56,6 +56,8 @@ export const IFRAME_BYPASS_KEY = "iframe_bypass_experience_ids";
 
 type ClawModelOption = { id: string; name: string; desc?: string; isDefault?: boolean };
 
+const HIDDEN_FROM_FRONTEND = new Set<string>(["maas/deepseek-v4-flash", "glm5/glm-5"]); // 2026-04-27: maas 限流 3rpm / glm5/glm-5 老版本已被 5.1 取代
+
 export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
   try {
     const raw = readFileSync(OPENCLAW_JSON_PATH, "utf8");
@@ -112,6 +114,9 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
         isDefault: true,
       });
     }
+
+    // 2026-04-27: 隐藏不可用模型（华为 MaaS deepseek-v4-flash 限流 3 rpm）
+    for (const k of HIDDEN_FROM_FRONTEND) uniq.delete(k);
 
     // 确保有且仅有一个 isDefault（优先保留 defaults.primary，否则标第一个）
     const arr = Array.from(uniq.values());

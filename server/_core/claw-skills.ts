@@ -2,17 +2,172 @@ import express from "express";
 import { createHash } from "crypto";
 import { execSync } from "child_process";
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, copyFileSync, readdirSync } from "fs";
+import path from "path";
+import type { SkillSource } from "../../shared/types/skill";
 import {
   APP_ROOT,
   requireClawOwner,
   resolveRuntimeAgentId,
   bumpSessionEpoch,
   clearAgentSessionsCache,
-  sanitizeRelPath,
 } from "./helpers";
+import { skillRegistry } from "./skills/skill-registry";
+import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer } from "./skills/skill-source";
+
+function registryErrorStatus(kind?: string): number {
+  if (kind === "not_found") return 404;
+  if (kind === "permission_denied") return 403;
+  if (kind === "validation_failed") return 400;
+  return 500;
+}
 
 export function registerSkillRoutes(app: express.Express) {
-  app.post("/api/claw/skill-package/upload", async (req, res) => {
+  app.get("/api/claw/skills/registry", async (req, res) => {
+    try {
+      const adoptId = String(req.query.adoptId || "").trim();
+      if (!adoptId) {
+        res.status(400).json({ error: "adoptId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      const result = await skillRegistry.listSkills(adoptId);
+      if (!result.ok) {
+        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        return;
+      }
+      res.json({ items: result.value });
+    } catch (e) {
+      console.error("[skills registry] list failed", e);
+      res.status(500).json({ error: "list skills failed" });
+    }
+  });
+
+  app.post("/api/claw/skills/reconcile", async (req, res) => {
+    try {
+      const body = (req.body || {}) as any;
+      const adoptId = String(body.adoptId || "").trim();
+      const skillId = String(body.skillId || "").trim();
+      if (!adoptId) {
+        res.status(400).json({ error: "adoptId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      const result = await skillRegistry.reconcile(adoptId, skillId ? { skillId } : undefined);
+      if (!result.ok) {
+        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        return;
+      }
+      console.log("[SKILL-RECONCILE]", {
+        adoptId,
+        skillId: skillId || "(all)",
+        scanned: result.value.scanned,
+        changed: result.value.changed,
+        failed: result.value.failed,
+      });
+      res.json({ report: result.value });
+    } catch (e) {
+      console.error("[skills registry] reconcile failed", e);
+      res.status(500).json({ error: "reconcile skills failed" });
+    }
+  });
+
+  app.post("/api/claw/skills/set-enabled", async (req, res) => {
+    try {
+      const body = (req.body || {}) as any;
+      const adoptId = String(body.adoptId || "").trim();
+      const skillId = String(body.skillId || "").trim();
+      const enabled = !!body.enabled;
+      if (!adoptId || !skillId) {
+        res.status(400).json({ error: "adoptId and skillId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      const result = await skillRegistry.setEnabled(adoptId, skillId, enabled);
+      if (!result.ok) {
+        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        return;
+      }
+      res.json({ item: result.value });
+    } catch (e) {
+      console.error("[skills registry] set-enabled failed", e);
+      res.status(500).json({ error: "set skill enabled failed" });
+    }
+  });
+
+  app.post("/api/claw/skills/uninstall", async (req, res) => {
+    try {
+      const body = (req.body || {}) as any;
+      const adoptId = String(body.adoptId || "").trim();
+      const skillId = String(body.skillId || "").trim();
+      if (!adoptId || !skillId) {
+        res.status(400).json({ error: "adoptId and skillId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      const result = await skillRegistry.uninstall(adoptId, skillId);
+      if (!result.ok) {
+        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("[skills registry] uninstall failed", e);
+      res.status(500).json({ error: "uninstall skill failed" });
+    }
+  });
+
+  app.post("/api/claw/skills/destroy", async (req, res) => {
+    try {
+      const body = (req.body || {}) as any;
+      const adoptId = String(body.adoptId || "").trim();
+      const skillId = String(body.skillId || "").trim();
+      if (!adoptId || !skillId) {
+        res.status(400).json({ error: "adoptId and skillId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      const result = await skillRegistry.destroy(adoptId, skillId);
+      if (!result.ok) {
+        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("[skills registry] destroy failed", e);
+      res.status(500).json({ error: "delete skill failed" });
+    }
+  });
+
+  app.post("/api/claw/skills/rename", async (req, res) => {
+    try {
+      const body = (req.body || {}) as any;
+      const adoptId = String(body.adoptId || "").trim();
+      const skillId = String(body.skillId || "").trim();
+      const displayName = String(body.displayName || "").trim();
+      if (!adoptId || !skillId || !displayName) {
+        res.status(400).json({ error: "adoptId, skillId and displayName required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      const result = await skillRegistry.rename(adoptId, skillId, displayName);
+      if (!result.ok) {
+        res.status(registryErrorStatus(result.error.kind)).json({ error: result.error.detail, kind: result.error.kind });
+        return;
+      }
+      res.json({ item: result.value });
+    } catch (e) {
+      console.error("[skills registry] rename failed", e);
+      res.status(500).json({ error: "rename skill failed" });
+    }
+  });
+
+  app.post("/api/claw/skill-package/inspect", async (req, res) => {
     try {
       const body = (req.body || {}) as any;
       const adoptId = String(body.adoptId || "").trim();
@@ -25,8 +180,8 @@ export function registerSkillRoutes(app: express.Express) {
       }
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      if (!filename.toLowerCase().endsWith(".zip")) {
-        res.status(400).json({ error: "only .zip allowed" });
+      if (!/\.(zip|skill)$/i.test(filename)) {
+        res.status(400).json({ error: "only .zip or .skill allowed" });
         return;
       }
       if (!contentBase64) {
@@ -35,11 +190,65 @@ export function registerSkillRoutes(app: express.Express) {
       }
 
       const fileBuf = Buffer.from(contentBase64, "base64");
-      const MAX_BYTES = 10 * 1024 * 1024;
-      if (fileBuf.length <= 0 || fileBuf.length > MAX_BYTES) {
-        res.status(400).json({ error: "file too large (max 10MB)" });
+      if (fileBuf.length <= 0 || fileBuf.length > MAX_SKILL_PACKAGE_BYTES) {
+        res.status(400).json({ error: "file too large (max 30MB)" });
         return;
       }
+      const parsed = await parseSkillPackageBuffer(fileBuf, filename);
+      res.json({
+        ok: true,
+        skill: {
+          skillId: parsed.skillId,
+          displayName: parsed.displayName,
+          description: parsed.description,
+          manifest: parsed.manifest,
+          mdMeta: parsed.mdMeta,
+          totalBytes: parsed.totalBytes,
+          warnings: parsed.warnings,
+        },
+      });
+    } catch (e: any) {
+      console.error("[skill-package inspect] failed", e);
+      res.status(400).json({ error: String(e?.message || "inspect skill package failed") });
+    }
+  });
+
+  app.post("/api/claw/skill-package/upload", async (req, res) => {
+    try {
+      const body = (req.body || {}) as any;
+      const adoptId = String(body.adoptId || "").trim();
+      const filename = String(body.filename || "").trim();
+      const contentBase64 = String(body.contentBase64 || "").trim();
+      const requestedName = String(body.displayName || "").trim();
+      const requestedDescription = String(body.description || "").trim();
+
+      if (!adoptId) {
+        res.status(400).json({ error: "adoptId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+      if (!/\.(zip|skill)$/i.test(filename)) {
+        res.status(400).json({ error: "only .zip or .skill allowed" });
+        return;
+      }
+      if (!contentBase64) {
+        res.status(400).json({ error: "contentBase64 required" });
+        return;
+      }
+
+      const fileBuf = Buffer.from(contentBase64, "base64");
+      if (fileBuf.length <= 0 || fileBuf.length > MAX_SKILL_PACKAGE_BYTES) {
+        res.status(400).json({ error: "file too large (max 30MB)" });
+        return;
+      }
+      const parsed = await parseSkillPackageBuffer(fileBuf, filename);
+      const displayName = requestedName || parsed.displayName;
+      if (!displayName || displayName.length < 2) {
+        res.status(400).json({ error: "displayName must be at least 2 characters" });
+        return;
+      }
+      const displayDescription = requestedDescription || parsed.description;
 
       const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
       const qDir = `${APP_ROOT}/data/skill-packages/${adoptId}`;
@@ -50,79 +259,57 @@ export function registerSkillRoutes(app: express.Express) {
 
       const sha256 = createHash("sha256").update(fileBuf).digest("hex");
 
-      // ── Zip 安全扫描：纯 Node.js，不依赖 Python ──
-      let result: { ok: boolean; errors: string[]; manifest: any; md_meta: { title: string; description: string } } = {
-        ok: true, errors: [], manifest: {}, md_meta: { title: "", description: "" }
-      };
-      try {
-        const AdmZip = (await import("adm-zip")).default;
-        const zip = new AdmZip(zipPath);
-        const entries = zip.getEntries();
-        if (entries.length > 300) {
-          result.ok = false; result.errors.push("too many entries");
-        } else {
-          for (const e of entries) {
-            if (!sanitizeRelPath(e.entryName)) {
-              result.ok = false; result.errors.push("path traversal"); break;
-            }
-          }
-        }
-        if (result.ok) {
-          const mdEntry = entries.find((e: any) => e.entryName.toLowerCase().endsWith("skill.md"));
-          if (mdEntry) {
-            const txt = mdEntry.getData().toString("utf-8").slice(0, 8000);
-            const mdLines = txt.split(/\r?\n/);
-            let mi = 0;
-            if (mdLines[0]?.trim() === "---") {
-              mi = 1;
-              while (mi < mdLines.length && mdLines[mi]?.trim() !== "---") mi++;
-              if (mi < mdLines.length) mi++;
-            }
-            for (let j = mi; j < mdLines.length; j++) {
-              const t = mdLines[j].trim();
-              if (t.startsWith("#")) { result.md_meta.title = t.replace(/^#+\s*/, "").trim(); break; }
-            }
-            for (let j = mi; j < mdLines.length; j++) {
-              const t = mdLines[j].trim();
-              if (t && !t.startsWith("#") && !t.startsWith("---")) {
-                result.md_meta.description = t.slice(0, 180); break;
-              }
-            }
-          }
-          const mfEntry = entries.find((e: any) => e.entryName.endsWith("manifest.json") || e.entryName.endsWith("skill.json"));
-          if (mfEntry) {
-            try { result.manifest = JSON.parse(mfEntry.getData().toString("utf-8")); } catch {}
-          }
-        }
-      } catch (scanErr: any) {
-        result.ok = false; result.errors.push(String(scanErr?.message || scanErr));
-      }
-
-      if (!result.ok) {
-        res.status(400).json({ error: "invalid skill package", details: result.errors || [] });
-        return;
-      }
-
       // 写入 index.json
       const idxPathUpload = `${APP_ROOT}/data/skill-packages/index.json`;
       let idxRows: any[] = [];
       if (existsSync(idxPathUpload)) {
         const rawIdx = String(readFileSync(idxPathUpload, "utf-8") || "[]");
-        try { idxRows = JSON.parse(rawIdx); } catch { idxRows = []; }
+          try { idxRows = JSON.parse(rawIdx); } catch { idxRows = []; }
       }
-      const mdMeta = result.md_meta || {};
-      const displayName = String((result.manifest?.name || result.manifest?.title) || mdMeta.title || safeName.replace(/\.zip$/i, ""));
-      const displayDescription = String(result.manifest?.description || mdMeta.description || "");
-      idxRows.push({
+      const mdMeta = parsed.mdMeta || {};
+      const indexRow = {
         adoptId, filename: safeName, path: zipPath, sha256, size: fileBuf.length,
-        manifest: result.manifest || {}, mdMeta,
+        manifest: parsed.manifest || {}, mdMeta,
         displayName, displayDescription,
+        installedSkillId: parsed.skillId,
+        installedAt: new Date().toISOString(),
         createdAt: new Date().toISOString()
-      });
+      };
+      idxRows.push(indexRow);
       writeFileSync(idxPathUpload, JSON.stringify(idxRows, null, 2), "utf-8");
 
+      const source: SkillSource = {
+        kind: "uploaded",
+        skillId: parsed.skillId,
+        displayName,
+        description: displayDescription,
+        sourcePath: zipPath,
+        version: String(parsed.manifest?.version || ""),
+      };
+      const installed = await skillRegistry.install(adoptId, source);
+      if (!installed.ok) {
+        res.status(registryErrorStatus(installed.error.kind)).json({ error: installed.error.detail, kind: installed.error.kind });
+        return;
+      }
+      await skillRegistry.updateScan(adoptId, parsed.skillId, {
+        warnings: parsed.warnings,
+        scannedAt: new Date().toISOString(),
+      });
+      const reconciled = await skillRegistry.reconcile(adoptId, { skillId: parsed.skillId });
+      if (!reconciled.ok) {
+        res.status(registryErrorStatus(reconciled.error.kind)).json({ error: reconciled.error.detail, kind: reconciled.error.kind });
+        return;
+      }
+
       bumpSessionEpoch(adoptId);
-      res.json({ ok: true, file: { filename: safeName, sha256, size: fileBuf.length }, manifest: result.manifest || {} });
+      res.json({
+        ok: true,
+        file: { filename: safeName, sha256, size: fileBuf.length },
+        item: installed.value,
+        report: reconciled.value,
+        manifest: parsed.manifest || {},
+        warnings: parsed.warnings,
+      });
     } catch (e) {
       console.error("[skill-package upload] failed", e);
       res.status(500).json({ error: "skill package upload failed" });

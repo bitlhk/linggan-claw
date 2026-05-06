@@ -29,32 +29,24 @@ function safeFilename(s: string): string {
     .slice(0, 200);
 }
 
-// 校验当前 user 是否是该协作 session 的成员或发起人
+// 校验当前 user 是否可查看该协作 session，且 requestId 属于该 session。
 async function userCanAccessCoop(userId: number, sessionId: string, requestId: number): Promise<boolean> {
   const { getDb } = await import("../db");
-  const { clawCollabRequests, lxCoopSessions } = await import("../../drizzle/schema");
+  const { clawCollabRequests } = await import("../../drizzle/schema");
+  // Dynamic import keeps this standalone Express route decoupled from DB helper load order.
+  const { canViewCoopSession } = await import("../db/coop-identity");
   const db = await getDb();
   if (!db) return false;
-  // 1) 看 request 是否属于该 session 且 targetUser 是当前 user
+
+  const access = await canViewCoopSession(userId, sessionId);
+  if (!access.ok) return false;
+
   const reqRows = await db
-    .select({ sessionId: clawCollabRequests.sessionId, targetUserId: clawCollabRequests.targetUserId })
+    .select({ sessionId: clawCollabRequests.sessionId })
     .from(clawCollabRequests)
     .where(eq(clawCollabRequests.id, requestId))
     .limit(1);
-  if (reqRows[0]?.targetUserId === userId && reqRows[0]?.sessionId === sessionId) return true;
-  // 2) 看 user 是否是该 session 的 creator
-  const sesRows = await db
-    .select({ creator: lxCoopSessions.creatorUserId })
-    .from(lxCoopSessions)
-    .where(eq(lxCoopSessions.id, sessionId))
-    .limit(1);
-  if (sesRows[0]?.creator === userId) return true;
-  // 3) 是否是该 session 任何 member（看附件全员可见）
-  const memberRows = await db
-    .select({ targetUserId: clawCollabRequests.targetUserId })
-    .from(clawCollabRequests)
-    .where(eq(clawCollabRequests.sessionId, sessionId));
-  return memberRows.some((m) => m.targetUserId === userId);
+  return reqRows[0]?.sessionId === sessionId;
 }
 
 export function registerCoopUploadRoutes(app: express.Express) {

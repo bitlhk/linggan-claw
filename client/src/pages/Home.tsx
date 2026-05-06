@@ -25,16 +25,228 @@ import { ChatPage } from "@/components/pages/ChatPage";
 import { LINGXIA_SIDEBAR_NAV } from "@/config/navigation";
 import { sidebarIconMap } from "@/config/icons";
 import { applySettings as applyUiSettings, getSettings, subscribeSettings } from "@/lib/settings";
+import { useLingxiaChat } from "@/hooks/useLingxiaChat";
 
+
+
+// ── 2026-04-27: reasoning_content (DeepSeek-V4-Flash 等 reasoning 模型) 累积成虚拟 thinking toolCall ──
+// 渲染上完全复用 ChatMessage 现有的 GATEWAY_TOOL_META.thinking + lingxia-toolcard，零 UI 改动。
+// 设计要点（防三个真坑）：
+//   1) thinking 没显式 end 信号 → 收到 content delta 或 finish_reason=stop 时强制 mark done
+//   2) ID 用 ts+index 防同毫秒撞 ID
+//   3) 后端不发 tool_call event，纯前端制造，不会被 routeTool 拦截
+function applyReasoningDelta(msgs: any[], reasoningDelta: string): any[] {
+  if (msgs.length === 0) return msgs;
+  const lastIdx = msgs.length - 1;
+  const last = msgs[lastIdx];
+  if (last.role !== "assistant") return msgs;
+  const tcs = (last.toolCalls || []) as any[];
+  const running = tcs.find((tc: any) => tc.name === "thinking" && tc.status === "running");
+  let newTcs;
+  if (running) {
+    newTcs = tcs.map((tc: any) => tc === running ? { ...tc, result: (tc.result || "") + reasoningDelta } : tc);
+  } else {
+    const id = "thinking-" + Date.now() + "-" + tcs.length;
+    newTcs = [...tcs, { id, name: "thinking", arguments: "{}", result: reasoningDelta, status: "running" as const, ts: Date.now(), executor: "gateway" as const, _gateway: true }];
+  }
+  const next = [...msgs];
+  next[lastIdx] = { ...last, toolCalls: newTcs };
+  return next;
+}
+
+function markThinkingDone(msgs: any[]): any[] {
+  if (msgs.length === 0) return msgs;
+  const lastIdx = msgs.length - 1;
+  const last = msgs[lastIdx];
+  if (last.role !== "assistant") return msgs;
+  const tcs = (last.toolCalls || []) as any[];
+  const hasRunning = tcs.some((tc: any) => tc.name === "thinking" && tc.status === "running");
+  if (!hasRunning) return msgs;
+  const newTcs = tcs.map((tc: any) => (tc.name === "thinking" && tc.status === "running")
+    ? { ...tc, status: "done" as const, durationMs: Date.now() - tc.ts }
+    : tc);
+  const next = [...msgs];
+  next[lastIdx] = { ...last, toolCalls: newTcs };
+  return next;
+}
+
+// 2026-04-28 批次 2 A1：lingxiaMsgs 加稳定 id，恢复时按 id 替换不按 findLastIndex
+// 用于 SSE 截断 recover 时精确匹配目标消息——用户在 recover 期间发新消息也不串
+const makeLxMsgId = () => `lx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const makeClientRunId = () => `run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+type LxMsg = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  timeLabel: string;
+  status?: string;
+  usage?: { input: number; output: number };
+  model?: string;
+  contextWindow?: number;
+  contextPercent?: number;
+  toolCalls?: import("@/components/ChatMessage").ToolCallEntry[];
+  // 2026-04-29 批次 2 A3：截断恢复状态（仅 assistant 用）
+  recovering?: boolean;
+  recovered?: boolean;
+  recoveryFailed?: boolean;
+  partialText?: string;            // 截断时已显示的内容（恢复失败时保留）
+};
+
+function isLingxiaChatV2Enabled(userId?: number | string | null): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const queryFlag = params.get("chatv2");
+    if (queryFlag === "1") localStorage.setItem("lingxia_chat_v2", "1");
+    if (queryFlag === "0") localStorage.setItem("lingxia_chat_v2", "0");
+    if (localStorage.getItem("lingxia_chat_v2") === "0") return false;
+    if (localStorage.getItem("lingxia_chat_v2") === "1") return true;
+  } catch {}
+
+  const mode = String(import.meta.env.VITE_LINGXIA_CHAT_V2 || "off").toLowerCase();
+  if (mode === "on") return true;
+  if (mode === "allowlist") {
+    const ids = String(import.meta.env.VITE_LINGXIA_CHAT_V2_USERS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return !!userId && ids.includes(String(userId));
+  }
+  return false;
+}
+
+const backfillLxMsgIds = (raw: any): LxMsg[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((m: any) => ({
+    ...m,
+    id: typeof m?.id === "string" && m.id ? m.id : makeLxMsgId(),
+    role: m?.role === "assistant" ? "assistant" : "user",
+    text: String(m?.text ?? ""),
+    timeLabel: String(m?.timeLabel ?? new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })),
+    // 2026-04-29 批次 2 A3：重载后清空 recovering 瞬态——刷新前正在补偿的消息视为失败，避免 UI 卡住
+    recovering: false,
+  }));
+};
+
+// ── 2026-04-29 批次 2 A3：SSE 截断后恢复 ────────────────────────────
+// 收到 __stream_truncated 事件时启动短轮询 /api/claw/recover-status，
+// 拿到 OpenClaw trajectory 完整 assistantTexts 后按 lingxiaMsgs.id 替换。
+// 调用方需传入当前 lingxiaMsgs snapshot（来自 ref.current）——不能依赖
+// setState updater 闭包来抓 id（React 18 concurrent 下 updater 不保证同步执行）。
+async function handleStreamTruncated(
+  truncEvt: { adoptId?: string; streamEndMs?: number; chatCompletionId?: string | null },
+  currentMsgs: LxMsg[],
+  setLingxiaMsgs: React.Dispatch<React.SetStateAction<LxMsg[]>>,
+): Promise<void> {
+  const { adoptId, streamEndMs, chatCompletionId } = truncEvt;
+  if (!adoptId || typeof streamEndMs !== "number") {
+    console.warn("[recover] missing fields in __stream_truncated:", truncEvt);
+    return;
+  }
+
+  // 直接从 currentMsgs (caller 已传 ref.current) 抓最后 assistant id —— 不走 setState 副作用
+  const lastIdx = currentMsgs.length - 1;
+  if (lastIdx < 0 || currentMsgs[lastIdx].role !== "assistant") {
+    console.warn("[recover] no last assistant message in current snapshot");
+    return;
+  }
+  const myId = currentMsgs[lastIdx].id;
+  const partialSnapshot = currentMsgs[lastIdx].text;
+
+  // 标 recovering——按 id 找，因为到 updater 跑时数组顺序可能已变（用户瞬时发新消息）
+  setLingxiaMsgs((prev) => {
+    const idx = prev.findIndex((m) => m.id === myId);
+    if (idx < 0) return prev;
+    const next = [...prev];
+    next[idx] = {
+      ...next[idx],
+      recovering: true,
+      partialText: partialSnapshot,
+      text: (partialSnapshot || "") + "\n\n_⏳ 上游连接提前结束，正在从 OpenClaw 后台补全完整内容（最多 5 分钟）..._",
+    };
+    return next;
+  });
+  console.log("[recover] start polling for", myId, { adoptId, streamEndMs, chatCompletionId });
+
+  const MAX_ATTEMPTS = 60;   // 5 分钟 / 5 秒 = 60 次（约束 #4）
+  const INTERVAL_MS = 5000;
+  let attempts = 0;
+
+  const poll = async () => {
+    if (attempts >= MAX_ATTEMPTS) {
+      console.warn("[recover] timeout after", MAX_ATTEMPTS, "attempts");
+      setLingxiaMsgs((msgs) => msgs.map((m) =>
+        m.id === myId
+          ? {
+              ...m,
+              recovering: false,
+              recoveryFailed: true,
+              text: (m.partialText || m.text) +
+                "\n\n_⚠️ 内容补偿超时（5 分钟），可重试或查看 Workspace 产物_",
+            }
+          : m
+      ));
+      return;
+    }
+    attempts++;
+    try {
+      const r = await fetch("/api/claw/recover-status", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          adoptId,
+          streamEndMs,
+          chatCompletionId: chatCompletionId ?? null,
+        }),
+      });
+      const d = await r.json();
+      if (d.status === "ready") {
+        const recovered = String(d.text || "");
+        console.log("[recover] ✅ ready, replacing", recovered.length, "chars (matchType=" + d.matchType + ")");
+        setLingxiaMsgs((msgs) => msgs.map((m) =>
+          m.id === myId
+            ? { ...m, recovering: false, recovered: true, text: recovered, partialText: undefined }
+            : m
+        ));
+        return;
+      }
+      if (d.status === "failed") {
+        console.warn("[recover] ❌ failed:", d);
+        setLingxiaMsgs((msgs) => msgs.map((m) =>
+          m.id === myId
+            ? {
+                ...m,
+                recovering: false,
+                recoveryFailed: true,
+                text: (m.partialText || m.text) +
+                  `\n\n_⚠️ 内容补偿失败：${d.finalStatus || d.reason || "unknown"}，可重试或查看 Workspace 产物_`,
+              }
+            : m
+        ));
+        return;
+      }
+      // pending 继续轮询
+      setTimeout(poll, INTERVAL_MS);
+    } catch (e: any) {
+      console.warn("[recover] poll error:", e?.message);
+      setTimeout(poll, INTERVAL_MS);
+    }
+  };
+  // 第一次也等 5s——给 OpenClaw 写 trace.artifacts 留时间
+  setTimeout(poll, INTERVAL_MS);
+}
 
 export default function Home() {
   // 灵虾子域名聊天态（MVP）
   const brand = useBrand();
   const [lingxiaInput, setLingxiaInput] = useState("");
-  const [lingxiaMsgs, setLingxiaMsgs] = useState<Array<{ role: "user" | "assistant"; text: string; timeLabel: string; status?: string; usage?: { input: number; output: number }; model?: string; contextWindow?: number; contextPercent?: number; toolCalls?: import("@/components/ChatMessage").ToolCallEntry[] }>>(() => {
+  const [lingxiaMsgs, setLingxiaMsgs] = useState<LxMsg[]>(() => {
     try { const s = localStorage.getItem("lingxia-chat-history");
-return s ? JSON.parse(s) : []; } catch { return []; }
+return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
   });
+  // 2026-04-29 批次 2 A3：mirror ref 用于 SSE 异步 handler 拿稳定 snapshot
+  // React 18 concurrent 下 setState updater 不保证同步执行，不能在 updater 里抓 id 给外层用
+  const lingxiaMsgsRef = useRef<LxMsg[]>(lingxiaMsgs);
+  useEffect(() => { lingxiaMsgsRef.current = lingxiaMsgs; }, [lingxiaMsgs]);
   const [agentTasks, setAgentTasks] = useState<AgentTask[]>([]);
   const [lingxiaToolCalls, setLingxiaToolCalls] = useState<ToolCallEntry[]>([]);
   const [lingxiaShowToolCalls, setLingxiaShowToolCalls] = useState(true);
@@ -45,7 +257,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
     if (!m) return "default";
     if (m === "modelarts-maas/glm-5" || m === "glm5/glm-5" || m === "glm5/glm-5.1" || m === "modelarts-maas/glm-5.1") return "GLM-5.1";
     if (m === "maas/deepseek-v4-flash") return "DeepSeek-V4-Flash";
-    if (m === "deepseek/deepseek-chat") return "DeepSeek-V4-Flash";
+    if (m === "deepseek/deepseek-v4-flash") return "DeepSeek-V4-Flash";
     if (m === "deepseek/deepseek-v4-pro") return "DeepSeek-V4-Pro";
     if (m.includes("/")) return m.split("/").pop() || m;
     return m;
@@ -68,6 +280,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
       const v = sessionStorage.getItem("home_initial_page");
       if (v) {
         sessionStorage.removeItem("home_initial_page");
+        if (v === "agentLab") return "chat";
         return v as PageKey;
       }
     } catch {}
@@ -137,16 +350,23 @@ return s ? JSON.parse(s) : []; } catch { return []; }
     { enabled: !!resolvedAdoptId, retry: false }
   );
   const { data: availableModels } = trpc.claw.getAvailableModels.useQuery(undefined, { retry: false, refetchInterval: 30000, refetchOnWindowFocus: true, refetchOnMount: true });
-  // 模型兜底：若 lingxiaModelId 为空或不在可用列表，优先选 isDefault 的，否则选第一个
+  // 模型兜底：优先用户在前端选过的偏好（claw-model-overrides.json），其次 isDefault，最后第一个
+  // 修复刷新后下拉强制回 GLM5.1 但 OpenClaw 实际跑用户上次选的 model 的前后端不一致 bug
   useEffect(() => {
     if (!availableModels || availableModels.length === 0) return;
     const ids = (availableModels as any[]).map((m: any) => m.id);
     if (!lingxiaModelId || !ids.includes(lingxiaModelId)) {
+      // 优先：用户在前端选过的 model（持久化在 data/claw-model-overrides.json，由 getSettings 返回）
+      const userPref = (clawSettings as any)?.model;
+      if (userPref && ids.includes(userPref)) {
+        setLingxiaModelId(userPref);
+        return;
+      }
       const defaultModel = (availableModels as any[]).find((m: any) => m.isDefault);
       setLingxiaModelId(defaultModel ? defaultModel.id : ids[0]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availableModels]);
+  }, [availableModels, clawSettings]);
 
   const switchModelMutation = trpc.claw.switchModel.useMutation({
     retry: false,
@@ -172,16 +392,25 @@ return s ? JSON.parse(s) : []; } catch { return []; }
 
   // lgh-* 虾是 Hermes runtime，不走 OpenClaw WSS；直接 HTTP SSE 由 server 侧 prefix 分叉到 hermes-bridge
   const isHermesRuntime = String(resolvedAdoptId || "").startsWith("lgh-");
+  const chatV2Enabled = isLingxiaChatV2Enabled((user as any)?.id);
+  const chatV2 = useLingxiaChat({
+    adoptId: resolvedAdoptId,
+    isHermesRuntime,
+    memoryEnabled: lingxiaMemoryEnabled === "yes",
+    contextTurns: lingxiaContextTurns,
+  });
+  const activeLingxiaMsgs = chatV2Enabled ? chatV2.messages : lingxiaMsgs;
+  const activeLingxiaStreaming = chatV2Enabled ? chatV2.isStreaming : lingxiaStreaming;
 
   // 初始化 WSS 连接（后台自动尝试，不阻塞 UI）—— 仅 OpenClaw (lgc-*)
   useEffect(() => {
-    if (!resolvedAdoptId || isHermesRuntime) return;
+    if (!resolvedAdoptId || isHermesRuntime || chatV2Enabled) return;
     const apiBase = (import.meta as any).env?.VITE_API_URL || "";
     const ws = new OpenClawWSClient(resolvedAdoptId, apiBase);
     wsClientRef.current = ws;
     ws.connect().then((ok) => { if (ok) setWsConnected(true); });
     return () => { ws.disconnect(); wsClientRef.current = null; setWsConnected(false); };
-  }, [resolvedAdoptId, isHermesRuntime]);
+  }, [resolvedAdoptId, isHermesRuntime, chatV2Enabled]);
   const lingxiaMsgViewportRef = useRef<HTMLDivElement | null>(null);
   const [lingxiaNearBottom, setLingxiaNearBottom] = useState(true);
   // 工具执行显性化状态
@@ -221,13 +450,8 @@ return s ? JSON.parse(s) : []; } catch { return []; }
       const saved = localStorage.getItem(MSGS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        const normalized = Array.isArray(parsed)
-          ? parsed.map((m: any) => ({
-              role: (m?.role === "assistant" ? "assistant" : "user") as "user" | "assistant",
-              text: String(m?.text || ""),
-              timeLabel: String(m?.timeLabel || new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })),
-            }))
-          : [];
+        // backfillLxMsgIds 会保留旧 id（如果有）或生成新 id，并兜底必填字段
+        const normalized = backfillLxMsgIds(parsed);
         setLingxiaMsgs(normalized);
       }
     } catch {}
@@ -238,7 +462,18 @@ return s ? JSON.parse(s) : []; } catch { return []; }
       if (lingxiaMsgs.length === 0) {
         localStorage.removeItem(MSGS_KEY);
       } else {
-        localStorage.setItem(MSGS_KEY, JSON.stringify(lingxiaMsgs.slice(-100)));
+        // 不持久化 recovering 瞬态——刷新后重新加载时清空，避免 UI 卡在补偿中
+        // 同时把 text 还原为 partialText（去掉"正在补全..."提示），避免刷新看到不会推进的虚假提示
+        const persisted = lingxiaMsgs.slice(-100).map((m) => {
+          if (!m.recovering) return m;
+          return {
+            ...m,
+            recovering: false,
+            text: m.partialText ?? m.text,
+            partialText: undefined,
+          };
+        });
+        localStorage.setItem(MSGS_KEY, JSON.stringify(persisted));
       }
     } catch {}
   }, [lingxiaMsgs, MSGS_KEY]);
@@ -306,6 +541,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
   const skipCollabRef = useRef(false);
   const sendLingxiaMessage = async () => {
     if (!resolvedAdoptId || !lingxiaInput.trim() || lingxiaStreaming) return;
+    if (chatV2Enabled) return;
     // 2026-04-17 SSE race fix: 强制 abort 上一次的流，避免 WS 重连/网络抖动后旧 reader 还在
     // setLingxiaMsgs 写 delta，跟新流字符级交错（典型现象：英文 narrative + 中文技能列表混合）
     if (lingxiaStreamAbortRef.current) {
@@ -339,43 +575,21 @@ return s ? JSON.parse(s) : []; } catch { return []; }
         "| \`/tasks\` | \u4efb\u52a1\u5217\u8868 |\n\n" +
         "> \u4e5f\u53ef\u4ee5\u76f4\u63a5\u7528\u81ea\u7136\u8bed\u8a00\u5bf9\u8bdd";
       setLingxiaMsgs((prev) => [...prev,
-        { role: "user" as const, text, timeLabel: nowLabel },
-        { role: "assistant" as const, text: helpMd, timeLabel: assistantTimeLabel },
-      ]);
-      setLingxiaInput("");
-      return;
-    }
-
-    // ── 前端 collab 意图检测：推荐专业助手 ──
-    const COLLAB_AGENTS: Array<{ pattern: RegExp; id: string; name: string; emoji: string }> = [
-      { pattern: /HTML.*幻灯片|网页.*演示|slides/i, id: "task-slides", name: "灵匠 · 幻灯片（HTML）", emoji: "🎨" },
-      { pattern: /PPT|幻灯片|演示文稿|路演.*材料|做个.*演示/i, id: "task-ppt", name: "灵匠 · 幻灯片（PPT）", emoji: "📊" },
-      { pattern: /股票分析|选股|个股.*分析|K线|技术面.*分析|股票助手/i, id: "task-stock", name: "灵犀 · 股票分析", emoji: "📈" },
-      { pattern: /理赔|车险|定损|全损|残值|动力电池|新能源.*保险|电动车.*理赔|梯次利用/i, id: "task-claim-ev", name: "灵犀 · EV 理赔决策助手", emoji: "🔋" },
-      { pattern: /信贷|贷款|征信|风控|贷前调查|贷后管理|三表分析|担保物|五级分类|风险定价/i, id: "task-credit-risk", name: "灵犀 · 智贷决策助手", emoji: "🏦" },
-    ];
-    const collabMatch = COLLAB_AGENTS.find(a => a.pattern.test(text));
-    if (collabMatch && !skipCollabRef.current) {
-      const cardMd = `> 💡 **检测到专业需求，推荐使用：**\n>\n> ${collabMatch.emoji} **${collabMatch.name}**\n>\n> _点击下方按钮打开助手，或选择继续在主对话中处理。_`;
-      setLingxiaMsgs((prev) => [
-        ...prev,
-        { role: "user" as const, text, timeLabel: nowLabel },
-        {
-          role: "assistant" as const,
-          text: cardMd,
-          timeLabel: assistantTimeLabel,
-          collabSuggestion: { agentId: collabMatch.id, agentName: collabMatch.name, agentEmoji: collabMatch.emoji, originalPrompt: text },
-        } as any,
+        { id: makeLxMsgId(), role: "user" as const, text, timeLabel: nowLabel },
+        { id: makeLxMsgId(), role: "assistant" as const, text: helpMd, timeLabel: assistantTimeLabel },
       ]);
       setLingxiaInput("");
       return;
     }
 
     skipCollabRef.current = false;
+    const userMessageId = makeLxMsgId();
+    const assistantMessageId = makeLxMsgId();
+    const clientRunId = makeClientRunId();
     setLingxiaMsgs((prev) => [
       ...prev,
-      { role: "user", text, timeLabel: nowLabel },
-      { role: "assistant", text: "", timeLabel: assistantTimeLabel },
+      { id: userMessageId, role: "user", text, timeLabel: nowLabel },
+      { id: assistantMessageId, role: "assistant", text: "", timeLabel: assistantTimeLabel },
     ]);
     setLingxiaInput("");
     setLingxiaStreaming(true);
@@ -407,6 +621,22 @@ return s ? JSON.parse(s) : []; } catch { return []; }
               // ── 统一语义：流结束 ──
               if (chunk.__stream_end) {
                 console.log("[DIAG] ✅ WSS 收到 __stream_end，流结束");
+                setLingxiaStreaming(false);
+                wsClient.setRawHandler(null);
+                return;
+              }
+              // ── 2026-04-29 批次 2 A3：上游 EOF 但 runtime 未确认完成 ──
+              if (chunk.__stream_truncated) {
+                console.log("[DIAG] ⚠️ WSS 收到 __stream_truncated，启动 recover:", chunk);
+                handleStreamTruncated(chunk, lingxiaMsgsRef.current, setLingxiaMsgs);
+                setLingxiaStreaming(false);
+                wsClient.setRawHandler(null);
+                return;
+              }
+              // ── 长度上限达到（finish_reason: length）──
+              if (chunk.__stream_end_length) {
+                console.log("[DIAG] ⚠️ WSS 收到 __stream_end_length");
+                setLingxiaMsgs((prev) => { const n = [...prev]; const last = n[n.length-1]; if (last?.role === "assistant") n[n.length-1] = { ...last, text: last.text + "\n\n_⚠️ 已达模型长度上限，输出可能不完整_" }; return n; });
                 setLingxiaStreaming(false);
                 wsClient.setRawHandler(null);
                 return;
@@ -556,13 +786,22 @@ return s ? JSON.parse(s) : []; } catch { return []; }
                 return;
               }
 
+              // reasoning_content delta（DeepSeek 等 reasoning 模型）→ 虚拟 thinking toolCall
+              const reasoningDelta = chunk?.choices?.[0]?.delta?.reasoning_content;
+              if (typeof reasoningDelta === "string" && reasoningDelta) {
+                setLingxiaMsgs((prev) => applyReasoningDelta(prev, reasoningDelta));
+              }
               // 文本 delta
               const delta = chunk?.choices?.[0]?.delta?.content;
               if (delta) {
+                // 收到 content delta → reasoning 阶段结束，mark thinking done
+                setLingxiaMsgs((prev) => markThinkingDone(prev));
                 setLingxiaMsgs((prev) => { const n = [...prev]; const last = n[n.length-1]; if (last?.role === "assistant") n[n.length-1] = { ...last, text: last.text + delta, status: undefined }; return n; });
               }
               // 完成
               if (chunk?.choices?.[0]?.finish_reason === "stop") {
+                // 双保险：finish_reason=stop 也兜底 mark thinking done
+                setLingxiaMsgs((prev) => markThinkingDone(prev));
                 console.log("[DIAG] ✅ WSS finish_reason=stop，流结束");
                 setLingxiaStreaming(false);
                 wsClient.setRawHandler(null);
@@ -570,7 +809,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
             } catch {}
           };
           wsClient.setRawHandler(wsHandler);
-        const sent = wsClient.sendChat(text);
+        const sent = wsClient.sendChat(text, undefined, { clientRunId, userMessageId });
         if (sent) {
           // WSS 响应超时检测：企业代理可能静默拦截 WSS 数据
           // 等待第一个有效事件，超时则降级到 HTTP SSE
@@ -591,16 +830,14 @@ return s ? JSON.parse(s) : []; } catch { return []; }
             });
           });
 
-          if (firstEventOk) {
-            // WSS 工作正常，后续由 wsHandler 接管
-            wsOk = true;
-            return;
+          if (!firstEventOk) {
+            // OpenClaw 2026.4.29 can take 60-120s before the first stream event.
+            // Once WSS send succeeds, do not HTTP-fallback and submit the same turn twice.
+            console.warn("[WS] first event wait elapsed; keeping WSS active", { clientRunId });
           }
-
-          // WSS 超时：清理 handler，降级到 HTTP
-          console.warn("[WS] no response in 15s, falling back to HTTP SSE");
-          console.log("[DIAG] ⚠️ WSS 超时降级 → 开始走 HTTP SSE 路径");
-          wsClient.setRawHandler(null);
+          // WSS submitted successfully; subsequent events are handled by wsHandler.
+          wsOk = true;
+          return;
         } else {
           console.log("[WS] send failed, falling back to HTTP");
         }
@@ -613,7 +850,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         signal: controller.signal,
-        body: JSON.stringify({ adoptId: resolvedAdoptId, message: text, model: lingxiaModelId }),
+        body: JSON.stringify({ adoptId: resolvedAdoptId, message: text, model: lingxiaModelId, clientRunId }),
       });
 
       if (!resp.ok || !resp.body) {
@@ -868,6 +1105,27 @@ return s ? JSON.parse(s) : []; } catch { return []; }
               sseDone = true;
               break;
             }
+            // ── 2026-04-29 批次 2 A3：上游 EOF 但 runtime 未确认完成 ──
+            if (chunk.__stream_truncated) {
+              console.log("[DIAG] ⚠️ 收到 __stream_truncated，启动 recover:", chunk);
+              flushDelta();
+              handleStreamTruncated(chunk, lingxiaMsgsRef.current, setLingxiaMsgs);
+              sseDone = true;
+              break;
+            }
+            // ── 长度上限达到（finish_reason: length）──
+            if (chunk.__stream_end_length) {
+              console.log("[DIAG] ⚠️ 收到 __stream_end_length");
+              flushDelta();
+              setLingxiaMsgs((prev) => {
+                const next = [...prev];
+                if (next.length === 0 || next[next.length - 1].role !== "assistant") return prev;
+                next[next.length - 1] = { ...next[next.length - 1], text: next[next.length - 1].text + "\n\n_⚠️ 已达模型长度上限，输出可能不完整_" };
+                return next;
+              });
+              sseDone = true;
+              break;
+            }
             // ── 统一语义：终止性错误 ──
             if (chunk.__stream_error) {
               console.log("[DIAG] ❌ 收到 __stream_error:", chunk.error);
@@ -891,14 +1149,25 @@ return s ? JSON.parse(s) : []; } catch { return []; }
               });
               continue;
             }
+            // reasoning_content delta（DeepSeek 等 reasoning 模型）→ 虚拟 thinking toolCall
+            const httpReasoningDelta = chunk?.choices?.[0]?.delta?.reasoning_content;
+            if (typeof httpReasoningDelta === "string" && httpReasoningDelta) {
+              setLingxiaMsgs((prev) => applyReasoningDelta(prev, httpReasoningDelta));
+            }
             const deltaRaw = chunk?.choices?.[0]?.delta?.content;
             // content 有时是对象数组（MiniMax/GLM 等模型），需提取文本
             const delta = Array.isArray(deltaRaw)
               ? deltaRaw.map((c: any) => (typeof c === "string" ? c : (c?.text ?? ""))).join("")
               : (typeof deltaRaw === "string" ? deltaRaw : (deltaRaw != null ? String(deltaRaw) : ""));
             if (delta) {
+              // 收到 content delta → reasoning 阶段结束，mark thinking done
+              setLingxiaMsgs((prev) => markThinkingDone(prev));
               pendingDelta += delta;
               scheduleFlush();
+            }
+            // HTTP 路径 finish_reason=stop 兜底 mark thinking done
+            if (chunk?.choices?.[0]?.finish_reason === "stop") {
+              setLingxiaMsgs((prev) => markThinkingDone(prev));
             }
           } catch {
             // 忽略非 JSON 行
@@ -944,7 +1213,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
         if (next.length > 0 && next[next.length - 1].role === "assistant" && next[next.length - 1].text === "") {
           next[next.length - 1] = { ...next[next.length - 1], text: msg };
         } else {
-          next.push({ role: "assistant", text: msg, timeLabel: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) });
+          next.push({ id: makeLxMsgId(), role: "assistant", text: msg, timeLabel: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) });
         }
         return next;
       });
@@ -965,11 +1234,11 @@ return s ? JSON.parse(s) : []; } catch { return []; }
 
 
   const resetLingxiaSession = async () => {
-    if (!resolvedAdoptId || lingxiaStreaming) return;
+    if (!resolvedAdoptId || activeLingxiaStreaming) return;
     if (!window.confirm("确认重置会话？将清空当前会话上下文。")) return;
 
     try {
-      setLingxiaStreaming(true);
+      if (!chatV2Enabled) setLingxiaStreaming(true);
       const apiBase = import.meta.env.VITE_API_URL || "";
       const resp = await fetch(`${apiBase}/api/claw/chat-stream`, {
         method: "POST",
@@ -979,14 +1248,19 @@ return s ? JSON.parse(s) : []; } catch { return []; }
       });
 
       if (!resp.ok) throw new Error(`重置失败 (${resp.status})`);
-      setLingxiaMsgs([]); localStorage.removeItem("lingxia-chat-history");
+      if (chatV2Enabled) {
+        chatV2.clear();
+      } else {
+        setLingxiaMsgs([]);
+      }
+      localStorage.removeItem("lingxia-chat-history");
       // 不需要断 WS：后端已通过 OpenClaw 原生 sessions.reset 换了 sessionId，
       // session key 不变，现有 WS 连接继续用即可，下次发消息打到新 sessionId 上
       toast.success("会话已重置（新会话）");
     } catch (error: any) {
       toast.error(error?.message || "重置会话失败");
     } finally {
-      setLingxiaStreaming(false);
+      if (!chatV2Enabled) setLingxiaStreaming(false);
     }
   };
 
@@ -1046,9 +1320,9 @@ return s ? JSON.parse(s) : []; } catch { return []; }
   };
   useEffect(() => {
     if (lingxiaNearBottom) {
-      scrollLingxiaToBottom(lingxiaStreaming ? "auto" : "smooth");
+      scrollLingxiaToBottom(activeLingxiaStreaming ? "auto" : "smooth");
     }
-  }, [lingxiaMsgs, lingxiaNearBottom, lingxiaStreaming]);
+  }, [activeLingxiaMsgs, activeLingxiaStreaming, lingxiaNearBottom]);
 
   // 技能行子组件
   // 技能行组件（内联，避免 Hook 规则问题）
@@ -1114,7 +1388,12 @@ return s ? JSON.parse(s) : []; } catch { return []; }
             </div>
 
             {/* 控制台导航（Phase A） */}
-            <Sidebar activePage={activePage} setActivePage={setActivePage} collapsed={sidebarCollapsed} coopBadge={coopBadgeCount} />
+            <Sidebar
+              activePage={activePage}
+              setActivePage={setActivePage}
+              collapsed={sidebarCollapsed}
+              coopBadge={coopBadgeCount}
+            />
 
             {/* 旧侧栏能力暂留（Phase B 迁移），当前隐藏 */}
                         <SidebarFooter
@@ -1226,7 +1505,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
                 </Select>
                 <button
                   onClick={resetLingxiaSession}
-                  disabled={lingxiaStreaming}
+                  disabled={activeLingxiaStreaming}
                   className="lingxia-topbar-btn"
                   style={{ height: 30, padding: "0 12px", borderRadius: "var(--oc-radius-md)", fontSize: "var(--oc-text-sm)", whiteSpace: "nowrap" }}
                 >
@@ -1275,7 +1554,7 @@ return s ? JSON.parse(s) : []; } catch { return []; }
                 </div>
               )}
 
-              {!clawByAdoptLoading && clawByAdoptId && lingxiaMsgs.length === 0 && (
+              {!clawByAdoptLoading && clawByAdoptId && activeLingxiaMsgs.length === 0 && (
                 /* 欢迎消息：带头像，对齐 OpenClaw AI 消息风格 */
                 <div className="flex items-start gap-3 max-w-4xl lingxia-msg-fade">
                   <div className="w-8 h-8 rounded-full shrink-0 flex items-center justify-center lingxia-avatar-ai" style={{ marginTop: 2 }}><BrandIcon size={22} animate={false} /></div>
@@ -1293,9 +1572,9 @@ return s ? JSON.parse(s) : []; } catch { return []; }
                   {agentTasks.map((t) => <AgentTaskCard key={t.id} task={t} />)}
                 </div>
               )}
-              {lingxiaMsgs.map((m, idx) => {
-                const isLast = idx === lingxiaMsgs.length - 1;
-                const isPlaceholder = isLast && m.role === "assistant" && m.text === "" && lingxiaStreaming;
+              {activeLingxiaMsgs.map((m, idx) => {
+                const isLast = idx === activeLingxiaMsgs.length - 1;
+                const isPlaceholder = isLast && m.role === "assistant" && m.text === "" && activeLingxiaStreaming;
                 return (
                   <div key={idx}>
                   <ChatMessage
@@ -1303,15 +1582,15 @@ return s ? JSON.parse(s) : []; } catch { return []; }
                     text={m.text}
                     isLast={isLast}
                     isPlaceholder={isPlaceholder}
-                    streaming={lingxiaStreaming}
+                    streaming={activeLingxiaStreaming}
                     displayName={lingxiaDisplayName || brand.name}
                     modelId={lingxiaModelId || "default"}
                     timeLabel={m.timeLabel}
-                    toolCalls={m.role === "assistant" ? (m.toolCalls ?? (isLast && lingxiaStreaming ? lingxiaToolCalls : [])) : undefined}
+                    toolCalls={m.role === "assistant" ? (m.toolCalls ?? (isLast && !chatV2Enabled && lingxiaStreaming ? lingxiaToolCalls : [])) : undefined}
                     showToolCalls={lingxiaShowToolCalls}
                     usage={m.usage}
                     contextPercent={m.contextPercent}
-                    onDelete={m.role === "assistant" ? () => { setLingxiaMsgs(prev => prev.filter((_, i) => i !== idx)); } : undefined}
+                    onDelete={m.role === "assistant" && !chatV2Enabled ? () => { setLingxiaMsgs(prev => prev.filter((_, i) => i !== idx)); } : undefined}
                   />
                   {/* 协作推荐卡片按钮 */}
                   {(m as any).collabSuggestion && (
@@ -1375,6 +1654,14 @@ return s ? JSON.parse(s) : []; } catch { return []; }
               onChange={setLingxiaInput}
               onSend={() => {
                 const text = (lingxiaInput || "").trim();
+                if (chatV2Enabled) {
+                  if (!text || chatV2.isStreaming) return;
+                  setMentionedUsers([]);
+                  setLingxiaInput("");
+                  setLingxiaNearBottom(true);
+                  void chatV2.send(text);
+                  return;
+                }
                 // 重扫 text 里实际还有的 @userName，过滤掉用户已删除的 mention（防 mentionedUsers 状态 ghost）
                 // 既有限制：textarea 是 plain text，不是 chip，删除标签靠这里 reconcile 兜底
                 const liveMentions = mentionedUsers.filter((u) => text.includes(`@${u.userName}`));
@@ -1411,12 +1698,12 @@ return s ? JSON.parse(s) : []; } catch { return []; }
                 setLingxiaInput("");
                 setLocationCoop("/coop/new");
               }}
-              onStop={stopLingxiaStreaming}
-              streaming={lingxiaStreaming}
+              onStop={chatV2Enabled ? () => chatV2.abort("home_stop") : stopLingxiaStreaming}
+              streaming={activeLingxiaStreaming}
               disabled={false}
               placeholder={`Message ${lingxiaDisplayName || brand.name}…`}
               maxLength={4000}
-              messages={lingxiaMsgs}
+              messages={activeLingxiaMsgs as any}
               onNewChat={resetLingxiaSession}
               onUserMention={(u) => {
                 setMentionedUsers((prev) => prev.some((x) => x.userId === u.userId) ? prev : [...prev, u]);
@@ -1429,15 +1716,6 @@ return s ? JSON.parse(s) : []; } catch { return []; }
             <MainPanel
               activePage={activePage as Exclude<PageKey, "chat">}
               adoptId={resolvedAdoptId || ""}
-              settings={{
-                memoryEnabled: lingxiaMemoryEnabled,
-                setMemoryEnabled: (v) => setLingxiaMemoryEnabled(v),
-                contextTurns: lingxiaContextTurns,
-                setContextTurns: (v) => setLingxiaContextTurns(v),
-                canSave: !!user,
-                saving: updateClawSettingsMutation.isPending,
-                onSave: saveLingxiaSettings,
-              }}
               skills={{
                 data: lingxiaSkills as any,
                 canEdit: !!user,

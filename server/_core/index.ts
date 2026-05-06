@@ -25,6 +25,7 @@ import { startRecycler } from "./recycler";
 import { registerCronRoutes } from "./claw-cron";
 import { registerNotifyRoutes } from "./claw-notify";
 import { registerWeixinRoutes } from "./claw-weixin";
+import { registerFeishuRoutes } from "./claw-feishu";
 import { registerSkillRoutes } from "./claw-skills";
 import { registerCollabRoutes } from "./claw-collab";
 import { registerBusinessRoutes } from "./claw-business";
@@ -36,10 +37,13 @@ import { registerDownloadRoutes } from "./claw-downloads";
 import { registerFilesRoutes } from "./claw-files";
 import { registerSandboxRoutes } from "./claw-sandbox";
 import { registerChatStreamRoutes } from "./claw-chat";
+import { registerRecoverRoutes } from "./claw-recover";
 import { registerCoopUploadRoutes } from "./coop-upload";
 import { registerWSProxy } from "./claw-ws-proxy";
 import { registerIframeRoutes } from "./claw-iframe";
 import { registerMiscRoutes } from "./claw-misc";
+import { registerAgentClusterLabRoutes } from "../_routes/agent-cluster-lab";
+import { registerTaskWorkbenchLabRoutes } from "../_routes/task-workbench-lab";
 import { APP_ROOT } from "./helpers";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
@@ -188,6 +192,7 @@ async function startServer() {
   registerCronRoutes(app);
   registerNotifyRoutes(app);
   registerWeixinRoutes(app);
+  registerFeishuRoutes(app);
   // 启动微信双向聊天桥
   import("./claw-weixin-bridge").then(m => m.startWeixinBridge()).catch(e => console.error("weixin bridge start failed:", e));
   // 启动 cron 结果投递轮询（灵虾平台侧，补充 Gateway 不支持的渠道）
@@ -203,10 +208,13 @@ async function startServer() {
   registerFilesRoutes(app);
   registerSandboxRoutes(app);
   registerChatStreamRoutes(app);
+  registerRecoverRoutes(app);
   registerCoopUploadRoutes(app);
   registerWSProxy(server);
   registerIframeRoutes(app);
   registerMiscRoutes(app);
+  registerAgentClusterLabRoutes(app);
+  registerTaskWorkbenchLabRoutes(app);
 
   // ── 灵虾流式聊天 SSE 端点 ──
   // Session/auth helpers extracted to ./helpers.ts

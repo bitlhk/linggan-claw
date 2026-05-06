@@ -9,16 +9,90 @@
  * 短消息（< 15 字且无关键词）直接 passthrough，不调 LLM。
  */
 import type { StreamWriter } from "./stream-writer";
+import { getBoundChannelsForAdopt } from "./cron/channel-binding-query";
+import { isScheduleToolV2Enabled } from "./cron/schedule-intent";
 
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || "";
 const DEEPSEEK_BASE = "https://api.deepseek.com";
 
 // ── 短消息快速过滤（不调 LLM）──
-const DISPATCH_KEYWORDS = /定时|每天|每隔|提醒|发到|微信|飞书|企微|任务|渠道|信贷|债券|理财|保险|PPT|幻灯片|股票|分析|评估|报告|代码|协作/;
+const DISPATCH_KEYWORDS = /定时|每天|每隔|提醒|发到|微信|飞书|企微|任务|渠道|技能|插件|工具包|帮我做个|帮我生成|信贷|债券|理财|保险|PPT|幻灯片|股票|分析|评估|报告|代码|协作/;
 
 function needsProjectManager(msg: string): boolean {
   if (msg.length < 15 && !DISPATCH_KEYWORDS.test(msg)) return false;
   return true;
+}
+
+function normalizeHour(period: string, rawHour: number): number {
+  let hour = rawHour;
+  if ((period === "下午" || period === "晚上") && hour < 12) hour += 12;
+  if (period === "中午" && hour < 11) hour = 12;
+  if (hour < 0) hour = 0;
+  if (hour > 23) hour = 23;
+  return hour;
+}
+
+function formatTime(hour: number, minute: number) {
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function extractWeekdays(message: string): string[] {
+  const match = message.match(/每周([一二三四五六日天和、,，\s]+)/);
+  if (!match) return [];
+  return [...match[1]].filter((ch) => /[一二三四五六日天]/.test(ch));
+}
+
+function quickScheduleAction(message: string, scheduleToolV2: boolean): { tool: string; args: any } | null {
+  if (/(查看|列出|有哪些|任务列表|删除|取消|关闭|停止).*任务/.test(message)) return null;
+  if (!/(每天|每日|每周|提醒我|定时|定期)/.test(message)) return null;
+
+  const timeMatch = message.match(/(凌晨|早上|上午|中午|下午|晚上)?\s*(\d{1,2})\s*(?:点|时)(?:半)?/);
+  if (!timeMatch) return null;
+  const hour = normalizeHour(timeMatch[1] || "", Number(timeMatch[2] || 9));
+  const minute = /半/.test(timeMatch[0]) ? 30 : 0;
+
+  let cronExpr = `${minute} ${hour} * * *`;
+  const weekMatch = message.match(/每周([一二三四五六日天])/);
+  if (weekMatch) {
+    const weekMap: Record<string, number> = { 日: 0, 天: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 };
+    cronExpr = `${minute} ${hour} * * ${weekMap[weekMatch[1]] ?? 1}`;
+  }
+
+  const channel = /飞书/.test(message) ? "feishu" : /企微|企业微信/.test(message) ? "wecom" : /微信/.test(message) ? "wechat" : undefined;
+  const isWeather = /天气/.test(message);
+  const task = isWeather
+    ? "查询天气并生成简要结果"
+    : message
+        .replace(/每天|每日|每周[一二三四五六日天]?|提醒我|定时|定期/g, "")
+        .replace(/(凌晨|早上|上午|中午|下午|晚上)?\s*\d{1,2}\s*(?:点|时)(?:半)?/g, "")
+        .replace(/(发|推|送)(到|给|去)?(我的)?(微信|飞书|企微|企业微信)/g, "")
+        .trim() || message;
+
+  if (scheduleToolV2) {
+    const time = formatTime(hour, minute);
+    const weekdays = extractWeekdays(message);
+    return {
+      tool: "create_schedule",
+      args: {
+        name: isWeather ? "天气推送" : "定时任务",
+        prompt: task,
+        schedule: weekdays.length > 0
+          ? { kind: "weekly", time, weekdays }
+          : { kind: "daily", time },
+        ...(channel ? { channel } : {}),
+      },
+    };
+  }
+
+  return {
+    tool: "create_schedule",
+    args: {
+      name: isWeather ? "天气推送" : "定时任务",
+      task,
+      cron_expr: cronExpr,
+      ...(channel ? { channel } : {}),
+    },
+  };
 }
 
 // ── 从 DB 加载可用 Agent 列表 ──
@@ -39,8 +113,58 @@ async function loadAgentList(): Promise<{ id: string; name: string; description:
 }
 
 // ── 项目经理 System Prompt ──
-function buildPMSystemPrompt(agents: { id: string; name: string; description: string }[]): string {
+function buildPMSystemPrompt(
+  agents: { id: string; name: string; description: string }[],
+  boundChannels: string[],
+  scheduleToolV2: boolean,
+): string {
   const agentList = agents.map(a => `  - ${a.id}: ${a.name} — ${a.description}`).join("\n");
+  if (!scheduleToolV2) {
+    return `你是灵虾平台的项目经理。用户发来一条消息，你决定怎么处理。
+
+你有以下工具可用：
+
+1. passthrough — 普通对话、闲聊、简单问题、查天气、翻译等。交给主聊天 AI 处理。
+2. dispatch_task — 把任务分发给专业 Agent。可以同时分发多个（并行执行）。
+3. create_schedule — 创建定时任务。
+4. send_message — 立即发消息到某个渠道（微信/企微/飞书）。
+5. list_schedules — 查看已有定时任务。
+6. delete_schedule — 删除定时任务。
+7. create_skill — 生成一个用户自有技能。仅当用户明确要求"做一个技能/插件/工具包"时使用。
+
+可用的专业 Agent：
+${agentList}
+
+决策原则：
+- 简单问题（聊天、翻译、查天气）→ passthrough
+- 需要专业能力的（信贷分析、债券、PPT、代码）→ dispatch_task 到对应 Agent
+- 跨领域问题 → 拆成多个 dispatch_task，每个发给不同 Agent
+- 定时/提醒/推送 → create_schedule 或 send_message
+- 生成技能/插件/工具包 → create_skill。生成的技能必须包含 SKILL.md；不要生成 child_process、eval、rm -rf、curl/wget 外部地址、删除 workspace 外文件等危险行为。
+- 不确定时 → passthrough（宁可不分发也不误分发）
+
+dispatch_task 时，prompt 参数要把用户原始需求转述清楚，让目标 Agent 能独立理解和执行。`;
+  }
+
+  const channelList = boundChannels.length > 0
+    ? boundChannels.map((channel) => `  - ${channel}`).join("\n")
+    : "  - 暂无已绑定频道";
+
+  const scheduleGuide = scheduleToolV2
+    ? `create_schedule 参数必须使用结构化字段：
+- name: 任务名称，例如 "天气推送"
+- prompt: 每次定时真正要执行的任务，例如 "查询天气并生成简要结果"
+- channel: 必填，只能从已绑定频道里选择 wechat/feishu/wecom；如果用户没说频道，不要猜，调用 create_schedule 时可以省略 channel，系统会追问。
+- schedule.kind:
+  - daily: 每天执行，必须填 time，如 "09:00"
+  - weekly: 每周执行，必须填 time 和 weekdays，如 ["mon","wed","fri"] 或 ["一","三","五"]
+  - once: 单次执行，必须填 runAt
+  - interval: 间隔执行，必须填 intervalMinutes
+  - cron: 高级 cron，必须填 cronExpr`
+    : `create_schedule 参数使用 cron_expr（分 时 日 月 周）。`;
+  const scheduleChannelRule = scheduleToolV2
+    ? "如果用户没说频道，不要猜测或默认选择频道；调用 create_schedule 时省略 channel，让执行器追问。"
+    : "如果用户没说频道，优先选择已绑定频道列表里的第一个。";
 
   return `你是灵虾平台的项目经理。用户发来一条消息，你决定怎么处理。
 
@@ -52,22 +176,31 @@ function buildPMSystemPrompt(agents: { id: string; name: string; description: st
 4. send_message — 立即发消息到某个渠道（微信/企微/飞书）。
 5. list_schedules — 查看已有定时任务。
 6. delete_schedule — 删除定时任务。
+7. create_skill — 生成一个用户自有技能。仅当用户明确要求"做一个技能/插件/工具包"时使用。
 
 可用的专业 Agent：
 ${agentList}
+
+当前用户已绑定的推送频道：
+${channelList}
 
 决策原则：
 - 简单问题（聊天、翻译、查天气）→ passthrough
 - 需要专业能力的（信贷分析、债券、PPT、代码）→ dispatch_task 到对应 Agent
 - 跨领域问题 → 拆成多个 dispatch_task，每个发给不同 Agent
-- 定时/提醒/推送 → create_schedule 或 send_message
+- 定时/提醒/推送 → create_schedule 或 send_message。只能选择已绑定频道；${scheduleChannelRule}
+- 生成技能/插件/工具包 → create_skill。生成的技能必须包含 SKILL.md；不要生成 child_process、eval、rm -rf、curl/wget 外部地址、删除 workspace 外文件等危险行为。
+- 如果没有已绑定频道但用户要创建定时推送，仍可调用 create_schedule，执行器会提示用户先去「频道」绑定。
 - 不确定时 → passthrough（宁可不分发也不误分发）
+
+${scheduleGuide}
 
 dispatch_task 时，prompt 参数要把用户原始需求转述清楚，让目标 Agent 能独立理解和执行。`;
 }
 
 // ── Tool 定义 ──
-const PM_TOOLS = [
+function buildPMTools(scheduleToolV2: boolean) {
+  return [
   {
     type: "function" as const,
     function: {
@@ -96,16 +229,38 @@ const PM_TOOLS = [
     function: {
       name: "create_schedule",
       description: "创建定时任务",
-      parameters: {
-        type: "object",
-        properties: {
-          name: { type: "string", description: "任务名称" },
-          task: { type: "string", description: "要执行的指令" },
-          cron_expr: { type: "string", description: "Cron 表达式（分 时 日 月 周）" },
-          channel: { type: "string", enum: ["conversation", "weixin", "wecom", "feishu", "webhook"], description: "推送渠道" },
-        },
-        required: ["name", "task", "cron_expr"],
-      },
+      parameters: scheduleToolV2
+        ? {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "任务名称" },
+              prompt: { type: "string", description: "每次定时执行时要交给 Agent 的指令" },
+              schedule: {
+                type: "object",
+                properties: {
+                  kind: { type: "string", enum: ["daily", "weekly", "once", "interval", "cron"] },
+                  time: { type: "string", description: "HH:mm，例如 09:00" },
+                  weekdays: { type: "array", items: { type: "string" }, description: "weekly 使用，例如 [\"mon\",\"wed\",\"fri\"] 或 [\"一\",\"三\",\"五\"]" },
+                  runAt: { type: "string", description: "once 使用，用户指定的执行时间" },
+                  intervalMinutes: { type: "number", description: "interval 使用，间隔分钟数" },
+                  cronExpr: { type: "string", description: "cron 使用，五段 cron 表达式" },
+                },
+                required: ["kind"],
+              },
+              channel: { type: "string", enum: ["wechat", "feishu", "wecom"], description: "推送渠道。只能从当前用户已绑定频道里选；微信用 wechat。" },
+            },
+            required: ["name", "prompt", "schedule"],
+          }
+        : {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "任务名称" },
+              task: { type: "string", description: "要执行的指令" },
+              cron_expr: { type: "string", description: "Cron 表达式（分 时 日 月 周）" },
+              channel: { type: "string", enum: ["conversation", "weixin", "wecom", "feishu", "webhook"], description: "推送渠道" },
+            },
+            required: ["name", "task", "cron_expr"],
+          },
     },
   },
   {
@@ -116,7 +271,7 @@ const PM_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          channel: { type: "string", enum: ["weixin", "wecom", "feishu", "webhook"] },
+          channel: { type: "string", enum: scheduleToolV2 ? ["wechat", "feishu", "wecom"] : ["weixin", "wecom", "feishu", "webhook"] },
           content: { type: "string", description: "消息内容" },
         },
         required: ["channel", "content"],
@@ -145,14 +300,45 @@ const PM_TOOLS = [
       },
     },
   },
-];
+  {
+    type: "function" as const,
+    function: {
+      name: "create_skill",
+      description: "根据用户需求生成一个可安装到当前子虾工作空间的技能。只在用户明确要求创建技能/插件/工具包时调用。",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "技能名称，至少 2 个字，例如 财报摘要助手" },
+          description: { type: "string", description: "技能说明，一句话说明它能做什么" },
+          files: {
+            type: "array",
+            description: "技能文件列表，必须包含 SKILL.md。路径必须是相对路径。",
+            items: {
+              type: "object",
+              properties: {
+                path: { type: "string", description: "相对路径，例如 SKILL.md 或 scripts/run.py" },
+                content: { type: "string", description: "文件内容" },
+              },
+              required: ["path", "content"],
+            },
+          },
+        },
+        required: ["name", "description", "files"],
+      },
+    },
+  },
+  ].filter((tool) => tool.function.name !== "dispatch_task");
+}
 
 // ── 调用项目经理 LLM ──
 async function callProjectManager(
   message: string,
   agents: { id: string; name: string; description: string }[],
+  boundChannels: string[],
+  scheduleToolV2: boolean,
 ): Promise<{ tool: string; args: any }[]> {
-  const systemPrompt = buildPMSystemPrompt(agents);
+  const systemPrompt = buildPMSystemPrompt(agents, boundChannels, scheduleToolV2)
+    + "\n\n【重要】主对话已关闭业务 Agent 自动派发。不要推荐或调用专业 Agent；如用户需要多个专业 Agent，请引导其进入「智能体集群」显式选择。";
 
   const resp = await fetch(`${DEEPSEEK_BASE}/v1/chat/completions`, {
     method: "POST",
@@ -166,7 +352,7 @@ async function callProjectManager(
         { role: "system", content: systemPrompt },
         { role: "user", content: message },
       ],
-      tools: PM_TOOLS,
+      tools: buildPMTools(scheduleToolV2),
       temperature: 0,
       max_tokens: 500,
     }),
@@ -254,8 +440,9 @@ async function dispatchToAgent(
 // 灰度发布：只对指定 adoptId 启用 PM
 const PM_ENABLED_ADOPT_IDS = new Set(["lgc-ofnmjm4joj"]);
 
-// Phase 1 强制路由：仅对特定 adoptId 生效，命中正则跳过 PM LLM 直接 dispatch
-const FORCE_ROUTE_ADOPT_IDS = new Set(["lgc-ofnmjm4joj"]);
+// Main chat no longer auto-dispatches to business agents. Users should enter the
+// Agent Cluster/Directory explicitly when they want specialist agents.
+const FORCE_ROUTE_ADOPT_IDS = new Set<string>();
 const FORCE_ROUTE_MAP: Array<{ pattern: RegExp; agentId: string }> = [
   // 顶部优先匹配，均走 Hermes（发 __hermes_tool 事件，被原生 ToolCallCard 渲染）
   // EV 理财
@@ -305,6 +492,8 @@ export async function routeMessage(
   message: string,
   writer: StreamWriter,
 ): Promise<boolean> {
+  const scheduleToolV2 = isScheduleToolV2Enabled(adoptId);
+
   // Phase 1 强制路由：特定 adoptId + 正则命中 → 跳过所有门禁直接 dispatch
   let forcedActions: { tool: string; args: any }[] | null = null;
   if (FORCE_ROUTE_ADOPT_IDS.has(adoptId)) {
@@ -315,37 +504,40 @@ export async function routeMessage(
     }
   }
 
+  const quickSchedule = scheduleToolV2 ? quickScheduleAction(message, true) : null;
+  if (quickSchedule) {
+    const { executePlatformIntent } = await import("./intent-executor");
+    await executePlatformIntent(adoptId, { type: "schedule_create", ...quickSchedule.args }, writer);
+    return true;
+  }
+
   if (!forcedActions) {
+    const hasSkillOp = /(?:创建|生成|做|写|开发).*(?:技能|插件|工具包)|(?:技能|插件|工具包).*(?:创建|生成|做|写|开发)/.test(message);
     // 灰度发布：非白名单用户走旧版 L1+L2
-    if (!PM_ENABLED_ADOPT_IDS.has(adoptId)) {
+    if (!PM_ENABLED_ADOPT_IDS.has(adoptId) && !scheduleToolV2 && !hasSkillOp) {
       return oldRouteMessage(adoptId, message, writer);
     }
 
     // 短消息快速通过，不调 LLM
     if (!needsProjectManager(message)) return false;
 
-    // L1 门禁：放行两类进 PM——
-    //   (a) 理财+选股组合 → Agent Team 多 agent 编排
-    //   (b) 定时任务/渠道发送/列表/删除 → PM 平台操作工具（create_schedule/send_message 等）
-    // 其他走旧版 oldRouteMessage。
-    const hasWealth = /资产配置|理财规划|家庭财务|\d+\s*万.*(投资|配置|理财|规划)/.test(message);
-    const hasStock = /选股|A股|个股|股票.*(推荐|挑|选|买)/.test(message);
+    // L1 门禁：主对话只允许平台操作进入 PM（定时任务/渠道/技能生成）。
+    // 业务 Agent 自动推荐/自动派发已关闭，避免普通问题被误路由成 Agent 卡片。
     const hasPlatformOp =
       /定时任务|每天|每隔|每周|提醒我|cron|schedule/i.test(message) ||
       /(?:发|推|送)(?:到|给|去)?\s*(?:我的?)?\s*(?:微信|企微|飞书|webhook)/i.test(message) ||
-      /(?:删除|取消|关闭|停止).*任务|任务列表|哪些.*任务|通知渠道|哪些渠道/.test(message);
-    if (!(hasWealth && hasStock) && !hasPlatformOp) {
-      console.log("[PM-L1] 未命中理财+选股组合/平台操作，走旧版路由");
+      /(?:删除|取消|关闭|停止).*任务|任务列表|哪些.*任务|通知渠道|哪些渠道/.test(message) ||
+      hasSkillOp;
+    if (!hasPlatformOp) {
+      console.log("[PM-L1] 未命中平台操作，走旧版路由");
       return oldRouteMessage(adoptId, message, writer);
     }
-    console.log(hasPlatformOp
-      ? "[PM-L1] 命中平台操作关键字，进 PM"
-      : "[PM-L1] 命中理财+选股组合，进 Agent Team");
+    console.log("[PM-L1] 命中平台操作关键字，进 PM");
     if (!DEEPSEEK_API_KEY) return false;
   }
 
-  // 加载可用 Agent 列表
-  const agents = await loadAgentList();
+  // 主对话不再暴露业务 Agent 列表，避免 PM 误路由；Agent 使用改走显式智能体集群入口。
+  const agents: { id: string; name: string; description: string }[] = [];
 
   // 调项目经理（强制路由时跳过）
   let actions: { tool: string; args: any }[];
@@ -353,7 +545,10 @@ export async function routeMessage(
     actions = forcedActions;
   } else {
     try {
-      actions = await callProjectManager(message, agents);
+      const boundChannels = scheduleToolV2
+        ? (await getBoundChannelsForAdopt(adoptId)).map((channel) => channel.channelId)
+        : [];
+      actions = await callProjectManager(message, agents, boundChannels, scheduleToolV2);
     } catch (e: any) {
       console.warn("[PM] project manager error:", e?.message?.slice(0, 80));
       return false; // 失败 → passthrough
@@ -364,7 +559,11 @@ export async function routeMessage(
   if (actions.every(a => a.tool === "passthrough")) return false;
 
   // 收集 dispatch_task 和平台操作
-  const dispatches = actions.filter(a => a.tool === "dispatch_task");
+  const requestedDispatches = actions.filter(a => a.tool === "dispatch_task");
+  if (requestedDispatches.length > 0) {
+    console.warn("[PM-DISPATCH-DISABLED] main chat ignored business-agent dispatch", requestedDispatches.map((a) => a.args?.agent_id || "unknown"));
+  }
+  const dispatches: typeof requestedDispatches = [];
   const platformOps = actions.filter(a => a.tool !== "dispatch_task" && a.tool !== "passthrough");
 
   // 先执行平台操作（schedule/send 等）
@@ -377,6 +576,7 @@ export async function routeMessage(
         list_schedules: "schedule_list",
         delete_schedule: "schedule_delete",
         send_message: "send",
+        create_skill: "skill_create",
       };
       const intent = { type: typeMap[op.tool] || op.tool, ...op.args };
       await executePlatformIntent(adoptId, intent, writer);

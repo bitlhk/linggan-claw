@@ -45,6 +45,10 @@ import {
   provisionLingganClawInstance,
   writeClawExecAudit,
 } from "./helpers";
+import { onboardBuiltinSkillsForAdopt } from "../_core/skills/skill-onboarding";
+import { skillRegistry } from "../_core/skills/skill-registry";
+import { parseSkillSourceDirectory } from "../_core/skills/skill-source";
+import type { SkillSource } from "../../shared/types/skill";
 
 export const clawRouter = router({
     me: protectedProcedure.query(async ({ ctx }) => {
@@ -125,6 +129,9 @@ export const clawRouter = router({
 
         // 2.5) 持久化到 openclaw.json agents.list[].model —— gateway 热加载后路由才真正切过来
         const cfgApplied = setAgentModelInOpenclawConfig(String((claw as any).agentId || ""), input.modelId);
+        if (!cfgApplied.ok) {
+          throw new Error(`模型切换持久化失败（${cfgApplied.error}）。当前会话已临时生效，但重启或热加载后会回退到原模型。`);
+        }
 
         // 2.6) 持久化到 claw-model-overrides.json —— 刷新后下拉能记住用户选择
         try {
@@ -331,7 +338,7 @@ export const clawRouter = router({
     // 用户安装（复制到 workspace/skills/）
     marketInstall: protectedProcedure
       .input(z.object({ marketId: z.number(), adoptId: z.string().min(1).max(64) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         // Hermes runtime 虾（lgh-*）的技能由 Hermes 自动管理，不支持手动安装市场技能。
         // 相关 cp 路径对 Hermes 无效，前端也应该隐藏安装按钮；这里做硬拦截防止走到后面制造脏目录。
         if (String(input.adoptId).startsWith("lgh-")) {
@@ -342,26 +349,31 @@ export const clawRouter = router({
         }
         const item = await getSkillMarketItem(input.marketId);
         if (!item || item.status !== "approved") throw new TRPCError({ code: "NOT_FOUND", message: "技能不存在或未上架" });
-        const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new TRPCError({ code: "NOT_FOUND", message: "实例不存在" });
-        const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-        // 用 SKILL.md 中的 name 作为安装目录名
-        let installName = item.skillId;
-        try {
-          const { readFileSync: rfs } = await import("fs");
-          const md = rfs(`${item.packagePath}/SKILL.md`, "utf8");
-          const nm = md.match(/^name:\s*"?([^"\n]+)"?/m);
-          if (nm) installName = nm[1].trim();
-        } catch {}
-        const targetDir = `${remoteHome}/.openclaw/workspace-${claw.agentId}/skills/${installName}`;
-        const { execSync } = await import("child_process");
-        try {
-          execSync(`mkdir -p ${targetDir} && cp -r ${item.packagePath}/* ${targetDir}/`, { stdio: "ignore" });
-        } catch (e: any) {
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "安装失败: " + e.message });
+        await assertClawOwnerOrThrow(ctx, input.adoptId);
+        if (!item.packagePath || !existsSync(item.packagePath)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "技能包源不存在" });
         }
+
+        const parsed = parseSkillSourceDirectory(item.packagePath, item.skillId || item.name || "market-skill");
+        const source: SkillSource = {
+          kind: "marketplace",
+          skillId: parsed.skillId || item.skillId,
+          displayName: item.name || parsed.displayName || item.skillId,
+          description: item.description || parsed.description || "",
+          sourcePath: item.packagePath,
+          marketplaceId: String(item.id),
+          version: String(item.version || parsed.manifest?.version || "1.0.0"),
+        };
+        const installed = await skillRegistry.install(input.adoptId, source);
+        if (!installed.ok) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: installed.error.detail });
+        }
+        await skillRegistry.updateScan(input.adoptId, source.skillId, {
+          warnings: parsed.warnings,
+          scannedAt: new Date().toISOString(),
+        });
         await incrementSkillDownload(input.marketId);
-        return { ok: true, skillId: item.skillId, name: item.name };
+        return { ok: true, skillId: source.skillId, name: source.displayName, item: installed.value, warnings: parsed.warnings };
       }),
 
         adminListSharedSkills: adminProcedure.query(async () => {
@@ -608,6 +620,13 @@ export const clawRouter = router({
             operatorType: "system",
             operatorId: null,
             detail: JSON.stringify(provision),
+          });
+
+          onboardBuiltinSkillsForAdopt(adoptId, agentId).catch((error) => {
+            console.warn("[SKILL-ONBOARD] failed", {
+              adoptId,
+              error: error instanceof Error ? error.message : String(error),
+            });
           });
 
           const latest = await getCurrentClawByUserId(userId);

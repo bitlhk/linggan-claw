@@ -3,7 +3,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Route, Switch, Redirect } from "wouter";
 import { lazy, Suspense, useEffect } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { ThemeProvider } from "./contexts/ThemeContext";
 import { AdminRoute } from "./components/ProtectedRoute";
 import { Loader2 } from "lucide-react";
 import { loadSettings, applySettings } from "./lib/settings";
@@ -17,6 +16,8 @@ const CoopNew = lazy(() => import("./pages/CoopNew"));
 const Login = lazy(() => import("./pages/Login"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const DebugChatV2 = lazy(() => import("./pages/DebugChatV2"));
+const TaskWorkbenchLab = lazy(() => import("./pages/TaskWorkbenchLab"));
 
 // 加载中组件
 const LoadingFallback = () => (
@@ -29,10 +30,10 @@ const LoadingFallback = () => (
 );
 
 function Router() {
-  // 确保 light 主题
+  // Apply persisted UI settings on boot without forcing a theme mode.
   useEffect(() => {
     loadSettings();
-    applySettings({ themeMode: "light" });
+    applySettings({});
   }, []);
 
   return (
@@ -53,6 +54,18 @@ function Router() {
         {/* ── 子虾控制台 ── */}
         <Route path={"/claw/:adoptId"}>
           <Home />
+        </Route>
+
+        {/* Internal debug page for the Phase 4 ChatEvent transport pipeline. */}
+        <Route path={"/debug/chat-v2/:adoptId"}>
+          <DebugChatV2 />
+        </Route>
+
+        {/* Admin-only standalone lab for task workbench validation. Not linked from main nav. */}
+        <Route path={"/task-workbench-lab"}>
+          <AdminRoute>
+            <TaskWorkbenchLab />
+          </AdminRoute>
         </Route>
 
         {/* ── 协作 session 窗口（V2）── */}
@@ -87,14 +100,10 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-      >
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </ThemeProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Router />
+      </TooltipProvider>
     </ErrorBoundary>
   );
 }

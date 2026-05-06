@@ -13,6 +13,13 @@ import { ResponseAccumulator } from "./response-accumulator";
 // 2026-04-18: eager import 避免首次 HTTP 聊天冷启动挂死（配合 claw-ws-proxy 保持一致）
 import { SseStreamWriter } from "./stream-writer";
 import { routeMessage } from "./intent-agent";
+import { normalizeHttpSseLine } from "./runtime";
+import {
+  markChatRunComplete,
+  markChatRunStarted,
+  normalizeClientRunId,
+  touchChatRun,
+} from "./chat-inflight";
 
 export function registerChatStreamRoutes(app: express.Express) {
 
@@ -21,6 +28,7 @@ export function registerChatStreamRoutes(app: express.Express) {
   app.post("/api/claw/chat-stream", clawChatLimiter, async (req, res) => {
     const routeEnterMs = Date.now();
     let { adoptId, message, model, pendingToolContext, epochLabel } = req.body || {};
+    const clientRunId = normalizeClientRunId(req.body?.clientRunId);
     if (!adoptId || !message) {
       res.status(400).json({ error: "adoptId and message required" });
       return;
@@ -82,39 +90,80 @@ export function registerChatStreamRoutes(app: express.Express) {
 
     const isSessionResetCmd = ["/new", "/reset"].includes(msgStr.trim());
     if (isSessionResetCmd) {
-      // 用 OpenClaw 原生 sessions.reset RPC 重置会话
-      // 这样 session key 不变（agent:xxx:main），但内部 sessionId 换了，上下文清空
-      // 不需要前端断 WS 重连，HTTP 和 WS 路径自动同步
-      try {
-        const dbAgentId = String((claw as any).agentId || "").trim();
-        const trialAgentId = `trial_${String(adoptId)}`;
-        const remoteHomeReset = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
-        const trialAgentDirReset = `${remoteHomeReset}/.openclaw/agents/${trialAgentId}`;
-        const runtimeAgentIdReset = existsSync(trialAgentDirReset) ? trialAgentId : dbAgentId;
-        const sessionKeyReset = `agent:${runtimeAgentIdReset}:main`;
+      // Reset must target the same session key used by normal chat. Since Lingxia
+      // uses epoch-based keys after the first reset (agent:<id>:main:eN), resetting
+      // only agent:<id>:main leaves the active context intact. The reliable reset
+      // contract is: best-effort reset current key, bump epoch, clear local/OpenClaw
+      // session caches, and let the next send create agent:<id>:main:e{next}.
+      const dbAgentId = String((claw as any).agentId || "").trim();
+      const trialAgentId = `trial_${String(adoptId)}`;
+      const remoteHomeReset = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+      const trialAgentDirReset = `${remoteHomeReset}/.openclaw/agents/${trialAgentId}`;
+      const runtimeAgentIdReset = existsSync(trialAgentDirReset) ? trialAgentId : dbAgentId;
+      const currentEpoch = readSessionEpoch(String(adoptId));
+      const currentSessionKey = lookupSessionRegistry(String(adoptId), runtimeAgentIdReset, currentEpoch)
+        || (currentEpoch > 0
+          ? `agent:${runtimeAgentIdReset}:main:e${currentEpoch}`
+          : `agent:${runtimeAgentIdReset}:main`);
+      const legacyMainSessionKey = `agent:${runtimeAgentIdReset}:main`;
+      const resetKeys = Array.from(new Set([currentSessionKey, legacyMainSessionKey].filter(Boolean)));
+      const gatewayResetResults: Array<{ key: string; ok: boolean; error?: string }> = resetKeys.map((key) => ({
+        key,
+        ok: false,
+        error: "scheduled",
+      }));
 
-        const { execFileSync } = await import("child_process");
-        const remoteHostReset = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
-        const gatewayPortReset = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
-        const gatewayTokenReset = process.env.CLAW_GATEWAY_TOKEN || "";
+      // Do not block the reset UX on OpenClaw CLI latency. The epoch bump below is
+      // the authoritative reset boundary; sessions.reset is best-effort cleanup for
+      // the old Gateway keys and can safely finish in the background.
+      void (async () => {
+        try {
+          const { execFile } = await import("child_process");
+          const { promisify } = await import("util");
+          const execFileAsync = promisify(execFile);
+          const remoteHostReset = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
+          const gatewayPortReset = parseInt(process.env.CLAW_GATEWAY_PORT || "18789", 10);
+          const gatewayTokenReset = process.env.CLAW_GATEWAY_TOKEN || "";
+          const results: Array<{ key: string; ok: boolean; error?: string }> = [];
 
-        execFileSync("openclaw", [
-          "gateway", "call", "sessions.reset",
-          "--url", `ws://${remoteHostReset}:${gatewayPortReset}`,
-          "--token", gatewayTokenReset,
-          "--params", JSON.stringify({ key: sessionKeyReset, reason: "new" }),
-          "--json",
-        ], { timeout: 8000, encoding: "utf8" });
+          for (const key of resetKeys) {
+            try {
+              await execFileAsync("openclaw", [
+                "gateway", "call", "sessions.reset",
+                "--url", `ws://${remoteHostReset}:${gatewayPortReset}`,
+                "--token", gatewayTokenReset,
+                "--params", JSON.stringify({ key, reason: "new" }),
+                "--json",
+              ], { timeout: 3000, encoding: "utf8" });
+              results.push({ key, ok: true });
+            } catch (e: any) {
+              const message = String(e?.message || e);
+              results.push({ key, ok: false, error: message.slice(0, 240) });
+            }
+          }
 
-        // 同时也升级灵虾的 epoch（保留向后兼容，老的注册表机制还在用）
-        const epoch = bumpSessionEpoch(String(adoptId));
-        res.status(200).json({ ok: true, reset: true, epoch, sessionKey: sessionKeyReset });
-        return;
-      } catch (e: any) {
-        console.error("[reset] failed:", e?.message || e);
-        res.status(500).json({ error: "reset failed: " + (e?.message || String(e)) });
-        return;
-      }
+          console.log("[reset] gateway sessions.reset background completed", { adoptId, results });
+        } catch (e: any) {
+          console.warn("[reset] gateway reset setup failed in background", e?.message || e);
+        }
+      })();
+
+      const epoch = bumpSessionEpoch(String(adoptId));
+      const nextSessionKey = epoch > 0
+        ? `agent:${runtimeAgentIdReset}:main:e${epoch}`
+        : `agent:${runtimeAgentIdReset}:main`;
+      clearAgentSessionsCache(runtimeAgentIdReset, remoteHomeReset);
+      console.log("[reset] session reset completed", {
+        adoptId,
+        runtimeAgentId: runtimeAgentIdReset,
+        previousEpoch: currentEpoch,
+        nextEpoch: epoch,
+        currentSessionKey,
+        nextSessionKey,
+        gatewayResetResults,
+      });
+      res.status(200).json({ ok: true, reset: true, epoch, previousSessionKey: currentSessionKey, sessionKey: nextSessionKey, gatewayResetResults });
+      return;
     }
 
     // /help command: return help text locally
@@ -249,12 +298,61 @@ export function registerChatStreamRoutes(app: express.Express) {
 
     const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
     const remoteHome = process.env.CLAW_REMOTE_OPENCLAW_HOME || "/root";
+    const dedupEpoch = readSessionEpoch(String(adoptId));
+    const dedupDbAgentId = String((claw as any).agentId || "").trim();
+    const dedupTrialAgentId = `trial_${String(adoptId)}`;
+    const dedupTrialAgentDir = `${remoteHome}/.openclaw/agents/${dedupTrialAgentId}`;
+    const dedupRuntimeAgentId = existsSync(dedupTrialAgentDir) ? dedupTrialAgentId : dedupDbAgentId;
+    let dedupSessionKey: string;
+    if (epochLabel && typeof epochLabel === "string" && epochLabel.trim().length > 0) {
+      const safeLabel = epochLabel.trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+      dedupSessionKey = `agent:${dedupRuntimeAgentId}:main:${safeLabel}`;
+    } else {
+      const found = lookupSessionRegistry(String(adoptId), dedupRuntimeAgentId, dedupEpoch);
+      if (found) {
+        dedupSessionKey = found;
+      } else {
+        dedupSessionKey = dedupEpoch > 0
+          ? `agent:${dedupRuntimeAgentId}:main:e${dedupEpoch}`
+          : `agent:${dedupRuntimeAgentId}:main`;
+        upsertSessionRegistry(String(adoptId), dedupRuntimeAgentId, dedupSessionKey, dedupEpoch);
+      }
+    }
+    const dedupStart = markChatRunStarted({
+      sessionKey: dedupSessionKey,
+      clientRunId,
+      transport: "http",
+      message: msgStr,
+    });
+    if (dedupStart?.status === "in_flight") {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      res.write(`data: ${JSON.stringify({
+        __in_flight: true,
+        transport: "http",
+        sessionKey: dedupSessionKey,
+        clientRunId,
+        runId: dedupStart.run.runId,
+        startedAt: dedupStart.run.startedAt,
+        lastEventAt: dedupStart.run.lastEventAt,
+        reason: "duplicate_http_fallback",
+      })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
     // ── 平台意图路由：打分 → 分类 → 执行（统一 StreamWriter）──
     {
       const sseWriter = new SseStreamWriter(res);
       sseWriter.init();
       const handled = await routeMessage(String(adoptId), msgStr, sseWriter);
-      if (handled) return;
+      if (handled) {
+        markChatRunComplete(dedupSessionKey, clientRunId, "platform_handled");
+        return;
+      }
       // 未命中：继续走 Agent，但 SSE headers 已发，后续 Gateway 代理不需要再发
     }
 
@@ -265,7 +363,7 @@ export function registerChatStreamRoutes(app: express.Express) {
       rawProfile === "plus" || rawProfile === "internal" ? rawProfile : "starter";
 
     // 前端传入的模型 ID，白名单校验后通过 x-openclaw-model header 生效
-    const ALLOWED_CLAW_MODELS = new Set(["glm5/glm-5", "glm5/glm-5.1", "deepseek/deepseek-chat", "maas/deepseek-v4-flash", "deepseek/deepseek-v4-pro"]);
+    const ALLOWED_CLAW_MODELS = new Set(["glm5/glm-5", "glm5/glm-5.1", "deepseek/deepseek-v4-flash", "maas/deepseek-v4-flash", "deepseek/deepseek-v4-pro"]);
     const reqModel = (typeof model === "string" && model.trim()) ? model.trim() : "";
     const backendModel = (reqModel && ALLOWED_CLAW_MODELS.has(reqModel)) ? reqModel : "";
 
@@ -391,6 +489,20 @@ const options = {
     let activeToolName = ""; // 当前执行中工具名
     let gatewayToolDetected = false; // 是否已检测到 Gateway 内部工具执行
 
+    // ── SSE 截断诊断（2026-04-28 示例客户复现 P0）──
+    // 完整设计见 memory: project_sse_truncation_diag
+    let sawUpstreamDone = false;                                          // 见到 upstream "[DONE]"
+    let sawFinishReason: "stop" | "length" | "tool_calls" | "function_call" | null = null;
+    let proxyResAbortedFlag = false;
+    let proxyResCloseFired = false;
+    let proxyResEndedFlag = false;                                        // proxyRes 已正常 end —— close 在 end 后触发不算异常
+    let proxyResErrorObj: Error | null = null;
+    let endReason: "natural" | "aborted" | "close" | "error" | "client_close" = "natural";
+    let lastChunkAt = 0;
+    let clientClosedFlag = false;
+    let chatCompletionId: string | null = null;                           // 上游 chat completion id（批次 2 reconcile 锚点之一）
+    let finalized = false;                                                // 单一 finalize guard，防 end/error 双写 [DONE]
+
     // 记录任意 SSE 事件，更新 lastEventAt
     const touchLastEvent = () => { lastSSEEventAt = Date.now(); };
 
@@ -501,7 +613,102 @@ const options = {
       // 启动 Gateway 内部工具空白检测
       // startGatewayGapDetection(); // disabled — HTTP gap detection unreliable, will replace with WSS
 
+      // ── 异常 finalize 助手（2026-04-28）──
+      // proxyRes 异常路径（aborted/error/close-without-end）走这里收口
+      // 防止前端 SSE 流挂住、防止漏写日志
+      // proxyRes.on("end") 走自己的正常 finalize 路径（在下面）
+      const triggerAbnormalFinalize = (kindForLog: string) => {
+        if (finalized) return;
+        finalized = true;
+        if (endReason === "natural") endReason = (kindForLog as any);
+        markChatRunComplete(sessionKey, clientRunId, kindForLog === "error" ? "http_error" : "http_abnormal");
+
+        try { memAcc.flush(); } catch {}
+        stopToolHeartbeat();
+        stopGatewayGapDetection();
+        clearInterval(sseKeepaliveInterval);
+
+        const flagMode = String(process.env.SSE_TRUNCATE_DETECT || "off").toLowerCase();
+        const userIdNum = Number((claw as any).userId || 0);
+        const allowlist = String(process.env.SSE_TRUNCATE_DETECT_USERS || "")
+          .split(",").map(s => s.trim()).filter(Boolean).map(Number);
+        const flagOn = flagMode === "on" || (flagMode === "allowlist" && allowlist.includes(userIdNum));
+
+        if (!res.writableEnded) {
+          if (flagOn) {
+            res.write(`data: ${JSON.stringify({
+              __stream_truncated: true,
+              adoptId: String(adoptId),
+              sessionKey,
+              endReason,
+              chatCompletionId,
+              streamEndMs: Date.now(),  // 异常路径砍流时间（GPT 约束 #2）
+              startedAt,                // 流起始时间——recover 时间窗下界
+              triggeredBy: kindForLog,
+            })}\n\n`);
+          } else {
+            // off 模式保持兼容：发 __stream_end（旧行为遇到这种 case 也是 silent end）
+            res.write(`data: ${JSON.stringify({ __stream_end: true })}\n\n`);
+          }
+          res.write("data: [DONE]\n\n");
+          res.end();
+        }
+
+        appendLogAsync("claw-exec-detail.log", {
+          ts: new Date().toISOString(),
+          event: "chat_stream_response_abnormal",
+          adoptId: String(adoptId),
+          agentId: String((claw as any).agentId || ""),
+          runtimeAgentId,
+          sessionKey,
+          userId: Number((claw as any).userId || 0),
+          permissionProfile: String((claw as any).permissionProfile || "starter"),
+          statusCode: Number(proxyRes.statusCode || 0),
+          durationMs: Date.now() - startedAt,
+          upstreamFirstChunkMs,
+          upstreamBytes,
+          preview: upstreamPreview.slice(0, 1000),
+          endReason,
+          proxyResComplete: proxyRes.complete,
+          proxyResDestroyed: proxyRes.destroyed,
+          proxyResAborted: proxyResAbortedFlag,
+          proxyResCloseFired,
+          proxyResEnded: proxyResEndedFlag,
+          proxyResError: proxyResErrorObj?.message ?? null,
+          sawUpstreamDone,
+          sawFinishReason,
+          chatCompletionId,
+          lastChunkAt,
+          clientClosed: clientClosedFlag,
+          flag: process.env.SSE_TRUNCATE_DETECT || "off",
+          triggeredBy: kindForLog,
+        });
+      };
+
+      // ── SSE 截断诊断 listener（2026-04-28）──
+      // close 不一定是异常：正常 end 后也会 emit close。判异常看 ended/proxyRes.complete/sawUpstreamDone 组合
+      proxyRes.on("aborted", () => {
+        proxyResAbortedFlag = true;
+        if (endReason === "natural") endReason = "aborted";
+        console.log("[BIZ-STREAM] proxyRes aborted, complete=", proxyRes.complete, "bytes=", upstreamBytes);
+        triggerAbnormalFinalize("aborted");
+      });
+      proxyRes.on("close", () => {
+        proxyResCloseFired = true;
+        // 真异常关闭：close && !proxyResEndedFlag（end 后的 close 是正常清理）
+        const abnormal = !proxyResEndedFlag;
+        console.log("[BIZ-STREAM] proxyRes close, complete=", proxyRes.complete, "destroyed=", proxyRes.destroyed, "abnormal=", abnormal);
+        if (abnormal) triggerAbnormalFinalize("close_abnormal");
+      });
+      proxyRes.on("error", (err: Error) => {
+        proxyResErrorObj = err;
+        if (endReason === "natural") endReason = "error";
+        console.log("[BIZ-STREAM] proxyRes error", err?.message);
+        triggerAbnormalFinalize("error");
+      });
+
       proxyRes.on("data", async (chunk: Buffer) => {
+        lastChunkAt = Date.now();
         if (upstreamFirstChunkMs === null) {
           upstreamFirstChunkMs = Date.now();
           if (!res.writableEnded) {
@@ -538,7 +745,34 @@ const options = {
 
           if (!line.startsWith("data: ")) continue;
           const dataStr = line.slice(6).trim();
-          if (dataStr === "[DONE]") {
+          const runtimeEvents = normalizeHttpSseLine(line, eventName);
+          let sawStreamDoneEvent = false;
+          if (runtimeEvents.length > 0) touchChatRun(sessionKey, clientRunId, "http_event");
+          for (const evt of runtimeEvents) {
+            switch (evt.type) {
+              case "stream_done":
+                sawUpstreamDone = true;
+                sawStreamDoneEvent = true;
+                break;
+              case "finish_reason":
+                sawFinishReason = evt.reason;
+                break;
+              case "delta":
+                lastAnyDeltaAt = Date.now();
+                memAcc.appendDelta(evt.content);
+                lastContentDeltaAt = Date.now();
+                recentContentBuffer = (recentContentBuffer + evt.content).slice(-200);
+                // 收到 content 说明 Gateway 工具执行完毕
+                if (gatewayToolDetected) stopGatewayGapDetection();
+                break;
+              case "thinking":
+                lastAnyDeltaAt = Date.now();
+                break;
+              default:
+                break;
+            }
+          }
+          if (sawStreamDoneEvent) {
             writeData({ __done: true });
             continue;
           }
@@ -546,6 +780,11 @@ const options = {
           try {
             const chunk = JSON.parse(dataStr);
 
+            // 完成态跟踪（2026-04-28 SSE 截断诊断）
+            // 只在标准 OpenAI chunk 上抓 id（含 choices 数组），避免误抓 tool_call 自带 id
+            if (!chatCompletionId && Array.isArray(chunk?.choices) && typeof chunk?.id === "string") {
+              chatCompletionId = chunk.id;
+            }
             // ── tool_call：通过 routeTool 统一处理（带 5 分钟超时）──────────
             if (eventName === "tool_call") {
               const req = {
@@ -615,22 +854,6 @@ const options = {
             if (eventName) {
               writeEvent(eventName, chunk);
             } else {
-              // 检测 content / reasoning_content delta：追踪活跃时间
-              const delta = chunk?.choices?.[0]?.delta;
-              const content = typeof delta?.content === "string" ? delta.content
-                : Array.isArray(delta?.content) ? delta.content.map((c: any) => c?.text || "").join("") : "";
-              const reasoning = typeof delta?.reasoning_content === "string" ? delta.reasoning_content : "";
-              // 任何 delta（content 或 reasoning_content）都算活跃
-              if (content || reasoning) {
-                lastAnyDeltaAt = Date.now();
-              }
-              if (content) {
-                memAcc.appendDelta(content);
-                lastContentDeltaAt = Date.now();
-                recentContentBuffer = (recentContentBuffer + content).slice(-200);
-                // 收到 content 说明 Gateway 工具执行完毕
-                if (gatewayToolDetected) stopGatewayGapDetection();
-              }
               writeData(chunk);
             }
           } catch {
@@ -642,6 +865,10 @@ const options = {
       });
 
       proxyRes.on("end", () => {
+        proxyResEndedFlag = true;
+        if (finalized) { console.log("[BIZ-STREAM] proxyRes end after finalized, skip"); return; }
+        finalized = true;
+        markChatRunComplete(sessionKey, clientRunId, "http_done");
         memAcc.flush();
           console.log("[BIZ-STREAM] proxyRes ended");
         stopToolHeartbeat(); // 清理心跳 interval
@@ -686,15 +913,51 @@ const options = {
             }
           } catch {}
           res.write(`data: ${JSON.stringify({ __perf: { streamEndMs } })}\n\n`);
-          res.write(`data: ${JSON.stringify({ __stream_end: true })}\n\n`);
+
+          // ── 完成态三档判定（2026-04-28 SSE 截断诊断）──
+          // Feature flag: SSE_TRUNCATE_DETECT
+          //   off（默认）→ 旧行为，always __stream_end（不影响线上）
+          //   allowlist → 仅 SSE_TRUNCATE_DETECT_USERS 列表中的 userId 走新逻辑
+          //   on → 全量
+          const flagMode = String(process.env.SSE_TRUNCATE_DETECT || "off").toLowerCase();
+          const userIdNum = Number((claw as any).userId || 0);
+          const allowlist = String(process.env.SSE_TRUNCATE_DETECT_USERS || "")
+            .split(",").map(s => s.trim()).filter(Boolean).map(Number);
+          const flagOn =
+            flagMode === "on" ||
+            (flagMode === "allowlist" && allowlist.includes(userIdNum));
+
+          const upstreamCompleted = sawUpstreamDone || sawFinishReason === "stop";
+          const lengthLimited = !upstreamCompleted && sawFinishReason === "length";
+          // truncated 排除 client_close（用户主动断不算 bug）
+          const truncated = !upstreamCompleted && !lengthLimited && !clientClosedFlag;
+
+          if (flagOn && truncated) {
+            res.write(`data: ${JSON.stringify({
+              __stream_truncated: true,
+              adoptId: String(adoptId),
+              sessionKey,
+              endReason,
+              chatCompletionId,
+              streamEndMs,         // 服务端砍流时间——批次 2 recover 锚点（GPT 约束 #2）
+              startedAt,           // 服务端流起始时间——recover 时间窗下界
+            })}\n\n`);
+          } else if (flagOn && lengthLimited) {
+            res.write(`data: ${JSON.stringify({ __stream_end_length: true })}\n\n`);
+          } else {
+            res.write(`data: ${JSON.stringify({ __stream_end: true })}\n\n`);
+          }
           res.write("data: [DONE]\n\n");
           res.end();  // 关闭 SSE 流
         }
+        // 日志增强（永远 on，不依赖 feature flag）—— 批次 1 段 1
         appendLogAsync("claw-exec-detail.log", {
           ts: new Date().toISOString(),
           event: "chat_stream_response",
           adoptId: String(adoptId),
           agentId: String((claw as any).agentId || ""),
+          runtimeAgentId,
+          sessionKey,
           userId: Number((claw as any).userId || 0),
           permissionProfile: String((claw as any).permissionProfile || "starter"),
           statusCode: Number(proxyRes.statusCode || 0),
@@ -702,14 +965,33 @@ const options = {
           upstreamFirstChunkMs,
           upstreamBytes,
           preview: upstreamPreview.slice(0, 1000),
+          // SSE diag 字段
+          endReason,
+          proxyResComplete: proxyRes.complete,
+          proxyResDestroyed: proxyRes.destroyed,
+          proxyResAborted: proxyResAbortedFlag,
+          proxyResCloseFired,
+          proxyResEnded: proxyResEndedFlag,
+          proxyResError: proxyResErrorObj?.message ?? null,
+          sawUpstreamDone,
+          sawFinishReason,
+          chatCompletionId,
+          lastChunkAt,
+          clientClosed: clientClosedFlag,
+          flag: process.env.SSE_TRUNCATE_DETECT || "off",
         });
       });
     });
 
       proxyReq.on("timeout", () => { console.log("[BIZ-STREAM] proxyReq TIMEOUT"); });
     proxyReq.on("error", (err) => {
+      if (endReason === "natural") endReason = "error";
+      proxyResErrorObj = err;
       stopToolHeartbeat();
       stopGatewayGapDetection();
+      if (finalized) return;
+      finalized = true;
+      markChatRunComplete(dedupSessionKey, clientRunId, "http_error");
       if (!res.writableEnded) {
         res.write(`data: ${JSON.stringify({ __stream_error: true, error: err.message })}\n\n`);
         res.write("data: [DONE]\n\n");
@@ -718,7 +1000,20 @@ const options = {
     });
 
     // 客户端断开时取消上游请求
-    req.on("close", () => { stopToolHeartbeat(); stopGatewayGapDetection(); clearInterval(sseKeepaliveInterval); proxyReq.destroy(); });
+    // 关键：finalized 时短路返回——正常完成路径上 res.end() 会让 underlying socket 关闭，
+    // req 跟着 emit "close"。如果不 guard，正常完成日志会被改写成 client_close。
+    req.on("close", () => {
+      if (finalized) {
+        clearInterval(sseKeepaliveInterval);
+        return;
+      }
+      clientClosedFlag = true;
+      if (endReason === "natural") endReason = "client_close";
+      stopToolHeartbeat();
+      stopGatewayGapDetection();
+      clearInterval(sseKeepaliveInterval);
+      proxyReq.destroy();
+    });
 
     proxyReq.write(body);
     proxyReq.on("close", () => clearInterval(sseKeepaliveInterval));

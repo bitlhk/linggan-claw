@@ -27,7 +27,7 @@ import { notifyCoopEvent } from "../_core/coop-notify";
 // ── 灰度白名单（user.id 数组） ──────────────────────────────
 // MVP 阶段硬编码。上线前替换为 env 或 feature_flags 表。
 // 2026-04-17 演练：放 user 6/20/101/138 进白名单一起跑通多人协作（已绑微信的优先）
-const COOP_WHITELIST_USER_IDS: number[] = [2, 6, 7, 20, 40, 101, 138, 64, 217]; // Hongkun Li / 赵印伟 / 程威 / 初利宝 / 张毓芬 / 王祥倩 / 龚倩 / 袁晨明 / 陈海双
+const COOP_WHITELIST_USER_IDS: number[] = [2, 6, 7, 20, 40, 101, 138, 64, 217, 467, 468]; // Hongkun Li / 赵印伟 / 程威 / 初利宝 / 张毓芬 / 王祥倩 / 龚倩 / 袁晨明 / 陈海双 / 罗哲(浙江华为) / 颜秉洋(浙江华为) — 2026-04-27 加 467/468
 
 function isCoopWhitelisted(userId: number): boolean {
   return COOP_WHITELIST_USER_IDS.includes(userId);
@@ -123,8 +123,8 @@ export const coopRouter = router({
         })
         .optional()
     )
-    .query(async ({ input }) => {
-      return await listMentionCandidates(input || {});
+    .query(async ({ input, ctx }) => {
+      return await listMentionCandidates({ ...(input || {}), viewerUserId: ctx.user!.id });
     }),
 
   // ── 被邀请者：同意 ─────────────────────────────────

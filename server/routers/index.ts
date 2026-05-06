@@ -3,7 +3,7 @@ import { systemRouter } from "../_core/systemRouter";
 import { authRouter, registrationRouter } from "./auth";
 import { visitStatsRouter } from "./stats";
 import { securityLogsRouter, ipManagementRouter } from "./security";
-import { smtpRouter, featureFlagsRouter, scenariosRouter, experienceConfigsRouter } from "./admin";
+import { smtpRouter, featureFlagsRouter, scenariosRouter, experienceConfigsRouter, collabSpacesRouter, collabMembersRouter } from "./admin";
 import { clawRouter } from "./claw";
 import { ipAccessLogsRouter } from "./ipAccessLogs";
 import { systemConfigsRouter } from "./systemConfigs";
@@ -23,6 +23,8 @@ export const appRouter = router({
   featureFlags: featureFlagsRouter,
   scenarios: scenariosRouter,
   experienceConfigs: experienceConfigsRouter,
+  collabSpaces: collabSpacesRouter,
+  collabMembers: collabMembersRouter,
   claw: clawRouter,
   ipAccessLogs: ipAccessLogsRouter,
   systemConfigs: systemConfigsRouter,
