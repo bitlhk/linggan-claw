@@ -46,6 +46,10 @@ export async function upsertBusinessAgent(data: InsertBusinessAgent): Promise<vo
       tags: data.tags,
       systemPrompt: data.systemPrompt,
       uiConfig: data.uiConfig,
+      providerType: (data as any).providerType,
+      adapterProtocol: (data as any).adapterProtocol,
+      capabilitiesJson: (data as any).capabilitiesJson,
+      endpointConfigJson: (data as any).endpointConfigJson,
     }});
 }
 

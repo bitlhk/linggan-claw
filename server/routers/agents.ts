@@ -14,6 +14,49 @@ import {
   updateAgentFields,
 } from "../db";
 
+const providerTypes = [
+  "openai-compatible",
+  "openclaw-local",
+  "openclaw-remote",
+  "hermes",
+  "http-sse",
+  "mcp",
+  "a2a",
+] as const;
+
+const adapterProtocols = [
+  "openai-chat-completions",
+  "openclaw-chat",
+  "hermes-events",
+  "stock-agent-v1",
+  "my-wealth-hermes-v1",
+  "bond-hermes-v1",
+  "credit-risk-hermes-v1",
+  "claim-ev-hermes-v1",
+  "mcp-tools-v1",
+  "a2a-task-v1",
+] as const;
+
+function inferProviderType(input: { id: string; kind?: string; providerType?: string | null }) {
+  if (input.providerType) return input.providerType;
+  if (input.id === "task-stock") return "http-sse";
+  if (["task-hermes", "task-my-wealth", "task-bond", "task-credit-risk", "task-claim-ev"].includes(input.id)) return "hermes";
+  if (input.kind === "local") return "openclaw-local";
+  return "openai-compatible";
+}
+
+function inferAdapterProtocol(input: { id: string; kind?: string; adapterProtocol?: string | null }) {
+  if (input.adapterProtocol) return input.adapterProtocol;
+  if (input.id === "task-stock") return "stock-agent-v1";
+  if (input.id === "task-my-wealth") return "my-wealth-hermes-v1";
+  if (input.id === "task-bond") return "bond-hermes-v1";
+  if (input.id === "task-credit-risk") return "credit-risk-hermes-v1";
+  if (input.id === "task-claim-ev") return "claim-ev-hermes-v1";
+  if (input.id === "task-hermes") return "hermes-events";
+  if (input.kind === "local") return "openclaw-chat";
+  return "openai-chat-completions";
+}
+
 export const agentHealthRouter = router({
     check: adminProcedure
       .input(z.object({ agentId: z.string() }))
@@ -130,11 +173,17 @@ export const bizAgentsRouter = router({
       tags: z.string().nullable().optional(),
       systemPrompt: z.string().nullable().optional(),
       uiConfig: z.string().nullable().optional(),
+      providerType: z.enum(providerTypes).nullable().optional(),
+      adapterProtocol: z.enum(adapterProtocols).nullable().optional(),
+      capabilitiesJson: z.string().nullable().optional(),
+      endpointConfigJson: z.string().nullable().optional(),
     })).mutation(async ({ input }) => {
       const existing = await getBusinessAgent(input.id);
       const nextApiToken = input.apiToken && input.apiToken.trim()
         ? input.apiToken.trim()
         : (existing?.apiToken || null);
+      const providerType = inferProviderType(input);
+      const adapterProtocol = inferAdapterProtocol(input);
       await upsertBusinessAgent({
         id: input.id,
         name: input.name,
@@ -154,6 +203,10 @@ export const bizAgentsRouter = router({
         tags: input.tags || "",
         systemPrompt: input.systemPrompt || null,
         uiConfig: input.uiConfig || null,
+        providerType,
+        adapterProtocol,
+        capabilitiesJson: input.capabilitiesJson || "[]",
+        endpointConfigJson: input.endpointConfigJson || null,
       } as any);
       return { ok: true };
     }),

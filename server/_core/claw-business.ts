@@ -64,8 +64,40 @@ export function registerBusinessRoutes(app: express.Express) {
       remote: agent.kind === "remote",
       model: "openclaw/main",
       tags: agent.tags || "",
+      providerType: inferProviderType(agent, String(agent.id)),
+      adapterProtocol: inferAdapterProtocol(agent, String(agent.id)),
+      capabilities: (() => {
+        try { return JSON.parse(agent.capabilitiesJson || "[]"); } catch { return []; }
+      })(),
       uiConfig,
     };
+  }
+  function inferProviderType(agent: any, agentId: string): string {
+    if (agent?.providerType) return String(agent.providerType);
+    if (agentId === "task-stock") return "http-sse";
+    if (["task-hermes", "task-my-wealth", "task-bond", "task-credit-risk", "task-claim-ev"].includes(agentId)) return "hermes";
+    if (agent?.kind === "local") return "openclaw-local";
+    return "openai-compatible";
+  }
+  function inferAdapterProtocol(agent: any, agentId: string): string {
+    if (agent?.adapterProtocol) return String(agent.adapterProtocol);
+    if (agentId === "task-stock") return "stock-agent-v1";
+    if (agentId === "task-my-wealth") return "my-wealth-hermes-v1";
+    if (agentId === "task-bond") return "bond-hermes-v1";
+    if (agentId === "task-credit-risk") return "credit-risk-hermes-v1";
+    if (agentId === "task-claim-ev") return "claim-ev-hermes-v1";
+    if (agentId === "task-hermes") return "hermes-events";
+    if (agent?.kind === "local") return "openclaw-chat";
+    return "openai-chat-completions";
+  }
+  function parseJsonRecord(raw: unknown): Record<string, any> {
+    if (!raw || typeof raw !== "string") return {};
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
   }
   function computeTenantShort(uid: number, aid: string): string {
     return createHmac("sha256", TENANT_SECRET_LOCAL).update(`uid:${uid}|agent:${aid}`).digest("hex").slice(0, 16);
@@ -312,6 +344,9 @@ export function registerBusinessRoutes(app: express.Express) {
 
     // ── 远端 Agent 动态路由（从 DB 读取 api_url / api_token）──────────────
     const bizAgentCfg = allowedAgents.find((a: any) => a.id === agentId);
+    const providerType = inferProviderType(bizAgentCfg, String(agentId));
+    const adapterProtocol = inferAdapterProtocol(bizAgentCfg, String(agentId));
+    const endpointConfig = parseJsonRecord((bizAgentCfg as any)?.endpointConfigJson);
 
     // ── 平台级记忆：创建响应缓冲器 ──
     const memAcc = new ResponseAccumulator(userId, String(agentId), msgStr);
@@ -320,7 +355,7 @@ export function registerBusinessRoutes(app: express.Express) {
     let creditReportBuffer = "";
 
     // ── 智贷决策助手专用分支：走 Hermes + 银保监+行业大模型 grounding ──
-    if (bizAgentCfg?.kind === "remote" && agentId === "task-credit-risk") {
+    if (bizAgentCfg?.kind === "remote" && adapterProtocol === "credit-risk-hermes-v1") {
       const tenantCtx: TenantContext = await beginTenantSession(
         userId, agentId, "chat_send",
         { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
@@ -617,7 +652,7 @@ export function registerBusinessRoutes(app: express.Express) {
     }
 
     // ── 债券投研助手专用分支：走 Hermes + 中央结算+中诚信 grounding + akshare 中债真实数据 ──
-    if (bizAgentCfg?.kind === "remote" && agentId === "task-bond") {
+    if (bizAgentCfg?.kind === "remote" && adapterProtocol === "bond-hermes-v1") {
       const tenantCtx: TenantContext = await beginTenantSession(
         userId, agentId, "chat_send",
         { message_length: msgStr.length, ua: req.headers["user-agent"]?.slice(0, 60) }
@@ -865,7 +900,7 @@ export function registerBusinessRoutes(app: express.Express) {
     }
 
     // ── 个人理财助手专用分支：走 Hermes + 中行+招行 白皮书 grounding + akshare 数据 ──
-    if (bizAgentCfg?.kind === "remote" && agentId === "task-my-wealth") {
+    if (bizAgentCfg?.kind === "remote" && adapterProtocol === "my-wealth-hermes-v1") {
       // TIL：构建租户上下文（虽然是个人 dogfood，结构还是保留好后续多用户）
       const tenantCtx: TenantContext = await beginTenantSession(
         userId, agentId, "chat_send",
@@ -1123,7 +1158,7 @@ export function registerBusinessRoutes(app: express.Express) {
     }
 
     // ── EV 理赔决策助手专用分支：走 Hermes /v1/runs + 系统提示 + SSE 工具名翻译 ──
-    if (bizAgentCfg?.kind === "remote" && agentId === "task-claim-ev") {
+    if (bizAgentCfg?.kind === "remote" && adapterProtocol === "claim-ev-hermes-v1") {
       // TIL：构建租户上下文（同 task-hermes 模式，但 sessionKey 命名空间不同）
       const tenantCtx: TenantContext = await beginTenantSession(
         userId, agentId, "chat_send",
@@ -1391,7 +1426,7 @@ export function registerBusinessRoutes(app: express.Express) {
     }
 
     // ── Hermes Agent 专用分支：走 /v1/runs + events SSE ──────────────
-    if (bizAgentCfg?.kind === "remote" && agentId === "task-hermes") {
+    if (bizAgentCfg?.kind === "remote" && adapterProtocol === "hermes-events") {
       // TIL：构建租户上下文（sessionKey 脱敏 + 审计 + 映射）
       const tenantCtx: TenantContext = await beginTenantSession(
         userId, agentId, "chat_send",
@@ -1718,7 +1753,7 @@ export function registerBusinessRoutes(app: express.Express) {
 
 
         // ── Stock Analysis Agent 专用分支：走 /api/v1/agent/chat/stream SSE ──
-    if (bizAgentCfg?.kind === "remote" && agentId === "task-stock") {
+    if (bizAgentCfg?.kind === "remote" && providerType === "http-sse" && adapterProtocol === "stock-agent-v1") {
       // TIL: 构建租户上下文
       const tenantCtxStock: TenantContext = await beginTenantSession(
         userId, agentId, "chat_send",
@@ -1756,7 +1791,7 @@ export function registerBusinessRoutes(app: express.Express) {
       const stockReq = http.request({
         hostname: stockUrl.hostname,
         port: parseInt(String(stockUrl.port || "8188"), 10),
-        path: "/api/v1/agent/chat/stream",
+        path: String(endpointConfig.path || "/api/v1/agent/chat/stream"),
         method: "POST",
         timeout: 0,
         headers: {
@@ -1825,6 +1860,12 @@ export function registerBusinessRoutes(app: express.Express) {
       return;
     }
 
+    if (providerType === "mcp" || providerType === "a2a") {
+      res.write(`data: ${JSON.stringify({ error: `${providerType.toUpperCase()} provider is reserved but not enabled yet` })}\n\n`);
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+      return;
+    }
 
     if (bizAgentCfg?.kind === "remote") {
       // TIL: 构建租户上下文（覆盖 task-slides / task-code 等通用 remote agent）

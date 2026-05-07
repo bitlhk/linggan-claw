@@ -558,6 +558,10 @@ export const businessAgents = mysqlTable("business_agents", {
   tags:          varchar("tags", { length: 256 }).default(""),
   systemPrompt:  text("system_prompt"),
   uiConfig:      text("ui_config"),
+  providerType:  varchar("provider_type", { length: 64 }),
+  adapterProtocol: varchar("adapter_protocol", { length: 96 }),
+  capabilitiesJson: text("capabilities_json"),
+  endpointConfigJson: text("endpoint_config_json"),
   createdAt:     timestamp("created_at").defaultNow().notNull(),
   updatedAt:     timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });

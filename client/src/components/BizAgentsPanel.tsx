@@ -14,6 +14,8 @@ interface BizAgent {
   lastHealthCheck?: string | null;
   allowedProfiles?: string | null; tags?: string | null;
   systemPrompt?: string | null; uiConfig?: string | null;
+  providerType?: string | null; adapterProtocol?: string | null;
+  capabilitiesJson?: string | null; endpointConfigJson?: string | null;
 }
 
 const EMPTY: Partial<BizAgent> = {
@@ -21,6 +23,8 @@ const EMPTY: Partial<BizAgent> = {
   apiUrl: "", apiToken: "", remoteAgentId: "main",
   localAgentId: "", skills: "", icon: "🤖", enabled: 1, sortOrder: 0,
   expiresAt: null, maxDailyRequests: 0, allowedProfiles: "plus,internal", tags: "",
+  providerType: "openai-compatible", adapterProtocol: "openai-chat-completions",
+  capabilitiesJson: "[\"chat\"]", endpointConfigJson: "",
 };
 
 const CATEGORY_OPTIONS = [
@@ -37,6 +41,29 @@ const TEMPLATE_OPTIONS = [
   { value: "compact", label: "轻量卡片" },
 ];
 
+const PROVIDER_OPTIONS = [
+  { value: "openai-compatible", label: "OpenAI 兼容服务" },
+  { value: "openclaw-local", label: "本机 OpenClaw" },
+  { value: "openclaw-remote", label: "远端 OpenClaw Gateway" },
+  { value: "hermes", label: "Hermes Runtime" },
+  { value: "http-sse", label: "HTTP SSE 服务" },
+  { value: "mcp", label: "MCP（预留）" },
+  { value: "a2a", label: "A2A（预留）" },
+];
+
+const ADAPTER_OPTIONS = [
+  { value: "openai-chat-completions", label: "OpenAI Chat Completions" },
+  { value: "openclaw-chat", label: "OpenClaw Chat" },
+  { value: "hermes-events", label: "Hermes Events" },
+  { value: "stock-agent-v1", label: "Stock Agent v1" },
+  { value: "my-wealth-hermes-v1", label: "个人理财 Hermes v1" },
+  { value: "bond-hermes-v1", label: "债券投研 Hermes v1" },
+  { value: "credit-risk-hermes-v1", label: "智贷决策 Hermes v1" },
+  { value: "claim-ev-hermes-v1", label: "EV 理赔 Hermes v1" },
+  { value: "mcp-tools-v1", label: "MCP Tools v1（预留）" },
+  { value: "a2a-task-v1", label: "A2A Task v1（预留）" },
+];
+
 const LEGACY_CATEGORY: Record<string, string> = {
   "task-hermes": "core",
   "task-trace": "core",
@@ -49,6 +76,17 @@ const LEGACY_CATEGORY: Record<string, string> = {
   "task-bond": "finance",
   "task-credit-risk": "finance",
 };
+
+function defaultRuntimeFor(id: string, kind: string) {
+  if (id === "task-stock") return { providerType: "http-sse", adapterProtocol: "stock-agent-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
+  if (id === "task-my-wealth") return { providerType: "hermes", adapterProtocol: "my-wealth-hermes-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
+  if (id === "task-bond") return { providerType: "hermes", adapterProtocol: "bond-hermes-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
+  if (id === "task-credit-risk") return { providerType: "hermes", adapterProtocol: "credit-risk-hermes-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
+  if (id === "task-claim-ev") return { providerType: "hermes", adapterProtocol: "claim-ev-hermes-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
+  if (id === "task-hermes") return { providerType: "hermes", adapterProtocol: "hermes-events", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
+  if (kind === "local") return { providerType: "openclaw-local", adapterProtocol: "openclaw-chat", capabilitiesJson: "[\"chat\",\"tools\",\"files\"]" };
+  return { providerType: "openai-compatible", adapterProtocol: "openai-chat-completions", capabilitiesJson: "[\"chat\"]" };
+}
 
 function agentIcon(id: string, size = 20) {
   const style = { color: "var(--oc-accent)" };
@@ -134,6 +172,10 @@ function toAgentPayload(v: any) {
     allowedProfiles: payload.allowedProfiles || "plus,internal",
     tags: payload.tags || "",
     systemPrompt: payload.systemPrompt || "",
+    providerType: payload.providerType || defaultRuntimeFor(payload.id || "", payload.kind || "remote").providerType,
+    adapterProtocol: payload.adapterProtocol || defaultRuntimeFor(payload.id || "", payload.kind || "remote").adapterProtocol,
+    capabilitiesJson: payload.capabilitiesJson || defaultRuntimeFor(payload.id || "", payload.kind || "remote").capabilitiesJson,
+    endpointConfigJson: payload.endpointConfigJson || "",
     uiConfig: JSON.stringify(uiConfig),
   };
 }
@@ -146,6 +188,7 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
   initial: Partial<BizAgent>; saving?: boolean; onSave: (v: any) => void; onCancel: () => void;
 }) {
   const ui = parseUiConfig(initial.uiConfig);
+  const runtimeDefaults = defaultRuntimeFor(String(initial.id || ""), String(initial.kind || "remote"));
   const [v, setV] = useState<any>({
     ...EMPTY,
     ...initial,
@@ -157,6 +200,10 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
     welcomeDescription: ui.welcomeDescription || initial.description || "",
     examplePrompts: formatExamples(ui.examples),
     uiBadges: Array.isArray(ui.badges) ? ui.badges.join(",") : "",
+    providerType: initial.providerType || runtimeDefaults.providerType,
+    adapterProtocol: initial.adapterProtocol || runtimeDefaults.adapterProtocol,
+    capabilitiesJson: initial.capabilitiesJson || runtimeDefaults.capabilitiesJson,
+    endpointConfigJson: initial.endpointConfigJson || "",
   });
   const set = (k: string, val: any) => setV((p: any) => ({ ...p, [k]: val }));
   const isEdit = !!initial.id;
@@ -188,12 +235,49 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
         </div>
         <div>
           <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>类型</label>
-          <select value={v.kind} onChange={e => set("kind", e.target.value)}
+          <select value={v.kind} onChange={e => {
+            const kind = e.target.value;
+            const defaults = defaultRuntimeFor(String(v.id || ""), kind);
+            setV((p: any) => ({ ...p, kind, ...defaults }));
+          }}
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }}>
             <option value="remote">🌐 远端 API（OpenAI 兼容）</option>
             <option value="local">💻 本地 Agent（本机 OpenClaw）</option>
           </select>
+        </div>
+        <div>
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>调用方式</label>
+          <select value={v.providerType || "openai-compatible"} onChange={e => set("providerType", e.target.value)}
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }}>
+            {PROVIDER_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          {(v.providerType === "mcp" || v.providerType === "a2a") && (
+            <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>当前作为协议扩展预留，正式调用适配器后续接入</div>
+          )}
+        </div>
+        <div>
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>协议适配器</label>
+          <select value={v.adapterProtocol || "openai-chat-completions"} onChange={e => set("adapterProtocol", e.target.value)}
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }}>
+            {ADAPTER_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </div>
+        <div className="col-span-2">
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>能力声明 JSON</label>
+          <input value={v.capabilitiesJson || ""} onChange={e => set("capabilitiesJson", e.target.value)}
+            placeholder='["chat","tools","files","artifacts","long_task"]'
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none font-mono"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+        </div>
+        <div className="col-span-2">
+          <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>连接配置 JSON（可选）</label>
+          <textarea value={v.endpointConfigJson || ""} onChange={e => set("endpointConfigJson", e.target.value)} rows={2}
+            placeholder='{"path":"/api/v1/agent/chat/stream","timeoutMs":0}'
+            className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none resize-none font-mono"
+            style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
         </div>
         <div>
           <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>图标（自定义 Agent Emoji）</label>
@@ -444,6 +528,8 @@ export function BizAgentsPanel() {
                     {a.expiresAt && <span>有效期: {new Date(a.expiresAt).toLocaleDateString()}</span>}
                     {!a.expiresAt && <span>永久有效</span>}
                     {(a.maxDailyRequests || 0) > 0 && <span>日限: {a.maxDailyRequests}次</span>}
+                    <span>{optionLabel(PROVIDER_OPTIONS, a.providerType || defaultRuntimeFor(a.id, a.kind).providerType)}</span>
+                    <span>{optionLabel(ADAPTER_OPTIONS, a.adapterProtocol || defaultRuntimeFor(a.id, a.kind).adapterProtocol)}</span>
                     {ui.category && <span>{optionLabel(CATEGORY_OPTIONS, ui.category)}</span>}
                     {ui.template && <span>{optionLabel(TEMPLATE_OPTIONS, ui.template)}</span>}
                     {a.tags && <span>{String(a.tags).split(",").filter(Boolean).map(t => `[${t.trim()}]`).join(" ")}</span>}
