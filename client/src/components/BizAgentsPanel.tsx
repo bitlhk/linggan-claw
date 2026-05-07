@@ -99,15 +99,28 @@ function toAgentPayload(v: any) {
     examples: parseExamples(examplePrompts || ""),
     badges: String(uiBadges || "").split(",").map((item) => item.trim()).filter(Boolean),
   };
-  return { ...payload, uiConfig: JSON.stringify(uiConfig) };
+  return {
+    ...payload,
+    description: payload.description || "",
+    apiUrl: payload.apiUrl || "",
+    apiToken: payload.apiToken || "",
+    remoteAgentId: payload.remoteAgentId || "",
+    localAgentId: payload.localAgentId || "",
+    skills: payload.skills || "",
+    icon: payload.icon || "🤖",
+    allowedProfiles: payload.allowedProfiles || "plus,internal",
+    tags: payload.tags || "",
+    systemPrompt: payload.systemPrompt || "",
+    uiConfig: JSON.stringify(uiConfig),
+  };
 }
 
 function optionLabel(options: { value: string; label: string }[], value?: string) {
   return options.find((option) => option.value === value)?.label || value || "未配置";
 }
 
-function AgentForm({ initial, onSave, onCancel }: {
-  initial: Partial<BizAgent>; onSave: (v: any) => void; onCancel: () => void;
+function AgentForm({ initial, saving = false, onSave, onCancel }: {
+  initial: Partial<BizAgent>; saving?: boolean; onSave: (v: any) => void; onCancel: () => void;
 }) {
   const ui = parseUiConfig(initial.uiConfig);
   const [v, setV] = useState<any>({
@@ -290,10 +303,10 @@ function AgentForm({ initial, onSave, onCancel }: {
       </div>
       <div className="flex gap-2 pt-1">
         <button onClick={() => onSave(toAgentPayload(v))}
-          disabled={!v.id || !v.name}
+          disabled={!v.id || !v.name || saving}
           className="admin-primary-action px-4 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
           style={{ background: "var(--oc-accent)", color: "var(--oc-text-on-accent)", border: "none", cursor: "pointer" }}>
-          保存
+          {saving ? "保存中..." : "保存"}
         </button>
         <button onClick={onCancel}
           className="admin-secondary-action px-4 py-1.5 rounded-lg text-xs"
@@ -311,9 +324,18 @@ export function BizAgentsPanel() {
   const healthCheckAllMutation = trpc.agentHealth.checkAll.useMutation({
     onSuccess: () => { listQ.refetch(); toast.success("健康检查完成"); },
   });
-  const upsert = trpc.bizAgents.upsert.useMutation({ onSuccess: () => { listQ.refetch(); setEditing(null); setAdding(false); toast.success("已保存"); } });
-  const del = trpc.bizAgents.delete.useMutation({ onSuccess: () => { listQ.refetch(); toast.success("已删除"); } });
-  const setEnabled = trpc.bizAgents.setEnabled.useMutation({ onSuccess: () => listQ.refetch() });
+  const upsert = trpc.bizAgents.upsert.useMutation({
+    onSuccess: () => { listQ.refetch(); setEditing(null); setAdding(false); toast.success("已保存"); },
+    onError: (error) => toast.error(error.message || "保存失败"),
+  });
+  const del = trpc.bizAgents.delete.useMutation({
+    onSuccess: () => { listQ.refetch(); toast.success("已删除"); },
+    onError: (error) => toast.error(error.message || "删除失败"),
+  });
+  const setEnabled = trpc.bizAgents.setEnabled.useMutation({
+    onSuccess: () => listQ.refetch(),
+    onError: (error) => toast.error(error.message || "状态更新失败"),
+  });
 
   const [editing, setEditing] = useState<BizAgent | null>(null);
   const [adding, setAdding] = useState(false);
@@ -347,7 +369,7 @@ export function BizAgentsPanel() {
       </div>
 
       {adding && (
-        <AgentForm initial={EMPTY} onSave={(v) => upsert.mutate(v)} onCancel={() => setAdding(false)} />
+        <AgentForm initial={EMPTY} saving={upsert.isPending} onSave={(v) => upsert.mutate(v)} onCancel={() => setAdding(false)} />
       )}
 
       {listQ.isLoading && (
@@ -363,7 +385,7 @@ export function BizAgentsPanel() {
           return (
           <div key={a.id}>
             {editing?.id === a.id ? (
-              <AgentForm initial={editing} onSave={(v) => upsert.mutate(v)} onCancel={() => setEditing(null)} />
+              <AgentForm initial={editing} saving={upsert.isPending} onSave={(v) => upsert.mutate(v)} onCancel={() => setEditing(null)} />
             ) : (
               <div className="rounded-xl border px-4 py-3 flex items-center gap-3"
                 style={{ borderColor: "var(--oc-border)", background: "var(--oc-input-bg)", opacity: a.enabled ? 1 : 0.5 }}>
