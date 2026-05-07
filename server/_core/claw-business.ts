@@ -244,7 +244,7 @@ export function registerBusinessRoutes(app: express.Express) {
       const dataSource = String(process.env.AGENT_PLAZA_DATA_SOURCE || "legacy").trim().toLowerCase();
       if (dataSource === "registry") {
         const userId = await resolveRequesterUserId(req, res);
-        if (!userId) return;
+        if (!userId) return res.status(401).json({ error: "未登录" });
         const { JsonAgentRegistry } = await import("./agent/agent-registry");
         const { getCoopProfile } = await import("../db/coop-identity");
         const registry = new JsonAgentRegistry({
@@ -284,7 +284,7 @@ export function registerBusinessRoutes(app: express.Express) {
       const { listEnabledBusinessAgents } = await import("../db");
       const dbAgents = await listEnabledBusinessAgents();
       const userId = await resolveRequesterUserId(req, res);
-      if (!userId) return;
+      if (!userId) return res.status(401).json({ error: "未登录" });
       const profileKeys = await getRequesterAgentProfile(userId);
       const agents = dbAgents
         .filter((agent: any) => isAgentAvailableForProfiles(agent, profileKeys))
