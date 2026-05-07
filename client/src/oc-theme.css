@@ -96,6 +96,24 @@ body {
   border-color: color-mix(in oklab, var(--accent) 38%, var(--border-hover));
 }
 
+.business-chat-composer {
+  transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out);
+}
+
+.business-chat-composer:focus-within {
+  border-color: color-mix(in oklab, var(--accent) 34%, var(--border-hover)) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 0 0 3px rgba(255, 92, 92, 0.07);
+}
+
+.business-chat-input:focus,
+.business-chat-input:focus-visible {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
 /* Thin scrollbar */
 * {
   scrollbar-width: thin;
