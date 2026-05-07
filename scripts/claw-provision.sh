@@ -11,8 +11,8 @@ set -euo pipefail
 #     --adopt-id=lgc-xxx \
 #     --agent-id=trial_lgc-xxx \
 #     --user-id=1 \
-#     --profile=starter \
-#     --ttl-days=7
+#     --profile=plus \
+#     --ttl-days=0
 
 ACTION="${1:-}"
 shift || true
@@ -20,8 +20,8 @@ shift || true
 ADOPT_ID=""
 AGENT_ID=""
 USER_ID=""
-PROFILE="starter"
-TTL_DAYS="7"
+PROFILE="plus"
+TTL_DAYS="0"
 
 for arg in "$@"; do
   case "$arg" in
@@ -183,7 +183,7 @@ EOF
 fi
 
 
-# === 写入 tools profile 到 openclaw.json（按套餐）===
+# === 写入 tools profile 到 openclaw.json（按企业角色映射）===
 # 2026-04-23 fix: 与 workspace 路径同根问题，OPENCLAW_HOME_DIR=/root 时原路径
 # /root/openclaw.json 不存在，Python 块永远 skip，导致 --profile 参数失效、
 # trial 用户实际跑在无 deny 的全权限下。
@@ -196,38 +196,34 @@ path, agent_id, profile = sys.argv[1], sys.argv[2], sys.argv[3]
 
 DEFAULT_MODEL = "glm5/glm-5.1"  # 2026-04-27: 升级到当前生产版本，glm5/glm-5 已废弃
 
+enterprise_tools = {
+    "profile": "coding",
+    "deny": ["gateway", "nodes", "browser", "sessions_spawn"],
+    "fs": {"workspaceOnly": True},
+    "exec": {"ask": "off", "security": "full"}
+}
+
 profile_map = {
-    # trial: 预备档位，给未来公网/培训客户用，此轮不默认触发
-    "trial": {
-        "tools": {
-            "profile": "messaging",
-            "allow": ["read", "memory_search", "memory_get", "web_fetch", "web_search"],
-            "deny": ["exec", "process", "write", "edit", "cron", "gateway", "browser", "nodes"],
-            "fs": {"workspaceOnly": True},
-            "exec": {"ask": "off", "security": "full"}
-        },
-        "model": DEFAULT_MODEL
-    },
-    # plus: 默认档位 = pro 级，内部同事全员
+    # 企业角色由灵虾层管理；OpenClaw 侧统一使用 coding profile，并叠加隔离限制。
     "plus": {
-        "tools": {
-            "profile": "coding",
-            "deny": ["gateway", "nodes", "browser", "sessions_spawn"],
-            "fs": {"workspaceOnly": True},
-            "exec": {"ask": "off", "security": "full"}
-        },
+        "tools": enterprise_tools,
         "model": DEFAULT_MODEL
     },
-    # internal: 调试用，只给自己
     "internal": {
-        "tools": {"profile": "full"},
+        "tools": enterprise_tools,
+        "model": DEFAULT_MODEL
+    },
+    # 向后兼容历史值，避免旧配置落到无约束 profile。
+    "starter": {
+        "tools": enterprise_tools,
+        "model": DEFAULT_MODEL
+    },
+    "trial": {
+        "tools": enterprise_tools,
         "model": DEFAULT_MODEL
     }
 }
 
-# starter 向后兼容：映射为 trial
-if profile == "starter":
-    profile = "trial"
 cfg = profile_map.get(profile, profile_map["plus"])
 
 with open(path) as f:

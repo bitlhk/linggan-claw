@@ -176,7 +176,7 @@ export const clawRouter = router({
       .input(z.object({
         id: z.number().int().positive(),
         permissionProfile: z.enum(["starter", "plus", "internal"]).optional(),
-        ttlDays: z.number().int().min(1).max(365).optional(),
+        ttlDays: z.number().int().min(0).max(365).optional(),
         status: z.enum(["creating", "active", "expiring", "recycled", "failed"]).optional(),
         expiresAt: z.string().datetime().optional(),
       }))
@@ -194,7 +194,7 @@ export const clawRouter = router({
       .input(z.object({
         ids: z.array(z.number().int().positive()).min(1),
         permissionProfile: z.enum(["starter", "plus", "internal"]).optional(),
-        ttlDays: z.number().int().min(1).max(365).optional(),
+        ttlDays: z.number().int().min(0).max(365).optional(),
         status: z.enum(["creating", "active", "expiring", "recycled", "failed"]).optional(),
       }))
       .mutation(async ({ input }) => {
@@ -492,20 +492,20 @@ export const clawRouter = router({
 
         adminGetConfig: adminProcedure.query(async () => {
       const visibility = (await getSystemConfigValue("claw_visibility", "internal")).trim() || "internal";
-      const defaultTtlDays = await getSystemConfigNumber("claw_default_ttl_days", 15);
+      const defaultTtlDays = await getSystemConfigNumber("claw_default_ttl_days", 0);
       const defaultProfile = (await getSystemConfigValue("claw_default_profile", "plus")).trim() || "plus";
       return {
         visibility: visibility === "internal" ? "internal" : "public",
         defaultTtlDays,
-        defaultProfile: defaultProfile as "starter" | "plus" | "internal",
+        defaultProfile: (defaultProfile === "internal" ? "internal" : "plus") as "plus" | "internal",
       };
     }),
 
     adminSetConfig: adminProcedure
       .input(z.object({
         visibility: z.enum(["public", "internal"]).optional(),
-        defaultTtlDays: z.number().int().min(1).max(365).optional(),
-        defaultProfile: z.enum(["starter", "plus", "internal"]).optional(),
+        defaultTtlDays: z.number().int().min(0).max(365).optional(),
+        defaultProfile: z.enum(["plus", "internal"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         if (input.visibility) {
@@ -516,13 +516,13 @@ export const clawRouter = router({
         }
         if (typeof input.defaultTtlDays === "number") {
           await upsertSystemConfig(
-            { key: "claw_default_ttl_days", value: String(input.defaultTtlDays), description: "灵虾默认有效期（天）" },
+            { key: "claw_default_ttl_days", value: String(input.defaultTtlDays), description: "灵虾默认有效期（天，0 表示长期有效）" },
             ctx.user!.id
           );
         }
         if (input.defaultProfile) {
           await upsertSystemConfig(
-            { key: "claw_default_profile", value: input.defaultProfile, description: "新领养灵虾默认套餐（对外叫 Trial/Pro/Debug，内部值 starter/plus/internal）" },
+            { key: "claw_default_profile", value: input.defaultProfile, description: "新领养灵虾默认角色：plus=员工，internal=管理员；底层 runtime 单独映射工具权限" },
             ctx.user!.id
           );
         }
@@ -626,8 +626,8 @@ export const clawRouter = router({
       .input(
         z
           .object({
-            permissionProfile: z.enum(["starter", "plus", "internal"]).optional(),
-            ttlDays: z.number().int().min(1).max(30).optional(),
+            permissionProfile: z.enum(["plus", "internal"]).optional(),
+            ttlDays: z.number().int().min(0).max(365).optional(),
           })
           .optional()
       )
@@ -658,8 +658,8 @@ export const clawRouter = router({
         }
 
         const defaultProfile = (await getSystemConfigValue("claw_default_profile", "plus")).trim() || "plus";
-        const profile = input?.permissionProfile || defaultProfile;
-        const defaultTtl = await getSystemConfigNumber("claw_default_ttl_days", 15);
+        const profile = input?.permissionProfile || (defaultProfile === "internal" ? "internal" : "plus");
+        const defaultTtl = await getSystemConfigNumber("claw_default_ttl_days", 0);
         const ttlDays = input?.ttlDays ?? defaultTtl;
         // 测试主页统一直达生产 demo 域名，避免落到 linggantest 域
         const baseDomain = process.env.DEMO_ROUTE_DOMAIN || "demo.linggan.top";
@@ -668,7 +668,7 @@ export const clawRouter = router({
         const adoptId = `lgc-${nanoid(10).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10)}`;
         const agentId = `trial_${adoptId}`;
         const entryUrl = `${entryScheme}://${adoptId}.${baseDomain}`;
-        const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
+        const expiresAt = ttlDays > 0 ? new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000) : null;
 
         const adoptionId = await createClawAdoption({
           userId,
@@ -686,7 +686,7 @@ export const clawRouter = router({
           eventType: "create_requested",
           operatorType: "user",
           operatorId: userId,
-          detail: JSON.stringify({ profile, ttlDays, source: "web" }),
+          detail: JSON.stringify({ profile, ttlDays, lifecycle: ttlDays > 0 ? "temporary" : "long_lived", source: "web" }),
         });
 
         try {
@@ -754,7 +754,7 @@ export const clawRouter = router({
           const dailyLimit = Number(process.env.CLAW_STARTER_DAILY_LIMIT || 50);
           const count = clawDailyUsage.increment(input.adoptId);
           if (count > dailyLimit) {
-            throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `今日对话已达上限（${dailyLimit}轮），升级 Plus 可解锁更多` });
+            throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `今日对话已达上限（${dailyLimit}轮），请联系管理员调整角色或配额` });
           }
         }
 

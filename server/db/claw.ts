@@ -113,7 +113,7 @@ export async function updateClawAdoptionStatus(
   id: number,
   status: ClawAdoptionStatus,
   options?: {
-    expiresAt?: Date;
+    expiresAt?: Date | null;
     entryUrl?: string;
     permissionProfile?: ClawPermissionProfile;
     ttlDays?: number;
@@ -129,7 +129,7 @@ export async function updateClawAdoptionStatus(
     status,
   };
 
-  if (options?.expiresAt) patch.expiresAt = options.expiresAt;
+  if (options && "expiresAt" in options) patch.expiresAt = options.expiresAt ?? null;
   if (options?.entryUrl) patch.entryUrl = options.entryUrl;
   if (options?.permissionProfile) patch.permissionProfile = options.permissionProfile;
   if (typeof options?.ttlDays === "number") patch.ttlDays = options.ttlDays;
@@ -222,7 +222,7 @@ export async function updateClawAdoptionAdmin(
     permissionProfile?: ClawPermissionProfile;
     ttlDays?: number;
     status?: ClawAdoptionStatus;
-    expiresAt?: Date;
+    expiresAt?: Date | null;
   }
 ) {
   const db = await getDb();
@@ -232,9 +232,11 @@ export async function updateClawAdoptionAdmin(
   if (patch.permissionProfile) nextPatch.permissionProfile = patch.permissionProfile;
   if (typeof patch.ttlDays === "number") {
     nextPatch.ttlDays = patch.ttlDays;
-    nextPatch.expiresAt = new Date(Date.now() + patch.ttlDays * 24 * 60 * 60 * 1000);
+    nextPatch.expiresAt = patch.ttlDays > 0
+      ? new Date(Date.now() + patch.ttlDays * 24 * 60 * 60 * 1000)
+      : null;
   }
-  if (patch.expiresAt) nextPatch.expiresAt = patch.expiresAt;
+  if ("expiresAt" in patch) nextPatch.expiresAt = patch.expiresAt ?? null;
   if (patch.status) nextPatch.status = patch.status;
 
   await db.update(clawAdoptions).set(nextPatch).where(eq(clawAdoptions.id, id));
@@ -256,7 +258,9 @@ export async function batchUpdateClawAdoptionAdmin(
   if (patch.permissionProfile) nextPatch.permissionProfile = patch.permissionProfile;
   if (typeof patch.ttlDays === "number") {
     nextPatch.ttlDays = patch.ttlDays;
-    nextPatch.expiresAt = new Date(Date.now() + patch.ttlDays * 24 * 60 * 60 * 1000);
+    nextPatch.expiresAt = patch.ttlDays > 0
+      ? new Date(Date.now() + patch.ttlDays * 24 * 60 * 60 * 1000)
+      : null;
   }
   if (patch.status) nextPatch.status = patch.status;
 

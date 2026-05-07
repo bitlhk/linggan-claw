@@ -27,17 +27,24 @@ import { BRAND_PRESETS } from "@shared/brand";
 const STATUS_OPTIONS = [
   { value: "all", label: "全部" },
   { value: "creating", label: "创建中" },
-  { value: "active", label: "活跃" },
-  { value: "expiring", label: "即将过期" },
-  { value: "recycled", label: "已回收" },
+  { value: "active", label: "启用" },
+  { value: "expiring", label: "即将到期" },
+  { value: "recycled", label: "停用" },
   { value: "failed", label: "失败" },
 ] as const;
 
 const PERMISSION_OPTIONS = [
-  { value: "starter", label: "Trial" },
-  { value: "plus", label: "Pro" },
-  { value: "internal", label: "Debug" },
+  { value: "plus", label: "员工" },
+  { value: "internal", label: "管理员" },
 ] as const;
+
+const formatStatus = (status?: string) =>
+  STATUS_OPTIONS.find((s) => s.value === status)?.label || status || "-";
+
+const formatExpiry = (row: any) => {
+  if (!row?.expiresAt || Number(row?.ttlDays || 0) <= 0) return "长期有效";
+  return new Date(row.expiresAt).toLocaleDateString("zh-CN");
+};
 
 const STATUS_COLORS: Record<string, string> = {
   total: "#6366f1",
@@ -506,7 +513,7 @@ export default function ClawAdmin() {
                 </Select>
                 <Select onValueChange={(v) => batchUpdateMutation.mutate({ ids: selectedIds, permissionProfile: v as any })}>
                   <SelectTrigger className="w-28 h-8 text-xs">
-                    <SelectValue placeholder="改权限" />
+                    <SelectValue placeholder="改角色" />
                   </SelectTrigger>
                   <SelectContent>
                     {PERMISSION_OPTIONS.map((p) => (
@@ -538,8 +545,8 @@ export default function ClawAdmin() {
                       <th className="p-3 text-left font-medium text-muted-foreground">Organization</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">Group</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">状态</th>
-                      <th className="p-3 text-left font-medium text-muted-foreground">权限</th>
-                      <th className="p-3 text-left font-medium text-muted-foreground">TTL</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">角色</th>
+                      <th className="p-3 text-left font-medium text-muted-foreground">有效期</th>
                       <th className="p-3 text-left font-medium text-muted-foreground">操作</th>
                     </tr>
                   </thead>
@@ -564,12 +571,12 @@ export default function ClawAdmin() {
                         <td className="p-3">
                           <span className="inline-flex items-center gap-1.5 text-xs font-medium">
                             <span className="w-1.5 h-1.5 rounded-full" style={{ background: STATUS_COLORS[row.status] || "#9ca3af" }} />
-                            <span style={{ color: STATUS_COLORS[row.status] || "#6b7280" }}>{row.status}</span>
+                            <span style={{ color: STATUS_COLORS[row.status] || "#6b7280" }}>{formatStatus(row.status)}</span>
                           </span>
                         </td>
                         <td className="p-3">
                           <Select
-                            value={row.permissionProfile || "starter"}
+                            value={row.permissionProfile === "internal" ? "internal" : "plus"}
                             onValueChange={(v) => updateMutation.mutate({ id: row.id, permissionProfile: v as any })}
                           >
                             <SelectTrigger className="h-7 w-24 text-xs">
@@ -582,7 +589,7 @@ export default function ClawAdmin() {
                             </SelectContent>
                           </Select>
                         </td>
-                        <td className="p-3 text-xs text-muted-foreground">{row.ttlDays || "-"}天</td>
+                        <td className="p-3 text-xs text-muted-foreground">{formatExpiry(row)}</td>
                         <td className="p-3">
                           <div className="flex items-center gap-1">
                             {row.status !== "active" && (
@@ -592,7 +599,7 @@ export default function ClawAdmin() {
                                 className="h-7 text-xs text-green-600 hover:text-green-700 hover:bg-green-50"
                                 onClick={() => updateMutation.mutate({ id: row.id, status: "active" })}
                               >
-                                激活
+                                启用
                               </Button>
                             )}
                             {row.status === "active" && (
@@ -602,7 +609,7 @@ export default function ClawAdmin() {
                                 className="h-7 text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
                                 onClick={() => updateMutation.mutate({ id: row.id, status: "recycled" })}
                               >
-                                回收
+                                停用
                               </Button>
                             )}
                           </div>
@@ -611,7 +618,7 @@ export default function ClawAdmin() {
                     ))}
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="p-8 text-center text-muted-foreground">暂无数据</td>
+                        <td colSpan={9} className="p-8 text-center text-muted-foreground">暂无数据</td>
                       </tr>
                     )}
                   </tbody>
@@ -650,18 +657,18 @@ export default function ClawAdmin() {
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="text-sm text-gray-700">默认有效期</Label>
-                    <p className="text-xs mt-0.5 text-muted-foreground">新领养的灵虾默认 TTL（天）</p>
+                    <p className="text-xs mt-0.5 text-muted-foreground">0 表示长期有效，适合企业内部员工默认使用</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Input
                       type="number"
                       className="w-20 text-center"
-                      defaultValue={configData?.defaultTtlDays || 15}
-                      min={1}
+                      defaultValue={configData?.defaultTtlDays ?? 0}
+                      min={0}
                       max={365}
                       onBlur={(e) => {
                         const v = parseInt(e.target.value);
-                        if (v >= 1 && v <= 365) setConfigMutation.mutate({ defaultTtlDays: v });
+                        if (v >= 0 && v <= 365) setConfigMutation.mutate({ defaultTtlDays: v });
                       }}
                     />
                     <span className="text-xs text-muted-foreground">天</span>
@@ -672,20 +679,19 @@ export default function ClawAdmin() {
 
                 <div className="flex items-center justify-between">
                   <div>
-                    <Label className="text-sm text-gray-700">默认套餐</Label>
-                    <p className="text-xs mt-0.5 text-muted-foreground">新领养的灵虾默认权限套餐</p>
+                    <Label className="text-sm text-gray-700">默认角色</Label>
+                    <p className="text-xs mt-0.5 text-muted-foreground">角色用于灵虾层管理，底层 OpenClaw 统一使用 coding profile 并叠加限制</p>
                   </div>
                   <Select
-                    value={configData?.defaultProfile || "plus"}
+                    value={configData?.defaultProfile === "internal" ? "internal" : "plus"}
                     onValueChange={(v) => setConfigMutation.mutate({ defaultProfile: v as any })}
                   >
                     <SelectTrigger className="w-32">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="starter">Trial</SelectItem>
-                      <SelectItem value="plus">Pro</SelectItem>
-                      <SelectItem value="internal">Debug</SelectItem>
+                      <SelectItem value="plus">员工</SelectItem>
+                      <SelectItem value="internal">管理员</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
