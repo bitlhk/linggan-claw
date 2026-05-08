@@ -7,6 +7,7 @@ import { resolveRequesterUserId, readOpenclawJson, OPENCLAW_HOME } from "./helpe
 import path from "path";
 import { createHmac } from "crypto";
 import { ResponseAccumulator, injectMemory } from "./response-accumulator";
+import { runProtocolAgentAdapter } from "./agent-protocol-adapters";
 
 export function registerBusinessRoutes(app: express.Express) {
 
@@ -1861,9 +1862,30 @@ export function registerBusinessRoutes(app: express.Express) {
     }
 
     if (providerType === "mcp" || providerType === "a2a") {
-      res.write(`data: ${JSON.stringify({ error: `${providerType.toUpperCase()} provider is reserved but not enabled yet` })}\n\n`);
-      res.write(`data: [DONE]\n\n`);
-      res.end();
+      try {
+        await runProtocolAgentAdapter({
+          providerType: providerType as "mcp" | "a2a",
+          adapterProtocol,
+          agentId: String(agentId),
+          apiUrl: String(bizAgentCfg?.apiUrl || ""),
+          apiToken: bizAgentCfg?.apiToken,
+          remoteAgentId: bizAgentCfg?.remoteAgentId,
+          endpointConfig,
+          message: msgStr,
+          res,
+          appendDelta: (text) => memAcc.appendDelta(text),
+        });
+        memAcc.flush();
+        res.write(`data: [DONE]\n\n`);
+        res.end();
+      } catch (e: any) {
+        console.error("[PROTOCOL-ADAPTER] failed", { agentId, providerType, adapterProtocol, message: e?.message });
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ error: e?.message || "protocol adapter failed" })}\n\n`);
+          res.write(`data: [DONE]\n\n`);
+          res.end();
+        }
+      }
       return;
     }
 

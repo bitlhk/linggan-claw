@@ -47,8 +47,8 @@ const PROVIDER_OPTIONS = [
   { value: "openclaw-remote", label: "远端 OpenClaw Gateway" },
   { value: "hermes", label: "Hermes Runtime" },
   { value: "http-sse", label: "HTTP SSE 服务" },
-  { value: "mcp", label: "MCP（预留）" },
-  { value: "a2a", label: "A2A（预留）" },
+  { value: "mcp", label: "MCP Server（实验）" },
+  { value: "a2a", label: "A2A Agent（实验）" },
 ];
 
 const ADAPTER_OPTIONS = [
@@ -60,8 +60,8 @@ const ADAPTER_OPTIONS = [
   { value: "bond-hermes-v1", label: "债券投研 Hermes v1" },
   { value: "credit-risk-hermes-v1", label: "智贷决策 Hermes v1" },
   { value: "claim-ev-hermes-v1", label: "EV 理赔 Hermes v1" },
-  { value: "mcp-tools-v1", label: "MCP Tools v1（预留）" },
-  { value: "a2a-task-v1", label: "A2A Task v1（预留）" },
+  { value: "mcp-tools-v1", label: "MCP Tools v1" },
+  { value: "a2a-task-v1", label: "A2A Task v1" },
 ];
 
 const LEGACY_CATEGORY: Record<string, string> = {
@@ -86,6 +86,49 @@ function defaultRuntimeFor(id: string, kind: string) {
   if (id === "task-hermes") return { providerType: "hermes", adapterProtocol: "hermes-events", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
   if (kind === "local") return { providerType: "openclaw-local", adapterProtocol: "openclaw-chat", capabilitiesJson: "[\"chat\",\"tools\",\"files\"]" };
   return { providerType: "openai-compatible", adapterProtocol: "openai-chat-completions", capabilitiesJson: "[\"chat\"]" };
+}
+
+function defaultRuntimeForProvider(providerType: string, kind: string) {
+  if (providerType === "mcp") return { adapterProtocol: "mcp-tools-v1", capabilitiesJson: "[\"chat\",\"tools\"]" };
+  if (providerType === "a2a") return { adapterProtocol: "a2a-task-v1", capabilitiesJson: "[\"chat\",\"long_task\"]" };
+  if (providerType === "openclaw-local" || kind === "local") return { adapterProtocol: "openclaw-chat", capabilitiesJson: "[\"chat\",\"tools\",\"files\"]" };
+  if (providerType === "openclaw-remote") return { adapterProtocol: "openai-chat-completions", capabilitiesJson: "[\"chat\",\"tools\",\"files\"]" };
+  if (providerType === "hermes") return { adapterProtocol: "hermes-events", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
+  if (providerType === "http-sse") return { adapterProtocol: "stock-agent-v1", capabilitiesJson: "[\"chat\",\"tools\",\"long_task\"]" };
+  return { adapterProtocol: "openai-chat-completions", capabilitiesJson: "[\"chat\"]" };
+}
+
+function endpointConfigTemplate(providerType: string) {
+  if (providerType === "mcp") {
+    return JSON.stringify({ rpcPath: "/mcp", toolName: "chat", messageParam: "message", arguments: {} }, null, 2);
+  }
+  if (providerType === "a2a") {
+    return JSON.stringify({ rpcPath: "/", stream: false }, null, 2);
+  }
+  return JSON.stringify({ path: "/v1/chat/completions", timeoutMs: 0 }, null, 2);
+}
+
+function endpointConfigPlaceholder(providerType?: string | null) {
+  return endpointConfigTemplate(providerType || "openai-compatible");
+}
+
+function parseJsonForSave(label: string, value: string, expect: "array" | "object") {
+  if (!value.trim()) return true;
+  try {
+    const parsed = JSON.parse(value);
+    if (expect === "array" && !Array.isArray(parsed)) {
+      toast.error(`${label} 必须是 JSON 数组`);
+      return false;
+    }
+    if (expect === "object" && (!parsed || typeof parsed !== "object" || Array.isArray(parsed))) {
+      toast.error(`${label} 必须是 JSON 对象`);
+      return false;
+    }
+    return true;
+  } catch {
+    toast.error(`${label} 不是合法 JSON`);
+    return false;
+  }
 }
 
 function agentIcon(id: string, size = 20) {
@@ -207,6 +250,25 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
   });
   const set = (k: string, val: any) => setV((p: any) => ({ ...p, [k]: val }));
   const isEdit = !!initial.id;
+  const handleProviderChange = (providerType: string) => {
+    const defaults = defaultRuntimeForProvider(providerType, String(v.kind || "remote"));
+    setV((p: any) => ({
+      ...p,
+      providerType,
+      adapterProtocol: defaults.adapterProtocol,
+      capabilitiesJson: defaults.capabilitiesJson,
+      endpointConfigJson: p.endpointConfigJson || endpointConfigTemplate(providerType),
+    }));
+  };
+  const handleSave = () => {
+    if ((v.providerType === "mcp" && v.adapterProtocol !== "mcp-tools-v1") || (v.providerType === "a2a" && v.adapterProtocol !== "a2a-task-v1")) {
+      toast.error("调用方式和协议适配器不匹配");
+      return;
+    }
+    if (!parseJsonForSave("能力声明 JSON", v.capabilitiesJson || "", "array")) return;
+    if (!parseJsonForSave("连接配置 JSON", v.endpointConfigJson || "", "object")) return;
+    onSave(toAgentPayload(v));
+  };
 
   return (
     <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "var(--oc-border)", background: "var(--oc-input-bg)" }}>
@@ -248,13 +310,13 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
         </div>
         <div>
           <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>调用方式</label>
-          <select value={v.providerType || "openai-compatible"} onChange={e => set("providerType", e.target.value)}
+          <select value={v.providerType || "openai-compatible"} onChange={e => handleProviderChange(e.target.value)}
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }}>
             {PROVIDER_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
           {(v.providerType === "mcp" || v.providerType === "a2a") && (
-            <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>当前作为协议扩展预留，正式调用适配器后续接入</div>
+            <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>实验能力：已接入通用 HTTP/JSON-RPC 适配器，生产使用前建议先做健康检查和小流量验证</div>
           )}
         </div>
         <div>
@@ -274,10 +336,16 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
         </div>
         <div className="col-span-2">
           <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>连接配置 JSON（可选）</label>
-          <textarea value={v.endpointConfigJson || ""} onChange={e => set("endpointConfigJson", e.target.value)} rows={2}
-            placeholder='{"path":"/api/v1/agent/chat/stream","timeoutMs":0}'
+          <textarea value={v.endpointConfigJson || ""} onChange={e => set("endpointConfigJson", e.target.value)} rows={4}
+            placeholder={endpointConfigPlaceholder(v.providerType)}
             className="w-full text-xs rounded-lg px-3 py-2 focus:outline-none resize-none font-mono"
             style={{ background: "var(--oc-card)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }} />
+          {v.providerType === "mcp" && (
+            <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>MCP 模板字段：rpcPath / toolName / messageParam / arguments</div>
+          )}
+          {v.providerType === "a2a" && (
+            <div className="text-[9px] mt-1" style={{ color: "var(--oc-text-secondary)", opacity: 0.65 }}>A2A 模板字段：rpcPath / stream，默认使用 message/send</div>
+          )}
         </div>
         <div>
           <label className="text-[10px] block mb-1" style={{ color: "var(--oc-text-secondary)" }}>图标（自定义 Agent Emoji）</label>
@@ -417,7 +485,7 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
         </div>
       </div>
       <div className="flex gap-2 pt-1">
-        <button onClick={() => onSave(toAgentPayload(v))}
+        <button onClick={handleSave}
           disabled={!v.id || !v.name || saving}
           className="admin-primary-action px-4 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40"
           style={{ background: "var(--oc-accent)", color: "var(--oc-text-on-accent)", border: "none", cursor: "pointer" }}>
