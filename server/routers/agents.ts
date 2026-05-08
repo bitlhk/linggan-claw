@@ -91,8 +91,9 @@ function parseJsonRecord(raw: unknown): Record<string, any> {
 }
 
 function joinUrl(baseUrl: string, pathValue?: string) {
+  if (!pathValue) return baseUrl;
   const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  const path = String(pathValue || "").replace(/^\//, "");
+  const path = String(pathValue).replace(/^\//, "");
   return new URL(path, base).toString();
 }
 
@@ -116,7 +117,7 @@ async function probeBusinessAgent(agent: any, timeoutMs: number) {
   if (!baseUrl) return { status: "offline", message: "No API URL configured", latency: 0 };
 
   if (providerType === "mcp") {
-    const url = joinUrl(baseUrl, endpointConfig.healthPath || endpointConfig.rpcPath || endpointConfig.path || "/mcp");
+    const url = joinUrl(baseUrl, endpointConfig.healthPath ?? endpointConfig.rpcPath ?? endpointConfig.path ?? "/mcp");
     const { response, latency } = await fetchWithTimeout(url, {
       method: "POST",
       headers: {
@@ -143,7 +144,7 @@ async function probeBusinessAgent(agent: any, timeoutMs: number) {
     : providerType === "a2a"
       ? "/.well-known/agent-card.json"
       : "";
-  const url = joinUrl(baseUrl, endpointConfig.healthPath || defaultPath);
+  const url = joinUrl(baseUrl, endpointConfig.healthPath ?? defaultPath);
   const { response, latency } = await fetchWithTimeout(url, { method: "GET", headers }, timeoutMs);
   return { status: response.ok ? (latency > 5000 ? "degraded" : "healthy") : "degraded", message: `HTTP ${response.status}`, latency };
 }

@@ -46,9 +46,33 @@ function authHeaders(token?: string | null) {
 }
 
 function endpoint(baseUrl: string, pathValue?: string) {
+  if (!pathValue) return baseUrl;
   const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   const path = String(pathValue || "").replace(/^\//, "");
   return new URL(path, base).toString();
+}
+
+function formatToolText(text: string) {
+  try {
+    const obj = JSON.parse(text);
+    if (Array.isArray(obj?.results)) {
+      const lines: string[] = [];
+      if (obj.query) lines.push(`查询：${obj.query}`);
+      if (obj.answer) lines.push("", String(obj.answer));
+      lines.push("", "搜索结果：");
+      obj.results.slice(0, 8).forEach((item: any, idx: number) => {
+        const title = String(item?.title || item?.url || `结果 ${idx + 1}`);
+        const url = String(item?.url || "");
+        const content = String(item?.content || item?.raw_content || "").replace(/\s+/g, " ").trim();
+        lines.push(`${idx + 1}. ${url ? `[${title}](${url})` : title}`);
+        if (content) lines.push(`   ${content.slice(0, 260)}${content.length > 260 ? "..." : ""}`);
+      });
+      return lines.join("\n");
+    }
+    return JSON.stringify(obj, null, 2);
+  } catch {
+    return text;
+  }
 }
 
 function parseSseJson(text: string): any[] {
@@ -93,8 +117,8 @@ function extractMcpText(result: any) {
   const content = Array.isArray(result?.content) ? result.content : [];
   const texts = content
     .map((item: any) => {
-      if (item?.type === "text" && typeof item.text === "string") return item.text;
-      if (typeof item?.text === "string") return item.text;
+      if (item?.type === "text" && typeof item.text === "string") return formatToolText(item.text);
+      if (typeof item?.text === "string") return formatToolText(item.text);
       return "";
     })
     .filter(Boolean);
@@ -129,7 +153,7 @@ function extractA2AText(value: any): string {
 }
 
 async function runMcpToolsV1(input: ProtocolAdapterInput) {
-  const rpcUrl = endpoint(input.apiUrl, input.endpointConfig.rpcPath || input.endpointConfig.path || "/mcp");
+  const rpcUrl = endpoint(input.apiUrl, input.endpointConfig.rpcPath ?? input.endpointConfig.path ?? "/mcp");
   const baseHeaders: Record<string, string> = {
     ...authHeaders(input.apiToken),
   };
@@ -171,7 +195,7 @@ async function runMcpToolsV1(input: ProtocolAdapterInput) {
 }
 
 async function runA2ATaskV1(input: ProtocolAdapterInput) {
-  const rpcUrl = endpoint(input.apiUrl, input.endpointConfig.rpcPath || input.endpointConfig.path || "");
+  const rpcUrl = endpoint(input.apiUrl, input.endpointConfig.rpcPath ?? input.endpointConfig.path ?? "");
   const method = input.endpointConfig.stream === true ? "message/stream" : "message/send";
   status(input.res, `A2A: ${method}...`);
   const message = {
