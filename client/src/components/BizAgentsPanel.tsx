@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2, Bot, Presentation, Code2, TrendingUp, Dna, BarChart3, Battery, Compass } from "lucide-react";
+import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2, Bot, Presentation, Code2, TrendingUp, Dna, BarChart3, Battery, Compass, Search, FileText, Globe2 } from "lucide-react";
 import { toast } from "sonner";
 
 interface BizAgent {
@@ -145,12 +145,23 @@ function agentIcon(id: string, size = 20) {
   return <Bot size={size} style={style} />;
 }
 
+function configuredIcon(icon?: string | null, size = 20) {
+  const key = String(icon || "").trim().toLowerCase();
+  const style = { color: "var(--oc-accent)" };
+  if (key === "search") return <Search size={size} style={style} />;
+  if (key === "filetext" || key === "file-text") return <FileText size={size} style={style} />;
+  if (key === "globe" || key === "globe2") return <Globe2 size={size} style={style} />;
+  if (key === "bot") return <Bot size={size} style={style} />;
+  if (icon && icon.trim().length <= 4 && !icon.trim().startsWith("/")) {
+    return <span style={{ fontSize: size + 2, lineHeight: 1 }}>{icon.trim()}</span>;
+  }
+  return null;
+}
+
 function renderAgentIcon(agent: Pick<BizAgent, "id" | "icon">, size = 20) {
   if (LEGACY_CATEGORY[agent.id]) return agentIcon(agent.id, size);
-  const icon = agent.icon?.trim();
-  if (icon && icon.length <= 4 && !icon.startsWith("/")) {
-    return <span style={{ fontSize: size + 2, lineHeight: 1 }}>{icon}</span>;
-  }
+  const icon = configuredIcon(agent.icon, size);
+  if (icon) return icon;
   return <Bot size={size} style={{ color: "var(--oc-accent)" }} />;
 }
 

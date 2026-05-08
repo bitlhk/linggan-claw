@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useAgentState, sendBusinessMessage, stopBusinessMessage, clearAgentState } from "@/lib/businessChatStore";
 import { CodeAgentView } from "./code-agent/CodeAgentView";
-import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Square, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3, Battery, Compass, Maximize2, FolderOpen, Trash2 } from "lucide-react";
+import { X, ChevronLeft, Download, Zap, Bot, Loader2, Send, Square, Users, Clock, Plus, Presentation, Code2, TrendingUp, Dna, Mic, MicOff, BarChart3, Battery, Compass, Maximize2, FolderOpen, Trash2, Search, FileText, Globe2 } from "lucide-react";
 import { SlidePreviewModal } from "@/components/pages/SlidePreviewModal";
 import { createPortal } from "react-dom";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
@@ -60,6 +60,19 @@ function agentIcon(id: string, size = 16) {
   return <Bot size={size} style={style} />;
 }
 
+function configuredIcon(icon?: string | null, size = 16) {
+  const key = String(icon || "").trim().toLowerCase();
+  const style = { color: "var(--oc-accent)" };
+  if (key === "search") return <Search size={size} style={style} />;
+  if (key === "filetext" || key === "file-text") return <FileText size={size} style={style} />;
+  if (key === "globe" || key === "globe2") return <Globe2 size={size} style={style} />;
+  if (key === "bot") return <Bot size={size} style={style} />;
+  if (icon && icon.trim().length <= 4 && !icon.trim().startsWith("/")) {
+    return <span style={{ fontSize: size + 2, lineHeight: 1 }}>{icon.trim()}</span>;
+  }
+  return null;
+}
+
 const LEGACY_AGENT_CATEGORY: Record<string, string> = {
   "task-hermes": "core",
   "task-trace": "core",
@@ -108,10 +121,8 @@ function renderAgentIcon(agent: BusinessAgent, size = 16) {
   if (LEGACY_AGENT_CATEGORY[agent.id]) {
     return agentIcon(agent.id, size);
   }
-  const icon = agent.icon?.trim();
-  if (icon && icon.length <= 4 && !icon.startsWith("/")) {
-    return <span style={{ fontSize: size + 2, lineHeight: 1 }}>{icon}</span>;
-  }
+  const icon = configuredIcon(agent.icon, size);
+  if (icon) return icon;
   return agentIcon(agent.id, size);
 }
 
@@ -142,7 +153,7 @@ function ConfiguredAgentWelcome({ agent, onPickExample }: { agent: BusinessAgent
           <p className="text-[11px] font-medium mb-1.5" style={{ color: "var(--oc-text-secondary)" }}>试试问我</p>
           {examples.map((item) => (
             <p key={item.text} className="text-[11px] py-0.5 cursor-pointer hover:opacity-70 transition-opacity flex items-start gap-1.5" style={{ color: "var(--oc-text-primary)", opacity: 0.72 }} onClick={() => onPickExample(item.text)}>
-              {item.icon && <span className="shrink-0">{item.icon}</span>}
+              {item.icon && <span className="shrink-0 pt-0.5">{configuredIcon(item.icon, 12)}</span>}
               <span>{item.text}</span>
             </p>
           ))}
