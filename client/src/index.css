@@ -4409,6 +4409,7 @@ html:has(:root[data-theme-mode="light"]) body {
    light/dark 双模式自动跟随 --oc-* 变量。
    ────────────────────────────────────────────────────────────── */
 .coop-session-themed {
+  min-height: 100vh;
   background: var(--oc-bg);
   color: var(--oc-text-primary);
   --background: var(--oc-bg);
@@ -4420,6 +4421,250 @@ html:has(:root[data-theme-mode="light"]) body {
   --border: var(--oc-border);
   --primary: var(--oc-accent);
   --primary-foreground: var(--oc-text-on-accent);
+}
+
+.coop-session-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid var(--oc-border);
+  background: color-mix(in oklab, var(--oc-bg) 92%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.coop-session-header__inner,
+.coop-session-shell {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
+.coop-session-header__inner {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.coop-session-header__main {
+  min-width: 0;
+  flex: 1;
+}
+
+.coop-session-back {
+  color: var(--oc-text-secondary);
+}
+
+.coop-session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.coop-session-title-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--banking-brand-red);
+}
+
+.coop-session-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--banking-text);
+  font-size: 15px;
+  font-weight: var(--oc-weight-semibold);
+  line-height: 1.35;
+}
+
+.coop-session-meta {
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.coop-session-shell--top {
+  margin-top: 16px;
+}
+
+.coop-session-shell--main {
+  padding-top: 16px;
+  padding-bottom: 28px;
+}
+
+.coop-session-card {
+  border: 1px solid var(--oc-border);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--oc-card) 78%, transparent);
+  padding: 14px;
+  box-shadow: none;
+}
+
+.coop-session-origin {
+  background: color-mix(in oklab, var(--oc-card) 72%, transparent);
+}
+
+.coop-session-member-card {
+  transition: background .15s, border-color .15s, box-shadow .15s;
+}
+
+.coop-session-member-card:hover {
+  background: color-mix(in oklab, var(--oc-card) 88%, transparent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .05);
+}
+
+.coop-session-member-card--mine {
+  border-color: color-mix(in oklab, var(--banking-brand-red) 22%, var(--oc-border));
+  background: color-mix(in oklab, var(--banking-brand-red) 5%, var(--oc-card));
+}
+
+.coop-session-member-name,
+.coop-session-card-title {
+  color: var(--banking-text);
+  font-size: 13px;
+  font-weight: var(--oc-weight-semibold);
+  line-height: 1.35;
+}
+
+.coop-session-member-org {
+  margin-top: 3px;
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.coop-session-me-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin-left: 8px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--banking-brand-red-subtle);
+  color: var(--banking-brand-red);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.coop-session-section-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--oc-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.coop-session-body-text,
+.coop-session-task-box,
+.coop-session-result-box,
+.coop-session-final-box {
+  color: var(--banking-text);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.coop-session-task-box {
+  min-height: 38px;
+  margin: 6px 0 12px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in oklab, var(--oc-border) 75%, transparent);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--oc-bg) 48%, transparent);
+}
+
+.coop-session-result-box {
+  max-height: 240px;
+  margin-top: 8px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--banking-ok-border);
+  border-radius: 10px;
+  background: var(--banking-ok-subtle);
+}
+
+.coop-session-published-card {
+  margin-top: 24px;
+  border-color: var(--banking-ok-border);
+  background: var(--banking-ok-subtle);
+}
+
+.coop-session-final-box {
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--banking-ok-border);
+  border-radius: 10px;
+  background: var(--banking-card);
+}
+
+.coop-session-consolidation-card {
+  margin-top: 24px;
+}
+
+.coop-session-textarea {
+  color: var(--banking-text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.coop-session-count {
+  color: var(--oc-text-secondary);
+  font-size: 11px;
+}
+
+.coop-session-invitation-actions {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in oklab, var(--oc-border) 72%, transparent);
+}
+
+.coop-session-attachments {
+  margin-top: 10px;
+}
+
+.coop-session-attachment-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in oklab, var(--banking-brand-red) 18%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--banking-brand-red) 6%, transparent);
+  color: var(--banking-brand-red);
+  font-size: 12px;
+  text-decoration: none;
+  transition: background .15s, border-color .15s;
+}
+
+.coop-session-attachment-link:hover {
+  border-color: color-mix(in oklab, var(--banking-brand-red) 28%, transparent);
+  background: color-mix(in oklab, var(--banking-brand-red) 10%, transparent);
+}
+
+@media (max-width: 760px) {
+  .coop-session-header__inner,
+  .coop-session-shell {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .coop-session-header__inner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
 }
 
 /* Schedule V2 canary: dense enterprise task list. */

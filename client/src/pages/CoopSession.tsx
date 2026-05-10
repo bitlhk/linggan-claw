@@ -36,8 +36,8 @@ function formatMemberOrg(member: any): string {
 function AttachmentList({ attachments }: { attachments: EventAttachment[] }) {
   if (!attachments?.length) return null;
   return (
-    <div className="mt-2">
-      <div className="text-[11px] font-medium mb-1 flex items-center gap-1" style={{ color: "var(--oc-text-secondary, #64748b)" }}>
+    <div className="coop-session-attachments">
+      <div className="coop-session-section-label">
         <Paperclip className="w-3 h-3" /> 附件 ({attachments.length})
       </div>
       <div className="space-y-1">
@@ -47,12 +47,7 @@ function AttachmentList({ attachments }: { attachments: EventAttachment[] }) {
             href={f.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors text-xs text-primary hover:bg-primary/10"
-            style={{
-              background: "color-mix(in oklab, var(--oc-accent) 6%, transparent)",
-              border: "1px solid color-mix(in oklab, var(--oc-accent) 20%, transparent)",
-              textDecoration: "none",
-            }}
+            className="coop-session-attachment-link"
             title={`下载 ${f.name}`}
           >
             <Download className="w-3 h-3 shrink-0" />
@@ -143,11 +138,11 @@ export default function CoopSession() {
   const sessionStatus = sessionStatusMeta(session.status);
 
   return (
-    <div className="min-h-screen coop-session-themed">
+    <div className="coop-session-themed">
       {/* 顶部 Header */}
-      <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border/50">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="sm" className="text-foreground" onClick={() => {
+      <div className="coop-session-header">
+        <div className="coop-session-header__inner">
+          <Button variant="ghost" size="sm" className="coop-session-back" onClick={() => {
             // 显式回「我的协作」tab：写 sessionStorage 让 Home 初始化时落地 collab 页
             // 跳 /claw/{adoptId}（Home），不是 / （那是 ClawHome 领养首页）
             try { sessionStorage.setItem("home_initial_page", "collab"); } catch {}
@@ -159,13 +154,13 @@ export default function CoopSession() {
           }}>
             <ArrowLeft className="w-4 h-4 mr-1" /> 返回
           </Button>
-          <div className="flex-1">
-            <div className="flex items-center gap-3">
-              <UsersIcon className="w-5 h-5 text-primary" />
-              <h1 className="text-lg font-semibold text-foreground">{session.title || "协作任务"}</h1>
+          <div className="coop-session-header__main">
+            <div className="coop-session-title-row">
+              <UsersIcon className="coop-session-title-icon" />
+              <h1 className="coop-session-title">{session.title || "协作任务"}</h1>
               <span className={`badge ${sessionStatus.badgeClass}`}>{sessionStatus.label}</span>
             </div>
-            <div className="text-xs text-muted-foreground mt-1">
+            <div className="coop-session-meta">
               协作 ID: <span className="font-mono">{session.id}</span> · {members.length} 位成员 · {isCreator && isMember ? "你是发起人（含成员）" : isCreator ? "你是发起人" : "你是协作成员"}
             </div>
           </div>
@@ -174,16 +169,16 @@ export default function CoopSession() {
 
       {/* 原始消息 */}
       {session.originMessage && (
-        <div className="max-w-6xl mx-auto px-6 mt-4">
-          <Card className="p-4 bg-card/80 border-border/50">
-            <div className="text-xs font-medium text-muted-foreground mb-2">发起任务</div>
-            <div className="text-sm text-foreground whitespace-pre-wrap">{session.originMessage}</div>
+        <div className="coop-session-shell coop-session-shell--top">
+          <Card className="coop-session-card coop-session-origin">
+            <div className="coop-session-section-label">发起任务</div>
+            <div className="coop-session-body-text">{session.originMessage}</div>
           </Card>
         </div>
       )}
 
       {/* 成员卡片 —— 接收方自己的卡片占整行宽度（因要内嵌 ChatBox），其他成员正常 grid */}
-      <div className="max-w-6xl mx-auto px-6 py-6 space-y-4">
+      <div className="coop-session-shell coop-session-shell--main">
         {/* 我的卡片（占整行，底部可展开 ChatBox） */}
         {(() => {
           const myCard = members.find((m: any) => m.targetUserId === currentUserId);
@@ -193,14 +188,14 @@ export default function CoopSession() {
           // running / approved 都算"已接手"：可以展开 ChatBox 继续干活
           const showChatBox = ["approved", "running"].includes(myCard.status);
           return (
-            <Card className="p-4 bg-primary/5 border-primary/20 hover:shadow-md transition-shadow">
+            <Card className="coop-session-card coop-session-member-card coop-session-member-card--mine">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-foreground">
+                  <div className="coop-session-member-name">
                     {myCard.targetUserName || myCard.targetEmail || `#${myCard.targetUserId}`}
-                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground font-normal">我</span>
+                    <span className="coop-session-me-pill">我</span>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
+                  <div className="coop-session-member-org">
                     {formatMemberOrg(myCard)}
                   </div>
                 </div>
@@ -208,8 +203,8 @@ export default function CoopSession() {
                   <Icon className="w-3 h-3" /> {meta.label}
                 </span>
               </div>
-              <div className="text-xs text-muted-foreground mb-1">分配给我的子任务</div>
-              <div className="text-sm text-foreground bg-muted/50 rounded p-2 mb-3">{myCard.taskSummary || "—"}</div>
+              <div className="coop-session-section-label">分配给我的子任务</div>
+              <div className="coop-session-task-box">{myCard.taskSummary || "—"}</div>
               {/* pending → 接手 / 修改 / 拒绝 */}
               {myCard.status === "pending" ? (
                 <InvitationActions
@@ -233,14 +228,7 @@ export default function CoopSession() {
               {/* 已提交 */}
               {myCard.status === "completed" && myCard.resultSummary ? (
                 <>
-                  <div
-                    className="mt-2 text-xs text-foreground rounded p-2 whitespace-pre-wrap"
-                    style={{
-                      background: "color-mix(in oklab, var(--oc-success) 10%, transparent)",
-                      border: "1px solid color-mix(in oklab, var(--oc-success) 25%, transparent)",
-                      maxHeight: 240, overflowY: "auto", overflowWrap: "anywhere",
-                    }}
-                  >
+                  <div className="coop-session-result-box">
                     {myCard.resultSummary}
                   </div>
                   <AttachmentList attachments={attachmentsByRequestId.get(myCard.requestId) || []} />
@@ -256,11 +244,11 @@ export default function CoopSession() {
             const meta = memberStatusMeta(m.status);
             const Icon = meta.icon;
             return (
-              <Card key={m.requestId} className="p-4 bg-card border-border/50 hover:shadow-md transition-shadow">
+              <Card key={m.requestId} className="coop-session-card coop-session-member-card">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-foreground truncate">{m.targetUserName || m.targetEmail || `#${m.targetUserId}`}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
+                    <div className="coop-session-member-name truncate">{m.targetUserName || m.targetEmail || `#${m.targetUserId}`}</div>
+                    <div className="coop-session-member-org">
                       {formatMemberOrg(m)}
                     </div>
                   </div>
@@ -268,19 +256,12 @@ export default function CoopSession() {
                     <Icon className="w-3 h-3" /> {meta.label}
                   </span>
                 </div>
-                <div className="text-xs text-muted-foreground mb-1">子任务</div>
-                <div className="text-sm text-foreground bg-muted/50 rounded p-2 mb-3">{m.taskSummary || "—"}</div>
+                <div className="coop-session-section-label">子任务</div>
+                <div className="coop-session-task-box">{m.taskSummary || "—"}</div>
                 {/* 完成后的结果 */}
                 {m.status === "completed" && m.resultSummary ? (
                   <>
-                    <div
-                      className="mt-2 text-xs text-foreground rounded p-2 whitespace-pre-wrap"
-                      style={{
-                        background: "color-mix(in oklab, var(--oc-success) 10%, transparent)",
-                        border: "1px solid color-mix(in oklab, var(--oc-success) 25%, transparent)",
-                        maxHeight: 240, overflowY: "auto", overflowWrap: "anywhere",
-                      }}
-                    >
+                    <div className="coop-session-result-box">
                       {m.resultSummary}
                     </div>
                     <AttachmentList attachments={attachmentsByRequestId.get(m.requestId) || []} />
@@ -293,35 +274,21 @@ export default function CoopSession() {
 
         {/* ── 已发布的最终结果（所有 member 都能看，发起人也能看）── */}
         {session.status === "published" && session.finalSummary ? (
-          <Card
-            className="mt-6 p-5"
-            style={{
-              background: "color-mix(in oklab, var(--oc-success) 8%, transparent)",
-              borderColor: "color-mix(in oklab, var(--oc-success) 30%, transparent)",
-            }}
-          >
+          <Card className="coop-session-card coop-session-published-card">
             <div className="flex items-center gap-2 mb-3">
               <CheckCircle2 className="w-4 h-4" style={{ color: "var(--oc-success)" }} />
-              <div className="text-sm font-semibold text-foreground">📢 协作最终汇总（已发布）</div>
+              <div className="coop-session-card-title">协作最终汇总（已发布）</div>
               {(session as any).publishedAt ? (
                 <span className="text-[11px] text-muted-foreground ml-auto">
                   {new Date((session as any).publishedAt).toLocaleString("zh-CN", { hour12: false })}
                 </span>
               ) : null}
             </div>
-            <div
-              className="text-sm text-foreground whitespace-pre-wrap rounded p-3 bg-card"
-              style={{
-                border: "1px solid color-mix(in oklab, var(--oc-success) 30%, transparent)",
-                maxHeight: 480,
-                overflowY: "auto",
-                overflowWrap: "anywhere",
-              }}
-            >
+            <div className="coop-session-final-box">
               {session.finalSummary}
             </div>
             {/* 发布者信息 */}
-            <div className="mt-2 text-[11px] text-muted-foreground">
+            <div className="coop-session-meta mt-2">
               发布人：{isCreator ? "我（发起人）" : `#${session.creatorUserId}`}
             </div>
           </Card>
@@ -374,12 +341,12 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
   const isClosed = session.status === "closed" || session.status === "dissolved";
 
   return (
-    <Card className="mt-6 p-5 bg-card border-border/50">
+    <Card className="coop-session-card coop-session-consolidation-card">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <div className="text-sm font-semibold text-foreground">汇总 · 发布</div>
-          <div className="text-xs text-foreground mt-0.5">
-            {isPublished ? "✅ 已发布，全员可见" : isClosed ? "协作已关闭" : readyToConsolidate ? "成员全部完成，可以汇总" : "等待成员完成执行..."}
+          <div className="coop-session-card-title">汇总 · 发布</div>
+          <div className="coop-session-meta mt-0.5">
+            {isPublished ? "已发布，全员可见" : isClosed ? "协作已关闭" : readyToConsolidate ? "成员全部完成，可以汇总" : "等待成员完成执行..."}
           </div>
         </div>
         <div className="flex gap-2">
@@ -397,19 +364,19 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
       {/* 2026-04-17: 自定义汇总指令（发起人可填，未填走默认 prompt） */}
       {!isPublished && !isClosed && readyToConsolidate ? (
         <div className="mt-2 mb-3">
-          <label className="text-xs text-muted-foreground mb-1 block">
+          <label className="coop-session-section-label mb-1">
             自定义汇总指令{hasPreset ? "（已从发起模板预填 · 可修改）" : "（可选 · 留空走默认）"}
           </label>
           <Textarea
             value={customInstructions}
             onChange={(e) => setCustomInstructions(e.target.value)}
             placeholder="例如：按部门分组列出 / 重点突出风险项 / 限 500 字内 / 大行公文严肃风格 / 用表格呈现 ..."
-            className="text-sm min-h-[60px]"
+            className="coop-session-textarea min-h-[60px]"
             disabled={consolidateMut.isPending}
             maxLength={1000}
           />
           <div className="flex items-center justify-between mt-1.5">
-            <div className="text-[10px] text-muted-foreground">{customInstructions.length}/1000</div>
+            <div className="coop-session-count">{customInstructions.length}/1000</div>
             <Button
               size="sm"
               variant="outline"
@@ -420,7 +387,7 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
               disabled={consolidateMut.isPending}
             >
               {consolidateMut.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-              ✨ AI 汇总{hasDraft ? "（重新生成）" : ""}
+              AI 汇总{hasDraft ? "（重新生成）" : ""}
             </Button>
           </div>
         </div>
@@ -430,7 +397,7 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
           <Textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            className="min-h-[220px] text-sm font-mono"
+            className="coop-session-textarea min-h-[220px] font-mono"
             placeholder="汇总内容（可编辑后发布）"
             readOnly={isPublished}
           />
@@ -467,13 +434,13 @@ function InvitationActions({ requestId, originalSubtask, onAgree, onReject, busy
   const [modified, setModified] = useState(originalSubtask);
 
   return (
-    <div className="mt-3 pt-3 border-t border-border/40">
+    <div className="coop-session-invitation-actions">
       {editing ? (
         <div className="space-y-2">
           <Textarea
             value={modified}
             onChange={(e) => setModified(e.target.value)}
-            className="text-xs min-h-[60px]"
+            className="coop-session-textarea text-xs min-h-[60px]"
             placeholder="修改子任务内容..."
           />
           <div className="flex gap-2">
