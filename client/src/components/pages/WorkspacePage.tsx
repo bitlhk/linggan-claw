@@ -10,6 +10,16 @@ import { useEffect, useMemo, useState } from "react";
 import { PageContainer } from "@/components/console/PageContainer";
 import { Folder, FileText, Download, Eye, RefreshCw, ChevronRight, Loader2, Upload, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type FileNode = { name: string; path: string; type: "file" | "directory"; size?: number; modifiedAt?: string };
 type Capabilities = { supportsList: boolean; supportsRead: boolean; supportsDownload: boolean; supportsUpload: boolean; supportsDelete: boolean; maxUploadBytes: number };
@@ -70,6 +80,7 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [currentPath, setCurrentPath] = useState<string>("");  // workspace-relative current dir, "" = root
+  const [deleteTarget, setDeleteTarget] = useState<FileNode | null>(null);
 
   const load = async () => {
     if (!adoptId) return;
@@ -150,12 +161,13 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
     }
   };
 
+  const requestDeleteFile = (file: FileNode) => {
+    if (!caps?.supportsDelete) return;
+    setDeleteTarget(file);
+  };
+
   const deleteFile = async (file: FileNode) => {
     if (!caps?.supportsDelete) return;
-    const prompt = file.type === "directory"
-      ? `确定删除文件夹 ${file.path}/ 及其所有内容？此操作不可撤销。`
-      : `确定删除 ${file.path}?`;
-    if (!window.confirm(prompt)) return;
     try {
       const r = await fetch("/api/claw/files/delete", {
         method: "DELETE",
@@ -169,6 +181,7 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
         return;
       }
       await load();
+      setDeleteTarget(null);
     } catch (e: any) {
       setError(e?.message || "delete failed");
     }
@@ -309,7 +322,7 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
                         </a>
                       )}
                       {caps?.supportsDelete && (
-                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); deleteFile(f); }} className="h-7 px-2 text-xs gap-1 lingxia-soft-action lingxia-soft-action--danger">
+                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); requestDeleteFile(f); }} className="h-7 px-2 text-xs gap-1 lingxia-soft-action lingxia-soft-action--danger">
                           <Trash2 className="w-3 h-3" />
                         </Button>
                       )}
@@ -349,6 +362,53 @@ export function WorkspacePage({ adoptId }: { adoptId: string }) {
           <Loader2 className="w-8 h-8 animate-spin text-white" />
         </div>
       )}
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent
+          className="max-w-[420px]"
+          style={{
+            background: "var(--oc-bg-surface)",
+            borderColor: "var(--oc-border)",
+            color: "var(--oc-text-primary)",
+            boxShadow: "0 20px 50px rgba(0,0,0,0.35)",
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base">
+              {deleteTarget?.type === "directory" ? "删除文件夹？" : "删除文件？"}
+            </AlertDialogTitle>
+            <AlertDialogDescription style={{ color: "var(--oc-text-secondary)" }}>
+              {deleteTarget?.type === "directory"
+                ? "该文件夹及其中所有内容都会被删除，此操作不可撤销。"
+                : "该文件会被删除，此操作不可撤销。"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteTarget && (
+            <div
+              className="rounded-md px-3 py-2 text-xs font-mono break-all"
+              style={{
+                background: "color-mix(in oklab, var(--oc-bg) 82%, transparent)",
+                border: "1px solid var(--oc-border)",
+                color: "var(--oc-text-secondary)",
+              }}
+            >
+              {deleteTarget.path}{deleteTarget.type === "directory" ? "/" : ""}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel className="lingxia-soft-action">取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="lingxia-soft-action lingxia-soft-action--danger"
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteTarget) void deleteFile(deleteTarget);
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageContainer>
   );
 }
