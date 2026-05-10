@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Bell, Building2, CheckCircle2, MessageCircle, QrCode, Send, Unlink } from "lucide-react";
 import { PageContainer } from "@/components/console/PageContainer";
 import { useChannelBinding } from "@/hooks/useChannelBinding";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type ChannelKey = "wechat" | "feishu" | "wecom";
 
@@ -22,19 +23,33 @@ export function ChannelsPage({ adoptId }: { adoptId?: string }) {
   const [active, setActive] = useState<ChannelKey>("wechat");
   const wechat = useChannelBinding("wechat", adoptId);
   const feishu = useChannelBinding("feishu", adoptId);
+  const { confirm, dialog } = useConfirmDialog();
 
   const unbindWechat = async () => {
-    if (!confirm("确认解绑微信？解绑后将无法通过微信接收通知和对话。")) return;
+    const ok = await confirm({
+      title: "解绑微信？",
+      description: "解绑后将无法通过微信接收通知和对话。",
+      confirmText: "解绑",
+      variant: "danger",
+    });
+    if (!ok) return;
     await wechat.unbind();
   };
 
   const unbindFeishu = async () => {
-    if (!confirm("确认解绑飞书？解绑后将无法通过飞书接收通知。")) return;
+    const ok = await confirm({
+      title: "解绑飞书？",
+      description: "解绑后将无法通过飞书接收通知。",
+      confirmText: "解绑",
+      variant: "danger",
+    });
+    if (!ok) return;
     await feishu.unbind();
   };
 
   return (
     <PageContainer title="频道" desc="管理灵虾与你的触达方式。日常对话、协作提醒和定时任务都可以复用这些频道。">
+      {dialog}
       <div className="channel-layout">
         <aside className="settings-card channel-list" aria-label="频道列表">
           {CHANNELS.map((channel) => {

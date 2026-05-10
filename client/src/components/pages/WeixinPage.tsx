@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { MessageCircle, QrCode, Send, Unlink } from "lucide-react";
 import { toast } from "sonner";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export function WeixinPage({ adoptId }: { adoptId?: string }) {
   const [status, setStatus] = useState<"idle"|"loading"|"scanning"|"bound">("idle");
@@ -9,6 +10,7 @@ export function WeixinPage({ adoptId }: { adoptId?: string }) {
   const [userId, setUserId] = useState("");
   const [testing, setTesting] = useState(false);
   const pollRef = useRef<any>(null);
+  const { confirm, dialog } = useConfirmDialog();
 
   useEffect(() => {
     if (!adoptId) return;
@@ -41,7 +43,14 @@ export function WeixinPage({ adoptId }: { adoptId?: string }) {
   };
 
   const unbind = async () => {
-    if (!adoptId || !confirm("确认解绑微信？解绑后将无法通过微信接收通知和对话。")) return;
+    if (!adoptId) return;
+    const ok = await confirm({
+      title: "解绑微信？",
+      description: "解绑后将无法通过微信接收通知和对话。",
+      confirmText: "解绑",
+      variant: "danger",
+    });
+    if (!ok) return;
     await fetch("/api/claw/weixin/unbind", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ adoptId }) });
     setStatus("idle"); setUserId(""); toast.success("已解绑");
   };
@@ -59,6 +68,7 @@ export function WeixinPage({ adoptId }: { adoptId?: string }) {
 
   return (
     <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
+      {dialog}
       <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5 stealth-scrollbar">
         <div style={{ maxWidth: 480, margin: "0 auto" }}>
 

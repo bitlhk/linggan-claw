@@ -6,6 +6,7 @@ import {
   isBuiltinBusinessAgentAdapter,
   isReservedLegacyBusinessAgentId,
 } from "@shared/business-agent-presets";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface BizAgent {
   id: string; name: string; description?: string | null;
@@ -699,6 +700,7 @@ function AgentForm({ initial, saving = false, onSave, onCancel }: {
 }
 
 export function BizAgentsPanel() {
+  const { confirm, dialog } = useConfirmDialog();
   const listQ = trpc.bizAgents.list.useQuery();
   const healthCheckMutation = trpc.agentHealth.check.useMutation({ onSuccess: () => listQ.refetch() });
   const healthCheckAllMutation = trpc.agentHealth.checkAll.useMutation({
@@ -722,8 +724,20 @@ export function BizAgentsPanel() {
 
   const agents: BizAgent[] = (listQ.data as any) || [];
 
+  const onDeleteAgent = async (agent: BizAgent) => {
+    const ok = await confirm({
+      title: "删除智能体配置？",
+      description: `确定删除「${agent.name}」？`,
+      confirmText: "删除",
+      variant: "danger",
+    });
+    if (!ok) return;
+    del.mutate({ id: agent.id });
+  };
+
   return (
     <div className="space-y-3">
+      {dialog}
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-semibold" style={{ color: "var(--oc-text-primary)" }}>业务智能体配置</div>
@@ -810,7 +824,7 @@ export function BizAgentsPanel() {
                     style={{ background: "none", border: "none", cursor: "pointer", color: "var(--oc-text-secondary)", padding: 4 }}>
                     <Pencil size={14} />
                   </button>
-                  <button onClick={() => { if (confirm(`确定删除「${a.name}」？`)) del.mutate({ id: a.id }); }}
+                  <button onClick={() => { void onDeleteAgent(a); }}
                     style={{ background: "none", border: "none", cursor: "pointer", color: "var(--oc-danger)", padding: 4 }}>
                     <Trash2 size={14} />
                   </button>

@@ -16,6 +16,16 @@ import { Loader2, ArrowLeft, CheckCircle2, Users as UsersIcon, Paperclip, Downlo
 import { toast } from "sonner";
 import { CoopChatBox } from "@/components/CoopChatBox";
 import { memberStatusMeta, sessionStatusMeta } from "@/lib/coopStatus";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type EventAttachment = { name: string; url: string; source?: string; size?: number };
 
@@ -308,6 +318,7 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
   members: any[];
   onRefresh: () => void;
 }) {
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [draft, setDraft] = useState<string>(session.finalSummary || "");
   const [providerUsed, setProviderUsed] = useState<string>("");
   const [hasDraft, setHasDraft] = useState(Boolean(session.finalSummary));
@@ -342,6 +353,33 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
 
   return (
     <Card className="coop-session-card coop-session-consolidation-card">
+      <AlertDialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
+        <AlertDialogContent className="bg-white text-gray-900 border-gray-200 shadow-xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-gray-900">关闭协作？</AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-600">
+              你可以只关闭协作并保留记录，也可以解散群组让协作终止。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:text-gray-900">
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-white text-gray-800 border border-gray-200 hover:bg-gray-50"
+              onClick={() => closeMut.mutate({ sessionId, mode: "keep" })}
+            >
+              只关闭
+            </AlertDialogAction>
+            <AlertDialogAction
+              className="bg-red-600 text-white hover:bg-red-700"
+              onClick={() => closeMut.mutate({ sessionId, mode: "dissolve" })}
+            >
+              解散群组
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="coop-session-card-title">汇总 · 发布</div>
@@ -351,10 +389,7 @@ function ConsolidationPanel({ sessionId, session, members, onRefresh }: {
         </div>
         <div className="flex gap-2">
           {!isClosed ? (
-            <Button size="sm" variant="ghost" className="text-foreground" onClick={() => {
-              const mode = window.confirm("解散群组？（确定=解散，取消=只关闭保留）") ? "dissolve" : "keep";
-              closeMut.mutate({ sessionId, mode });
-            }} disabled={closeMut.isPending}>
+            <Button size="sm" variant="ghost" className="text-foreground" onClick={() => setCloseDialogOpen(true)} disabled={closeMut.isPending}>
               关闭/解散
             </Button>
           ) : null}

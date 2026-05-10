@@ -33,6 +33,7 @@ import { CollaborationTab } from "./admin/CollaborationTab";
 import { toast } from "sonner";
 import { useBrand, invalidateBrandClientCache } from "@/lib/useBrand";
 import { DEFAULT_BRAND } from "@shared/brand";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "全部" },
@@ -259,6 +260,7 @@ function BrandSettingsPanel() {
 export default function ClawAdmin() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
+  const { confirm, dialog } = useConfirmDialog();
   const [activeTab, setActiveTab] = useState("instances");
   const [keyword, setKeyword] = useState("");
   const [viewingSkillId, setViewingSkillId] = useState<number | null>(null);
@@ -329,6 +331,16 @@ export default function ClawAdmin() {
     onSuccess: () => { refetchMarket(); toast.success("已删除"); },
     onError: (e: any) => toast.error(e?.message || "删除失败"),
   });
+  const handleDeleteMarketSkill = async (id: number) => {
+    const ok = await confirm({
+      title: "删除市场技能？",
+      description: "确定删除？",
+      confirmText: "删除",
+      variant: "danger",
+    });
+    if (!ok) return;
+    deleteMarketSkillMutation.mutate({ id });
+  };
 
   const { data: viewSkillSource, refetch: refetchSkillSource } = trpc.claw.adminViewSkillSource.useQuery(
     { id: viewingSkillId! },
@@ -450,6 +462,7 @@ export default function ClawAdmin() {
 
   return (
     <div className="claw-admin-shell min-h-screen bg-gradient-to-b from-white to-gray-50/80">
+      {dialog}
       {/* Header */}
       <header className="claw-admin-header sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-border/50">
         <div className="container flex items-center justify-between h-14 px-6">
@@ -852,7 +865,7 @@ export default function ClawAdmin() {
                             {(item.status === "offline" || item.status === "rejected") && (
                               <Button size="sm" variant="outline" className="admin-secondary-action h-7 text-xs" onClick={() => reviewSkillMutation.mutate({ id: item.id, status: "approved" })}>重新上架</Button>
                             )}
-                            <Button size="sm" variant="ghost" className="admin-danger-ghost-action h-7 text-xs" onClick={() => { if (confirm("确定删除？")) deleteMarketSkillMutation.mutate({ id: item.id }); }}>删除</Button>
+                            <Button size="sm" variant="ghost" className="admin-danger-ghost-action h-7 text-xs" onClick={() => { void handleDeleteMarketSkill(item.id); }}>删除</Button>
                           </div>
                         </div>
                       </div>

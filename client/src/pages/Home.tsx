@@ -27,6 +27,7 @@ import { sidebarIconMap } from "@/config/icons";
 import { applySettings as applyUiSettings, getSettings, subscribeSettings } from "@/lib/settings";
 import { useLingxiaChat } from "@/hooks/useLingxiaChat";
 import { formatModelName, getModelProviderLabel } from "@/lib/modelDisplay";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 
 
@@ -278,6 +279,7 @@ async function handleStreamTruncated(
 export default function Home() {
   // 灵虾子域名聊天态（MVP）
   const brand = useBrand();
+  const { confirm, dialog } = useConfirmDialog();
   const [lingxiaInput, setLingxiaInput] = useState("");
   const [lingxiaMsgs, setLingxiaMsgs] = useState<LxMsg[]>(() => {
     try { const s = localStorage.getItem("lingxia-chat-history");
@@ -1306,7 +1308,13 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
 
   const resetLingxiaSession = async () => {
     if (!resolvedAdoptId || activeLingxiaStreaming) return;
-    if (!window.confirm("确认重置会话？将清空当前会话上下文。")) return;
+    const ok = await confirm({
+      title: "重置会话？",
+      description: "确认重置会话？将清空当前会话上下文。",
+      confirmText: "重置",
+      variant: "danger",
+    });
+    if (!ok) return;
 
     try {
       if (!chatV2Enabled) setLingxiaStreaming(true);
@@ -1423,6 +1431,7 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
   if (isLingxiaSubdomain) {
     return (
       <>
+      {dialog}
       <div className="h-screen overflow-hidden flex flex-col lingxia-shell" style={{ background: "var(--oc-bg)", color: "var(--oc-text-primary)" }}>
 
         {/* 智能体广场抽屉（动效在 CollabDrawer 内部实现） */}

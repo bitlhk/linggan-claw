@@ -16,6 +16,7 @@ import {
   Zap,
 } from "lucide-react";
 import { PageContainer } from "@/components/console/PageContainer";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type ChannelId = "wechat" | "feishu" | "wecom";
 
@@ -268,6 +269,7 @@ function SkeletonRows() {
 
 export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
   const aid = adoptId || "";
+  const { confirm, dialog } = useConfirmDialog();
   const [jobs, setJobs] = useState<CronJobV2[]>([]);
   const [runs, setRuns] = useState<CronRunV2[]>([]);
   const [loading, setLoading] = useState(false);
@@ -359,7 +361,14 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
   }
 
   async function removeJob(job: CronJobV2) {
-    if (!aid || !confirm(`${T.deleteConfirmPrefix}${job.name}${T.deleteConfirmSuffix}`)) return;
+    if (!aid) return;
+    const ok = await confirm({
+      title: "删除定时任务？",
+      description: `${T.deleteConfirmPrefix}${job.name}${T.deleteConfirmSuffix}`,
+      confirmText: "删除",
+      variant: "danger",
+    });
+    if (!ok) return;
     try {
       const resp = await fetch("/api/claw/cron/remove", {
         method: "POST",
@@ -434,6 +443,7 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
 
   return (
     <PageContainer title={T.pageTitle}>
+      {dialog}
       <div className="schedule-v2">
         <div className="schedule-v2-toolbar">
           <div>

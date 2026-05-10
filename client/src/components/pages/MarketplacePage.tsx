@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type OriginKey = "opensource" | "squad";
 
@@ -54,6 +55,7 @@ function categoryMeta(category: string) {
 }
 
 export function MarketplacePage({ adoptId }: { adoptId?: string }) {
+  const { confirm, dialog } = useConfirmDialog();
   const [items, setItems] = useState<MarketSkill[]>([]);
   const [loading, setLoading] = useState(true);
   const [installing, setInstalling] = useState<number | null>(null);
@@ -150,7 +152,13 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
     if (!adoptId || installing) return;
     const installed = installedMarket[String(item.id)];
     if (!installed?.skillId) return;
-    if (!confirm(`确认卸载 ${item.title}？广场源不会删除，可重新安装。`)) return;
+    const ok = await confirm({
+      title: "卸载技能？",
+      description: `确认卸载 ${item.title}？广场源不会删除，可重新安装。`,
+      confirmText: "卸载",
+      variant: "danger",
+    });
+    if (!ok) return;
     setInstalling(item.id);
     try {
       const r = await fetch("/api/claw/skills/uninstall", {
@@ -186,6 +194,7 @@ export function MarketplacePage({ adoptId }: { adoptId?: string }) {
 
   return (
     <div className="skills-market">
+      {dialog}
       <div className="skills-market-hero settings-card">
         <div className="skills-market-hero__icon"><Store size={18} /></div>
         <div className="min-w-0">

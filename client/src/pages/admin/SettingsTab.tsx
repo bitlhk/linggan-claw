@@ -43,8 +43,10 @@ import {
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { formatDate, scenarioNames } from "./utils";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export function SettingsTab() {
+  const { confirm, dialog } = useConfirmDialog();
   // SMTP 配置相关
   const [smtpFormData, setSmtpFormData] = useState<{
     host: string;
@@ -327,8 +329,31 @@ export function SettingsTab() {
     },
   });
 
+  const handleDeleteScenario = async (scenario: { id: string; title: string }) => {
+    const ok = await confirm({
+      title: "删除场景？",
+      description: `确定删除场景 ${scenario.title} 吗？\n注意：关联体验会变成无场景显示。`,
+      confirmText: "删除",
+      variant: "danger",
+    });
+    if (!ok) return;
+    deleteScenarioMutation.mutate({ id: scenario.id });
+  };
+
+  const handleDeleteExperienceConfig = async (id: number) => {
+    const ok = await confirm({
+      title: "删除体验配置？",
+      description: "确定要删除这个配置吗？",
+      confirmText: "删除",
+      variant: "danger",
+    });
+    if (!ok) return;
+    deleteExperienceConfig.mutate({ id });
+  };
+
   return (
     <>
+      {dialog}
       <Card className="border-border/50">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -843,11 +868,7 @@ export function SettingsTab() {
                           variant="ghost"
                           size="sm"
                           className="text-destructive"
-                          onClick={() => {
-                            if (confirm(`确定删除场景 ${s.title} 吗？\n注意：关联体验会变成无场景显示。`)) {
-                              deleteScenarioMutation.mutate({ id: s.id });
-                            }
-                          }}
+                          onClick={() => { void handleDeleteScenario(s); }}
                         >
                           <XCircle className="w-4 h-4" />
                         </Button>
@@ -1015,11 +1036,7 @@ export function SettingsTab() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              if (confirm("确定要删除这个配置吗？")) {
-                                deleteExperienceConfig.mutate({ id: config.id });
-                              }
-                            }}
+                            onClick={() => { void handleDeleteExperienceConfig(config.id); }}
                             className="text-destructive"
                           >
                             <XCircle className="w-4 h-4" />

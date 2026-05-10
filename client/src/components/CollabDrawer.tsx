@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 // ── 类型 ─────────────────────────────────────────────────────────────────
 interface AgentExample { text: string; icon?: string; }
@@ -613,6 +614,7 @@ function CollabExecPanel({ req, adoptId, onBack, onDone }: { req: any; adoptId: 
 
 // ── 业务 Agent 任务面板 ───────────────────────────────────────────────────
 function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onBack: () => void; prefillPrompt?: string }) {
+  const { confirm, dialog } = useConfirmDialog();
   // module-level store: state survives unmount, fetch keeps writing in background
   const { msgs, sessionKey, streaming } = useAgentState(agent.id);
   const [input, setInput] = useState("");
@@ -701,9 +703,15 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
   }, [agent.id, apiBase]);
 
   const clearFiles = useCallback(async () => {
-    if (!window.confirm("清空所有生成的文件？")) return;
+    const ok = await confirm({
+      title: "清空生成文件？",
+      description: "清空所有生成的文件？",
+      confirmText: "清空",
+      variant: "danger",
+    });
+    if (!ok) return;
     try { await fetch(`${apiBase}/api/claw/business-files?agentId=${agent.id}&all=1`, { method: "DELETE", credentials: "include" }); setFiles([]); } catch {}
-  }, [agent.id, apiBase]);
+  }, [agent.id, apiBase, confirm]);
 
   useEffect(() => { fetchFiles(); const t = setInterval(fetchFiles, 30000); return () => clearInterval(t); }, [fetchFiles]);
 
@@ -719,6 +727,7 @@ function TaskPanel({ agent, onBack, prefillPrompt }: { agent: BusinessAgent; onB
 
   return (
     <div className="flex flex-col h-full">
+      {dialog}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b shrink-0" style={{ borderColor: "var(--oc-border)" }}>
         <button onClick={onBack} className="p-1 rounded hover:opacity-80 transition-colors"><ChevronLeft size={16} style={{ color: "var(--oc-text-secondary)" }} /></button>
         <span className="flex items-center justify-center" style={{ width: 18, height: 18 }}>{renderAgentIcon(agent, 18)}</span>

@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { ArrowLeft, Loader2, Users as UsersIcon, Search, UserPlus, X, Sparkles } from "lucide-react";
 import { COOP_TEMPLATES, getTemplateById, renderVars } from "@/data/coopTemplates";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type Candidate = {
   userId: number;
@@ -58,6 +59,7 @@ type CoopNewFormProps = {
 };
 
 export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
+  const { confirm, dialog } = useConfirmDialog();
   const { user } = useAuth();
   const selfUserId = user?.id;
   const [title, setTitle] = useState("");
@@ -193,7 +195,7 @@ export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
   };
 
   // 应用模板 — 整块重置，不走 prevOrigin 跟随逻辑
-  const applyTemplate = (id: string) => {
+  const applyTemplate = async (id: string) => {
     if (id === templateId) return;
     const tpl = getTemplateById(id);
     if (!tpl) return;
@@ -204,9 +206,11 @@ export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
       consolidationPromptPreset.trim().length > 0 ||
       selected.some((s) => s.subtask.trim().length > 0);
     if (hasAnyInput && id !== "blank") {
-      const ok = window.confirm(
-        `切换到「${tpl.name}」模板会覆盖当前的标题、原始描述、子任务和汇总指令。确定继续？`
-      );
+      const ok = await confirm({
+        title: "切换协作模板？",
+        description: `切换到「${tpl.name}」模板会覆盖当前的标题、原始描述、子任务和汇总指令。`,
+        confirmText: "切换",
+      });
       if (!ok) return;
     }
 
@@ -246,6 +250,7 @@ export function CoopNewForm({ onDone, onCancel }: CoopNewFormProps) {
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
+      {dialog}
       {/* 1. 协作描述 */}
       <Card className="p-5 bg-card border-border/50">
         <div className="space-y-3">

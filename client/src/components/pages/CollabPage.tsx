@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { sessionStatusMeta } from "@/lib/coopStatus";
 import { CoopNewForm } from "@/pages/CoopNew";
 import { Button } from "@/components/ui/button";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type PageMode = "list" | "create";
 type FilterKey = "all" | "action" | "created" | "participating" | "completed";
@@ -174,6 +175,7 @@ export function CollabPage({ adoptId: _adoptId }: { adoptId: string }) {
 
 function CoopSessionsWorkbench({ onCreate }: { onCreate?: () => void }) {
   const [, setLoc] = useLocation();
+  const { confirm, dialog } = useConfirmDialog();
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const { data: sessions, isLoading, isFetching, refetch } = trpc.coop.listMySessions.useQuery({ limit: 80 }, {
     refetchInterval: 10_000,
@@ -236,22 +238,39 @@ function CoopSessionsWorkbench({ onCreate }: { onCreate?: () => void }) {
     return true;
   });
 
-  const handleDelete = (session: CoopSessionRow) => {
-    if (!window.confirm(`确认删除协作「${session.title || session.id}」？\n\n所有成员的视图都会消失（软删除，30 天内可联系管理员恢复）。`)) return;
+  const handleDelete = async (session: CoopSessionRow) => {
+    const ok = await confirm({
+      title: "删除协作？",
+      description: `确认删除协作「${session.title || session.id}」？\n\n所有成员的视图都会消失（软删除，30 天内可联系管理员恢复）。`,
+      confirmText: "删除",
+      variant: "danger",
+    });
+    if (!ok) return;
     softDeleteMut.mutate({ sessionId: session.id });
   };
-  const handleHide = (session: CoopSessionRow) => {
-    if (!window.confirm(`从你的列表隐藏「${session.title || session.id}」？\n\n仅影响你的视图，发起人和其他成员不受影响。`)) return;
+  const handleHide = async (session: CoopSessionRow) => {
+    const ok = await confirm({
+      title: "隐藏协作？",
+      description: `从你的列表隐藏「${session.title || session.id}」？\n\n仅影响你的视图，发起人和其他成员不受影响。`,
+      confirmText: "隐藏",
+    });
+    if (!ok) return;
     toggleHideMut.mutate({ sessionId: session.id, hide: true });
   };
 
   if (isLoading) {
-    return <div className="coop-workbench__loading">加载协作任务...</div>;
+    return (
+      <>
+        {dialog}
+        <div className="coop-workbench__loading">加载协作任务...</div>
+      </>
+    );
   }
 
   if (sorted.length === 0) {
     return (
       <div className="coop-empty-state">
+        {dialog}
         <div className="coop-empty-state__icon"><UsersRound size={24} /></div>
         <div className="coop-empty-state__title">还没有协作任务</div>
         <div className="coop-empty-state__desc">你可以发起一个多人协作，让成员分别处理子任务后统一汇总。</div>
@@ -264,6 +283,7 @@ function CoopSessionsWorkbench({ onCreate }: { onCreate?: () => void }) {
 
   return (
     <>
+      {dialog}
       <div className="coop-summary-grid">
         <SummaryItem icon={<Clock3 size={16} />} label="待我处理" value={stats.action} tone={stats.action > 0 ? "warning" : "neutral"} />
         <SummaryItem icon={<Activity size={16} />} label="进行中" value={stats.active} tone="info" />

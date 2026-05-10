@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { PageContainer } from "@/components/console/PageContainer";
 import { handleRovingTabKey } from "@/lib/a11y";
 import { MarketplacePage } from "./MarketplacePage";
+import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type SourceKind = "builtin" | "marketplace" | "uploaded" | "generated";
 type RuntimeState =
@@ -421,6 +422,7 @@ export function SkillsPage({ adoptId }: {
   onToggle?: (skillId: string, enable: boolean, source: "shared" | "system") => void;
   adoptId?: string;
 }) {
+  const { confirm, dialog } = useConfirmDialog();
   const [skillTab, setSkillTab] = useState<SkillTab>("mine");
   const [items, setItems] = useState<RegistrySkill[]>([]);
   const [loading, setLoading] = useState(false);
@@ -513,8 +515,14 @@ export function SkillsPage({ adoptId }: {
     });
   });
 
-  const onUninstall = (skill: RegistrySkill) => {
-    if (!confirm(`确认卸载 ${displayNameOf(skill)}？广场源不会删除，可重新安装。`)) return;
+  const onUninstall = async (skill: RegistrySkill) => {
+    const ok = await confirm({
+      title: "卸载技能？",
+      description: `确认卸载 ${displayNameOf(skill)}？广场源不会删除，可重新安装。`,
+      confirmText: "卸载",
+      variant: "danger",
+    });
+    if (!ok) return;
     void mutate(skill, "已卸载", async () => {
       await fetchJson("/api/claw/skills/uninstall", {
         method: "POST",
@@ -524,8 +532,14 @@ export function SkillsPage({ adoptId }: {
     });
   };
 
-  const onDestroy = (skill: RegistrySkill) => {
-    if (!confirm(`确认删除 ${displayNameOf(skill)}？这会删除源文件和运行时副本。`)) return;
+  const onDestroy = async (skill: RegistrySkill) => {
+    const ok = await confirm({
+      title: "删除技能？",
+      description: `确认删除 ${displayNameOf(skill)}？这会删除源文件和运行时副本。`,
+      confirmText: "删除",
+      variant: "danger",
+    });
+    if (!ok) return;
     void mutate(skill, "已删除", async () => {
       await fetchJson("/api/claw/skills/destroy", {
         method: "POST",
@@ -605,6 +619,7 @@ export function SkillsPage({ adoptId }: {
 
   return (
     <PageContainer title="技能">
+      {dialog}
       <div className="skills-page">
         <div className="page-tabs" role="tablist" aria-label="技能分区" onKeyDown={(e) => handleRovingTabKey(e, SKILL_TAB_KEYS, skillTab, setSkillTab)}>
           <button id="skills-tab-mine" className="page-tab" data-active={skillTab === "mine" ? "true" : "false"} role="tab" aria-selected={skillTab === "mine"} aria-controls="skills-panel-mine" tabIndex={skillTab === "mine" ? 0 : -1} onClick={() => setSkillTab("mine")}>
