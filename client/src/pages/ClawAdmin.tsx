@@ -32,7 +32,7 @@ import { BizAgentsPanel } from "@/components/BizAgentsPanel";
 import { CollaborationTab } from "./admin/CollaborationTab";
 import { toast } from "sonner";
 import { useBrand, invalidateBrandClientCache } from "@/lib/useBrand";
-import { BRAND_PRESETS } from "@shared/brand";
+import { DEFAULT_BRAND } from "@shared/brand";
 
 const STATUS_OPTIONS = [
   { value: "all", label: "全部" },
@@ -83,16 +83,13 @@ function BrandSettingsPanel() {
   });
   const [saving, setSaving] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState(() => {
-    const match = BRAND_PRESETS.find(p => p.config.nameEn === brand.nameEn);
-    return match?.id || "custom";
+    return brand.nameEn === DEFAULT_BRAND.nameEn ? "lingxia" : "custom";
   });
 
   const applyPreset = (presetId: string) => {
     setSelectedPreset(presetId);
     if (presetId === "custom") return;
-    const preset = BRAND_PRESETS.find(p => p.id === presetId);
-    if (!preset) return;
-    setForm({ ...preset.config });
+    setForm({ ...DEFAULT_BRAND });
   };
 
   // Sync from brand when loaded
@@ -107,10 +104,11 @@ function BrandSettingsPanel() {
       logo: brand.logo,
       favicon: brand.favicon,
       systemPrompt: brand.systemPrompt,
-      agentIdentity: brand.agentIdentity,
-      githubUrl: brand.githubUrl,
-      pageTitle: brand.pageTitle,
+        agentIdentity: brand.agentIdentity,
+        githubUrl: brand.githubUrl,
+        pageTitle: brand.pageTitle,
     });
+    setSelectedPreset(brand.nameEn === DEFAULT_BRAND.nameEn ? "lingxia" : "custom");
   }, [brand]);
 
   const setBrandMutation = trpc.claw.adminSetBrand.useMutation({
@@ -138,14 +136,20 @@ function BrandSettingsPanel() {
           className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
           rows={opts.rows}
           value={form[key]}
-          onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+          onChange={(e) => {
+            setSelectedPreset("custom");
+            setForm((f) => ({ ...f, [key]: e.target.value }));
+          }}
           placeholder={opts?.placeholder}
         />
       ) : (
         <Input
           type={opts?.type || "text"}
           value={form[key]}
-          onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+          onChange={(e) => {
+            setSelectedPreset("custom");
+            setForm((f) => ({ ...f, [key]: e.target.value }));
+          }}
           placeholder={opts?.placeholder}
         />
       )}
@@ -156,30 +160,37 @@ function BrandSettingsPanel() {
     <div className="space-y-6">
       {/* 模板选择器 */}
       <Card className="p-6 border-border/50 bg-white/80">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">品牌模板</h3>
-        <p className="text-xs text-muted-foreground mb-4">选择预设模板一键填充，也可以选"自定义"后手动编辑</p>
-        <div className="grid grid-cols-5 gap-2">
-          {BRAND_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => applyPreset(p.id)}
-              className="text-left rounded-lg border p-3 transition-all hover:shadow-sm"
-              style={{
-                borderColor: selectedPreset === p.id ? p.config.accentColor : "rgba(0,0,0,0.08)",
-                background: selectedPreset === p.id ? `${p.config.accentColor}08` : "white",
-                boxShadow: selectedPreset === p.id ? `0 0 0 2px ${p.config.accentColor}30` : "none",
-              }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <div
-                  className="w-4 h-4 rounded-full shrink-0"
-                  style={{ background: p.config.accentColor }}
-                />
-                <span className="text-sm font-medium text-gray-900 truncate">{p.label}</span>
-              </div>
-              <p className="text-[11px] text-muted-foreground truncate">{p.description}</p>
-            </button>
-          ))}
+        <h3 className="text-sm font-semibold text-gray-900 mb-3">品牌模式</h3>
+        <p className="text-xs text-muted-foreground mb-4">默认使用灵虾品牌；需要企业白标时再切换为自定义。</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            onClick={() => applyPreset("lingxia")}
+            className="text-left rounded-xl border p-4 transition-all hover:bg-gray-50"
+            style={{
+              borderColor: selectedPreset === "lingxia" ? DEFAULT_BRAND.accentColor : "rgba(0,0,0,0.08)",
+              boxShadow: selectedPreset === "lingxia" ? `0 0 0 2px ${DEFAULT_BRAND.accentColor}20` : "none",
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <div className="h-4 w-4 rounded-full" style={{ background: DEFAULT_BRAND.accentColor }} />
+              <span className="text-sm font-semibold text-gray-900">默认灵虾</span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">恢复灵虾名称、Logo、主题色和默认身份。</p>
+          </button>
+          <button
+            onClick={() => setSelectedPreset("custom")}
+            className="text-left rounded-xl border p-4 transition-all hover:bg-gray-50"
+            style={{
+              borderColor: selectedPreset === "custom" ? "#6b7280" : "rgba(0,0,0,0.08)",
+              boxShadow: selectedPreset === "custom" ? "0 0 0 2px rgba(107,114,128,0.16)" : "none",
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <div className="h-4 w-4 rounded-full border border-gray-300 bg-white" />
+              <span className="text-sm font-semibold text-gray-900">自定义</span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">按企业部署需要编辑名称、视觉和 AI 身份。</p>
+          </button>
         </div>
       </Card>
 
@@ -204,12 +215,18 @@ function BrandSettingsPanel() {
               <input
                 type="color"
                 value={form.accentColor}
-                onChange={(e) => setForm((f) => ({ ...f, accentColor: e.target.value }))}
+                onChange={(e) => {
+                  setSelectedPreset("custom");
+                  setForm((f) => ({ ...f, accentColor: e.target.value }));
+                }}
                 className="w-10 h-8 rounded border cursor-pointer"
               />
               <Input
                 value={form.accentColor}
-                onChange={(e) => setForm((f) => ({ ...f, accentColor: e.target.value }))}
+                onChange={(e) => {
+                  setSelectedPreset("custom");
+                  setForm((f) => ({ ...f, accentColor: e.target.value }));
+                }}
                 className="w-28 font-mono text-sm"
               />
             </div>
