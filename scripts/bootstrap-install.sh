@@ -181,7 +181,13 @@ run_setup() {
   if [[ "$OVERWRITE_ENV" == "true" ]]; then
     setup_args+=("--overwrite-env")
   fi
-  run bash "$INSTALL_DIR/setup.sh" "${setup_args[@]}"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    printf "[dry-run] cd %q && bash ./setup.sh" "$INSTALL_DIR"
+    for arg in "${setup_args[@]}"; do printf " %q" "$arg"; done
+    printf "\n"
+  else
+    (cd "$INSTALL_DIR" && bash ./setup.sh "${setup_args[@]}")
+  fi
 }
 
 start_app() {
