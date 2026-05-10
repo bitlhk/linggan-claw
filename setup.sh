@@ -429,7 +429,7 @@ elif [[ "$DB_URL" == *"@db:"* ]]; then
   echo "  Docker Compose 数据库，请先: docker compose up -d db"
   echo "  然后运行: pnpm db:push"
 else
-  if pnpm_cmd db:push 2>/dev/null; then
+  if pnpm_cmd exec drizzle-kit push --force; then
     echo "  数据库迁移完成。"
   else
     echo "  迁移失败，请检查 DATABASE_URL。"
