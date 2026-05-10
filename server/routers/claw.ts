@@ -3,7 +3,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { execSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "fs";
 import {
   getCurrentClawByUserId,
   listClawsByUserId,
@@ -13,6 +13,8 @@ import {
   listClawAdoptionsAdmin,
   updateClawAdoptionAdmin,
   batchUpdateClawAdoptionAdmin,
+  getClawAdoptionAdminById,
+  deleteClawAdoptionAdmin,
   appendClawAdoptionEvent,
   getClawProfileSettings,
   upsertClawProfileSettings,
@@ -45,7 +47,7 @@ import {
   provisionLingganClawInstance,
   writeClawExecAudit,
 } from "./helpers";
-import { hermesProfileSkillsDir } from "../_core/helpers";
+import { hermesProfileSkillsDir, resolveRuntimeAgentId } from "../_core/helpers";
 import { onboardBuiltinSkillsForAdopt } from "../_core/skills/skill-onboarding";
 import { skillRegistry } from "../_core/skills/skill-registry";
 import { parseSkillSourceDirectory } from "../_core/skills/skill-source";
@@ -54,6 +56,40 @@ import type { SkillSource } from "../../shared/types/skill";
 const openClawWorkspaceDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/workspace-${String(runtimeAgentId || "").trim()}`;
 const openClawSkillMarketDir = () => `${OPENCLAW_HOME}/skill-market`;
 const openClawSharedSkillsDir = () => `${OPENCLAW_HOME}/skills-shared`;
+
+function pruneSkillRegistryForAdopt(adoptId: string): number {
+  const registryPath = `${APP_ROOT}/data/skill-registry.json`;
+  try {
+    if (!existsSync(registryPath)) return 0;
+    const rows = JSON.parse(String(readFileSync(registryPath, "utf-8") || "[]"));
+    if (!Array.isArray(rows)) return 0;
+    const next = rows.filter((row: any) => String(row?.adoptId || "") !== adoptId);
+    if (next.length === rows.length) return 0;
+    writeFileSync(registryPath, JSON.stringify(next, null, 2), "utf-8");
+    return rows.length - next.length;
+  } catch (e: any) {
+    console.warn("[ADMIN-DELETE-CLAW] failed to prune skill registry", { adoptId, error: String(e?.message || e) });
+    return 0;
+  }
+}
+
+function pruneOpenClawAgentConfig(agentIds: string[]): boolean {
+  try {
+    if (!existsSync(OPENCLAW_JSON_PATH)) return false;
+    const config = JSON.parse(String(readFileSync(OPENCLAW_JSON_PATH, "utf-8") || "{}"));
+    const list = Array.isArray(config?.agents?.list) ? config.agents.list : null;
+    if (!list) return false;
+    const idSet = new Set(agentIds.map((id) => String(id || "").trim()).filter(Boolean));
+    const next = list.filter((entry: any) => !idSet.has(String(entry?.id || "")));
+    if (next.length === list.length) return false;
+    config.agents.list = next;
+    writeFileSync(OPENCLAW_JSON_PATH, JSON.stringify(config, null, 2), "utf-8");
+    return true;
+  } catch (e: any) {
+    console.warn("[ADMIN-DELETE-CLAW] failed to prune openclaw config", { agentIds, error: String(e?.message || e) });
+    return false;
+  }
+}
 
 export const clawRouter = router({
     me: protectedProcedure.query(async ({ ctx }) => {
@@ -204,6 +240,65 @@ export const clawRouter = router({
           status: input.status as any,
         });
         return { ok: true, count: input.ids.length };
+      }),
+
+    adminDelete: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const row = await getClawAdoptionAdminById(input.id);
+        if (!row) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "子虾不存在" });
+        }
+        if (!["recycled", "failed"].includes(String(row.status))) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "请先停用子虾，再执行删除" });
+        }
+
+        const adoptId = String(row.adoptId || "");
+        const runtimeAgentId = resolveRuntimeAgentId(adoptId, String(row.agentId || ""));
+        const workspacePath = openClawWorkspaceDir(runtimeAgentId);
+        const skillsRemoved = pruneSkillRegistryForAdopt(adoptId);
+        const configPruned = pruneOpenClawAgentConfig([String(row.agentId || ""), runtimeAgentId, `trial_${adoptId}`]);
+
+        try {
+          if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
+        } catch (e: any) {
+          console.warn("[ADMIN-DELETE-CLAW] failed to remove workspace", { adoptId, workspacePath, error: String(e?.message || e) });
+        }
+
+        const deleted = await deleteClawAdoptionAdmin(input.id);
+        bumpClawSessionEpochBestEffort(adoptId);
+        writeClawExecAudit({
+          adoptId,
+          agentId: String(row.agentId || ""),
+          userId: ctx.user?.id ?? null,
+          permissionProfile: String(row.permissionProfile || ""),
+          message: "admin_delete_claw",
+          ok: true,
+          meta: {
+            id: input.id,
+            runtimeAgentId,
+            status: row.status,
+            workspaceRemoved: !existsSync(workspacePath),
+            skillsRemoved,
+            configPruned,
+          },
+        });
+
+        return {
+          ok: true,
+          deleted: {
+            id: deleted.id,
+            adoptId: deleted.adoptId,
+            agentId: deleted.agentId,
+            status: deleted.status,
+          },
+          cleanup: {
+            workspacePath,
+            workspaceRemoved: !existsSync(workspacePath),
+            skillsRemoved,
+            configPruned,
+          },
+        };
       }),
 
     // ── Hermes runtime 专属虾 provisioning（admin 手动发放） ──

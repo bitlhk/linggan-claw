@@ -13,9 +13,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck, Building2 } from "lucide-react";
+import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck, Building2, Trash2 } from "lucide-react";
 import { UsageStatsTab } from "@/components/pages/UsageStatsTab";
 import { TenantAuditTab } from "@/components/pages/TenantAuditTab";
 import { BizAgentsPanel } from "@/components/BizAgentsPanel";
@@ -240,6 +250,7 @@ export default function ClawAdmin() {
   const [aiReviewResult, setAiReviewResult] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
 
   // ── 实例管理 ──
   const { data: listData, isLoading: listLoading, refetch: refetchList } = trpc.claw.adminList.useQuery(
@@ -251,6 +262,12 @@ export default function ClawAdmin() {
     retry: false,
     onSuccess: () => { refetchList(); toast.success("已更新"); },
     onError: (e: any) => toast.error(e?.message || "更新失败"),
+  });
+
+  const deleteMutation = trpc.claw.adminDelete.useMutation({
+    retry: false,
+    onSuccess: () => { setDeleteTarget(null); refetchList(); toast.success("子虾已删除"); },
+    onError: (e: any) => toast.error(e?.message || "删除失败"),
   });
 
   const batchUpdateMutation = trpc.claw.adminBatchUpdate.useMutation({
@@ -611,6 +628,18 @@ export default function ClawAdmin() {
                                 停用
                               </Button>
                             )}
+                            {(row.status === "recycled" || row.status === "failed") && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                disabled={deleteMutation.isPending}
+                                onClick={() => setDeleteTarget(row)}
+                              >
+                                <Trash2 size={13} />
+                                删除
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -875,6 +904,35 @@ export default function ClawAdmin() {
           </section>
         </Tabs>
       </main>
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除这个子虾？</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除后会清理子虾工作空间、个人技能注册和后台设置；协作记录与审计记录会保留。这个操作只允许对已停用或失败的子虾执行。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteTarget && (
+            <div className="rounded-lg border border-red-100 bg-red-50/70 px-3 py-2 text-xs text-red-700">
+              Adopt ID: <span className="font-mono">{deleteTarget.adoptId}</span>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 text-white hover:bg-red-700"
+              disabled={deleteMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteTarget) deleteMutation.mutate({ id: deleteTarget.id });
+              }}
+            >
+              {deleteMutation.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

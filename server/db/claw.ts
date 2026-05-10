@@ -1,5 +1,5 @@
 import { desc, eq, inArray, and, sql } from "drizzle-orm";
-import { users, clawAdoptions, clawAdoptionEvents, clawProfileSettings, InsertClawAdoption, InsertClawAdoptionEvent, InsertClawProfileSetting, ClawAdoption, registrations, lxGroups } from "../../drizzle/schema";
+import { users, clawAdoptions, clawAdoptionEvents, clawProfileSettings, clawCollabSettings, InsertClawAdoption, InsertClawAdoptionEvent, InsertClawProfileSetting, ClawAdoption, registrations, lxGroups } from "../../drizzle/schema";
 import { getDb } from "./connection";
 
 // ============ 灵感龙虾方案（领养实例） ============
@@ -265,6 +265,31 @@ export async function batchUpdateClawAdoptionAdmin(
   if (patch.status) nextPatch.status = patch.status;
 
   await db.update(clawAdoptions).set(nextPatch).where(inArray(clawAdoptions.id, ids));
+}
+
+export async function getClawAdoptionAdminById(id: number): Promise<ClawAdoption | null> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const rows = await db.select().from(clawAdoptions).where(eq(clawAdoptions.id, id)).limit(1);
+  return rows[0] || null;
+}
+
+export async function deleteClawAdoptionAdmin(id: number): Promise<ClawAdoption> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const rows = await db.select().from(clawAdoptions).where(eq(clawAdoptions.id, id)).limit(1);
+  const row = rows[0];
+  if (!row) throw new Error("claw adoption not found");
+  if (!["recycled", "failed"].includes(row.status)) {
+    throw new Error("only recycled or failed claws can be deleted");
+  }
+
+  await db.delete(clawProfileSettings).where(eq(clawProfileSettings.adoptionId, id));
+  await db.delete(clawCollabSettings).where(eq(clawCollabSettings.adoptionId, id));
+  await db.delete(clawAdoptions).where(eq(clawAdoptions.id, id));
+  return row;
 }
 
 
