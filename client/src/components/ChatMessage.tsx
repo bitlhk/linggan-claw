@@ -1,6 +1,7 @@
 import { BrandIcon } from "@/components/BrandIcon";
 import { memo, useState, useRef } from "react";
 import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { formatModelName } from "@/lib/modelDisplay";
 
 export type ToolCallEntry = {
   id: string;
@@ -35,17 +36,6 @@ type ChatMessageProps = {
   contextPercent?: number | null;
   onDelete?: () => void;
 };
-
-function prettyModelName(modelId: string) {
-  const m = String(modelId || "").trim();
-  if (!m) return "default";
-  if (m === "modelarts-maas/glm-5" || m === "glm5/glm-5" || m === "glm5/glm-5.1" || m === "modelarts-maas/glm-5.1") return "GLM-5.1";
-  if (m === "maas/deepseek-v4-flash") return "DeepSeek-V4-Flash";
-  if (m === "deepseek/deepseek-v4-flash") return "DeepSeek-V4-Flash";
-  if (m === "deepseek/deepseek-v4-pro") return "DeepSeek-V4-Pro";
-  if (m.includes("/")) return m.split("/").pop() || m;
-  return m;
-}
 
 // ── Gateway 内部工具内联状态（web_search / memory_search 等）──
 const GATEWAY_TOOL_META: Record<string, { icon: string; label: string }> = {
@@ -518,7 +508,7 @@ function ChatMessageInner({
         {/* 时间戳行 + 朗读/删除 */}
         <p className="text-[10px] mt-1 px-1 font-mono flex items-center gap-1.5 flex-wrap" style={{ color: "var(--oc-text-tertiary)" }}>
           <span>
-            {displayName} · {prettyModelName(modelId)} · {timeLabel}
+            {displayName} · {formatModelName(modelId)} · {timeLabel}
             {usage && usage.input + usage.output > 0 && (
               <> · ↑{usage.input} ↓{usage.output}</>
             )}

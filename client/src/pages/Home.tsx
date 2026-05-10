@@ -26,6 +26,7 @@ import { LINGXIA_SIDEBAR_NAV } from "@/config/navigation";
 import { sidebarIconMap } from "@/config/icons";
 import { applySettings as applyUiSettings, getSettings, subscribeSettings } from "@/lib/settings";
 import { useLingxiaChat } from "@/hooks/useLingxiaChat";
+import { formatModelName, getModelProviderLabel } from "@/lib/modelDisplay";
 
 
 
@@ -291,16 +292,6 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
   const [lingxiaShowToolCalls, setLingxiaShowToolCalls] = useState(true);
   const [lingxiaDisplayName, setLingxiaDisplayName] = useState(brand.name);
   const identityNameRef = useRef<string>("");
-  const prettyLingxiaModelName = (modelId: string) => {
-    const m = String(modelId || "").trim();
-    if (!m) return "default";
-    if (m === "modelarts-maas/glm-5" || m === "glm5/glm-5" || m === "glm5/glm-5.1" || m === "modelarts-maas/glm-5.1") return "GLM-5.1";
-    if (m === "maas/deepseek-v4-flash") return "DeepSeek-V4-Flash";
-    if (m === "deepseek/deepseek-v4-flash") return "DeepSeek-V4-Flash";
-    if (m === "deepseek/deepseek-v4-pro") return "DeepSeek-V4-Pro";
-    if (m.includes("/")) return m.split("/").pop() || m;
-    return m;
-  };
     const [lingxiaMemoryEnabled, setLingxiaMemoryEnabled] = useState<"yes" | "no">("yes");
   const [lingxiaContextTurns, setLingxiaContextTurns] = useState(20);
   const [lingxiaModelId, setLingxiaModelId] = useState("");
@@ -1543,9 +1534,8 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
                     }}
                   >
                     {(availableModels || []).map((m: any) => {
-                      const parts = String(m.id).split("/");
-                      const modelName = parts.length > 1 ? parts[parts.length - 1] : m.id;
-                      const provider = parts.length > 1 ? parts[0] : "";
+                      const modelName = String(m.name || "").trim() || formatModelName(m.id);
+                      const provider = getModelProviderLabel(m.id);
                       return (
                         <SelectItem
                           key={m.id}
@@ -1589,11 +1579,6 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
             right={activePage === "chat" ? (
               <button
                 onClick={() => {
-                  const profile = (clawByAdoptId as any)?.permissionProfile || "starter";
-                  if (profile === "starter") {
-                    toast.info("智能体广场需要 Pro 套餐");
-                    return;
-                  }
                   setCollabOpen(true);
                 }}
                 className={`lingxia-topbar-btn ${collabOpen ? "is-active" : ""}`}
@@ -1635,7 +1620,7 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
                     <div className="rounded-2xl rounded-tl-sm px-4 py-3 text-sm leading-relaxed" style={{ background: "color-mix(in oklab, var(--oc-card) 65%, transparent)", color: "var(--oc-text-primary)" }}>
                       你好，我是 <span style={{ color: "var(--oc-accent, #7c3aed)", fontWeight: "var(--oc-weight-semibold)" }}>{lingxiaDisplayName || brand.name}</span>，有什么想聊的？
                     </div>
-                    <p className="text-[10px] mt-1 px-1 font-mono" style={{ color: "var(--oc-text-tertiary)" }}>{lingxiaDisplayName || brand.name} · {prettyLingxiaModelName(lingxiaModelId || "default")}</p>
+                    <p className="text-[10px] mt-1 px-1 font-mono" style={{ color: "var(--oc-text-tertiary)" }}>{lingxiaDisplayName || brand.name} · {formatModelName(lingxiaModelId)}</p>
                   </div>
                 </div>
               )}

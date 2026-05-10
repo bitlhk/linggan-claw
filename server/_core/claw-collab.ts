@@ -97,7 +97,7 @@ export function registerCollabRoutes(app: express.Express) {
       if (!claw) return;
     }
     if (String((claw as any).permissionProfile || "starter") === "starter") {
-      res.status(403).json({ error: "plus+ only" });
+      res.status(403).json({ error: "collaboration permission required" });
       return;
     }
 
