@@ -65,7 +65,10 @@ export function deriveScheduleTaskFromMessage(message: string): string {
 }
 
 function quickScheduleAction(message: string): { tool: string; args: any } | null {
-  if (/(查看|列出|有哪些|任务列表|删除|取消|关闭|停止).*任务/.test(message)) return null;
+  if (/(查看|列出|有哪些|有啥|任务列表|当前|我的|你有哪些|你有啥).*?(?:定时任务|任务|cron|schedule)/i.test(message)) {
+    return { tool: "list_schedules", args: {} };
+  }
+  if (/(删除|取消|关闭|停止).*任务/.test(message)) return null;
   if (!/(每天|每日|每周|提醒我|定时|定期)/.test(message)) return null;
 
   const timeMatch = message.match(/(凌晨|早上|上午|中午|下午|晚上)?\s*(\d{1,2})\s*(?:点|时)(?:半)?/);
@@ -432,7 +435,8 @@ export async function routeMessage(
   const quickSchedule = quickScheduleAction(message);
   if (quickSchedule) {
     const { executePlatformIntent } = await import("./intent-executor");
-    await executePlatformIntent(adoptId, { type: "schedule_create", ...quickSchedule.args }, writer);
+    const quickScheduleType = quickSchedule.tool === "list_schedules" ? "schedule_list" : "schedule_create";
+    await executePlatformIntent(adoptId, { type: quickScheduleType, ...quickSchedule.args }, writer);
     return true;
   }
 

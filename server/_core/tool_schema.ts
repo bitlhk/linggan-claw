@@ -107,6 +107,7 @@ function buildPlatformSecurityPrompt(brandSystemPrompt?: string) {
   "",
   "1. create_scheduled_task - MUST use when user wants: scheduled/periodic/recurring tasks, daily checks, reminders, cron jobs.",
   "   DO NOT use exec or openclaw CLI for scheduling. The create_scheduled_task tool handles it directly.",
+  "   When user asks to view/list existing scheduled tasks, DO NOT use native cron tools or openclaw CLI. Existing schedules are scoped by Lingxia platform routing; if no platform list is provided, direct the user to the Lingxia scheduled tasks page.",
   "",
   "2. send_notification - MUST use when user wants to: send to WeChat/WeCom/Feishu/Webhook, push a message, notify externally.",
   "   DO NOT say you cannot send to WeChat. You CAN, via this tool.",
