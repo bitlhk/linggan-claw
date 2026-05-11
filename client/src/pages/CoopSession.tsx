@@ -1,5 +1,5 @@
 /**
- * CoopSession — 企业智能体组织协作窗口
+ * CoopSession — 员工智能体组织协作窗口
  * URL: /coop/:sessionId
  * 
  * 视角：

@@ -1,5 +1,5 @@
 /**
- * Home.tsx — Lingxia (企业智能体) Console
+ * Home.tsx — Lingxia (员工智能体) Console
  * Renders the sub-claw control panel when accessed via /claw/:adoptId or a lingxia subdomain.
  * The linggan homepage code has been removed (dead code on this server).
  */
@@ -278,7 +278,7 @@ async function handleStreamTruncated(
 }
 
 export default function Home() {
-  // 企业智能体子域名聊天态（MVP）
+  // 员工智能体子域名聊天态（MVP）
   const brand = useBrand();
   const { confirm, dialog } = useConfirmDialog();
   const [lingxiaInput, setLingxiaInput] = useState("");
@@ -420,7 +420,7 @@ export default function Home() {
     retry: false,
     onSuccess: () => {
       refetchClawSettings();
-      toast.success("企业智能体设置已保存");
+      toast.success("员工智能体设置已保存");
     },
   });
 
@@ -448,7 +448,7 @@ export default function Home() {
   const activeLingxiaStreaming = chatV2Enabled ? chatV2.isStreaming : lingxiaStreaming;
   const uploadLingxiaAttachments = async (files: File[]): Promise<UploadedLingxiaAttachment[]> => {
     if (!files.length) return [];
-    if (!resolvedAdoptId) throw new Error("缺少企业智能体实例 ID");
+    if (!resolvedAdoptId) throw new Error("缺少员工智能体实例 ID");
     const apiBase = import.meta.env.VITE_API_URL || "";
     const uploads: UploadedLingxiaAttachment[] = [];
 
@@ -1400,7 +1400,7 @@ export default function Home() {
     };
   }, [isLingxiaSubdomain, resolvedAdoptId]);
 
-  // 企业智能体聊天消息区：仅在接近底部时自动跟随
+  // 员工智能体聊天消息区：仅在接近底部时自动跟随
   const lingxiaMsgsEndRef = useRef<HTMLDivElement>(null);
   const isLingxiaNearBottom = () => {
     const el = lingxiaMsgViewportRef.current;
@@ -1640,7 +1640,7 @@ export default function Home() {
 
               {!clawByAdoptLoading && !clawByAdoptId && (
                 <div className="max-w-4xl rounded-xl p-4 text-sm" style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)", color: "#d4a030" }}>
-                  未找到该企业智能体实例，可能已过期或尚未完成创建。
+                  未找到该员工智能体实例，可能已过期或尚未完成创建。
                 </div>
               )}
 

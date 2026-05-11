@@ -178,7 +178,7 @@ const TASK_DESCRIPTION_OVERRIDES: Record<string, string> = {
 const TASK_PLACEHOLDERS: Record<string, string> = {
   market_research_brief: "输入金融市场、行业、公司或监管主题，例如：跨境支付最近有什么新的动态？",
   meeting_prep_agent: "输入客户、机构、会议目标和关注方向，例如：准备拜访某银行科技部的会议问题。",
-  ai_topic_insight_ppt: "输入 AI、金融科技或技术趋势主题，例如：把企业智能体落地趋势整理成汇报 PPT。",
+  ai_topic_insight_ppt: "输入 AI、金融科技或技术趋势主题，例如：把员工智能体落地趋势整理成汇报 PPT。",
   ppt_report_writing: "输入汇报主题、受众和风格要求。",
   stock_ppt_report: "输入股票、报告用途和关注维度。",
 };

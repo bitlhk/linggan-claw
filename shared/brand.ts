@@ -2,11 +2,11 @@
  * 品牌配置 — 类型定义 + 默认值
  *
  * 优先级: DB system_configs (brand_*) > 环境变量 (BRAND_*) > 默认值
- * 默认值 = 当前企业智能体硬编码值，不做任何配置时行为完全不变。
+ * 默认值 = 当前员工智能体硬编码值，不做任何配置时行为完全不变。
  */
 
 export interface BrandConfig {
-  /** 产品名（中文），如 "企业智能体" */
+  /** 产品名（中文），如 "员工智能体" */
   name: string;
   /** 产品名（英文），如 "Enterprise Agent" */
   nameEn: string;
@@ -32,9 +32,9 @@ export interface BrandConfig {
   pageTitle: string;
 }
 
-/** 企业智能体默认值 — 与当前硬编码完全一致 */
+/** 员工智能体默认值 — 与当前硬编码完全一致 */
 export const DEFAULT_BRAND: BrandConfig = {
-  name: "企业智能体",
+  name: "员工智能体",
   nameEn: "Enterprise Agent",
   platform: "灵感",
   platformEn: "Linggan",
@@ -45,7 +45,7 @@ export const DEFAULT_BRAND: BrandConfig = {
   systemPrompt:
     "You are Enterprise Agent, an enterprise AI assistant on the Linggan platform.",
   agentIdentity:
-    "你是企业智能体，一个友好、专业、简洁的 AI 助手。",
+    "你是员工智能体，一个友好、专业、简洁的 AI 助手。",
   githubUrl: "https://github.com/bitlhk/linggan-claw",
   pageTitle: "灵感 - AI让灵感触手可及",
 };
@@ -102,7 +102,7 @@ export const BRAND_PRESETS: BrandPreset[] = [
   // ── 默认 ──
   {
     id: "lingxia",
-    label: "企业智能体 (默认)",
+    label: "员工智能体 (默认)",
     description: "灵感平台默认品牌",
     config: { ...DEFAULT_BRAND },
   },

@@ -1,5 +1,5 @@
 /**
- * ClawHome — 企业智能体独立首页（路径模式）
+ * ClawHome — 员工智能体独立首页（路径模式）
  * 风格：白色主题，与灵感官网一致
  * 功能：Hero + 功能介绍 + 创建/进入
  */
@@ -40,7 +40,7 @@ const scaleIn: Variants = {
   visible: { opacity: 1, scale: 1, transition: { duration: 0.6, ease: "easeOut" } },
 };
 
-// ── 企业智能体 SVG Logo 动画组件 ──
+// ── 员工智能体 SVG Logo 动画组件 ──
 function AnimatedLogo({ size = 120 }: { size?: number }) {
   return (
     <motion.svg
@@ -226,7 +226,7 @@ export default function ClawHome() {
         <div className="container flex items-center justify-between h-14 px-6">
           <div className="flex items-center gap-2.5">
             <BrandIcon size={32} />
-            <span className="text-base font-bold text-gray-900">企业智能体平台</span>
+            <span className="text-base font-bold text-gray-900">员工智能体</span>
             <span className="text-xs text-muted-foreground hidden sm:inline">AI Agent Platform</span>
           </div>
           <div className="flex items-center gap-2">
