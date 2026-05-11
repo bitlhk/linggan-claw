@@ -126,7 +126,7 @@ export const clawRouter = router({
           status: claw.status,
           entryUrl: claw.entryUrl,
           expiresAt: claw.expiresAt,
-          displayName: String((profile as any)?.displayName || "灵虾"),
+          displayName: String((profile as any)?.displayName || "员工智能体"),
           permissionProfile: String(claw.permissionProfile || "starter"),
         };
       }),
@@ -149,9 +149,9 @@ export const clawRouter = router({
         }
 
         const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("灵虾实例不存在");
+        if (!claw) throw new Error("智能体实例不存在");
         if (Number(claw.userId) !== Number(ctx.user!.id)) {
-          throw new Error("无权修改该灵虾设置");
+          throw new Error("无权修改该智能体设置");
         }
 
         // 1) 保存到业务设置（用于页面回显）
@@ -247,10 +247,10 @@ export const clawRouter = router({
       .mutation(async ({ ctx, input }) => {
         const row = await getClawAdoptionAdminById(input.id);
         if (!row) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "子虾不存在" });
+          throw new TRPCError({ code: "NOT_FOUND", message: "智能体不存在" });
         }
         if (!["recycled", "failed"].includes(String(row.status))) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "请先停用子虾，再执行删除" });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "请先停用智能体，再执行删除" });
         }
 
         const adoptId = String(row.adoptId || "");
@@ -605,19 +605,19 @@ export const clawRouter = router({
       .mutation(async ({ input, ctx }) => {
         if (input.visibility) {
           await upsertSystemConfig(
-            { key: "claw_visibility", value: input.visibility, description: "灵虾可见性：public/internal" },
+            { key: "claw_visibility", value: input.visibility, description: "员工智能体可见性：public/internal" },
             ctx.user!.id
           );
         }
         if (typeof input.defaultTtlDays === "number") {
           await upsertSystemConfig(
-            { key: "claw_default_ttl_days", value: String(input.defaultTtlDays), description: "灵虾默认有效期（天，0 表示长期有效）" },
+            { key: "claw_default_ttl_days", value: String(input.defaultTtlDays), description: "员工智能体默认有效期（天，0 表示长期有效）" },
             ctx.user!.id
           );
         }
         if (input.defaultProfile) {
           await upsertSystemConfig(
-            { key: "claw_default_profile", value: input.defaultProfile, description: "新领养灵虾默认角色：plus=员工，internal=管理员；底层 runtime 单独映射工具权限" },
+            { key: "claw_default_profile", value: input.defaultProfile, description: "新建员工智能体默认角色：plus=员工，internal=管理员；底层 runtime 单独映射工具权限" },
             ctx.user!.id
           );
         }
@@ -666,7 +666,7 @@ export const clawRouter = router({
       .input(z.object({ adoptId: z.string().min(1).max(64) }))
       .query(async ({ input }) => {
         const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("灵虾实例不存在");
+        if (!claw) throw new Error("智能体实例不存在");
         const settings = await getClawProfileSettings(Number(claw.id));
         // 读取模型覆盖（存在 claw-model-overrides.json）
         let modelOverride = "";
@@ -677,7 +677,7 @@ export const clawRouter = router({
         } catch {}
         const base = settings || {
           adoptionId: Number(claw.id),
-          displayName: "灵虾",
+          displayName: "员工智能体",
           personaPrompt: "",
           stylePreset: "steady_research",
           memoryEnabled: "yes",
@@ -703,9 +703,9 @@ export const clawRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("灵虾实例不存在");
+        if (!claw) throw new Error("智能体实例不存在");
         if (Number(claw.userId) !== Number(ctx.user!.id)) {
-          throw new Error("无权修改该灵虾设置");
+          throw new Error("无权修改该智能体设置");
         }
 
         const { adoptId, ...patch } = input;
@@ -729,11 +729,11 @@ export const clawRouter = router({
       .mutation(async ({ ctx, input }) => {
         const userId = ctx.user!.id;
 
-        // 可见性复用 Demo 权限模型：internal 仅 all 用户可领养
+        // 可见性复用 Demo 权限模型：internal 仅 all 用户可创建
         const clawVisibility = (await getSystemConfigValue("claw_visibility", "internal")).trim() || "internal";
         const userAccessLevel = ((ctx.user as any)?.accessLevel || "public_only") as "public_only" | "all";
         if (clawVisibility === "internal" && userAccessLevel !== "all") {
-          throw new Error("当前灵虾为内部访问，仅内部权限用户可领养");
+          throw new Error("当前员工智能体为内部访问，仅内部权限用户可创建");
         }
 
         // 幂等：已有活跃/创建中实例则直接返回
@@ -841,7 +841,7 @@ export const clawRouter = router({
       .mutation(async ({ input }) => {
         const startedAt = Date.now();
         const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("灵虾实例不存在");
+        if (!claw) throw new Error("智能体实例不存在");
 
         // ── 每日对话额度检查 ──
         const profile = String(claw.permissionProfile || "starter");
@@ -1004,12 +1004,12 @@ export const clawRouter = router({
               durationMs: Date.now() - startedAt,
               error: msg,
             });
-            throw new Error(`灵虾对话引擎调用失败：${msg}`);
+            throw new Error(`员工智能体对话引擎调用失败：${msg}`);
           }
         }
 
         // 默认 mock
-        const reply = `🦞 灵虾已收到：${input.message}\n\n（对话引擎接入中，下一步将切到真实 OpenClaw 会话）`;
+        const reply = `员工智能体已收到：${input.message}\n\n（对话引擎接入中，下一步将切到真实 OpenClaw 会话）`;
         return {
           ok: true,
           adoptId: input.adoptId,
@@ -1023,12 +1023,12 @@ export const clawRouter = router({
     // ── 技能管理（三层架构）────────────────────────────────────
     // Layer1: openclaw 系统内置  /usr/lib/node_modules/openclaw/skills/
     // Layer2: 灵感公共金融技能  /root/.openclaw/skills-shared/
-    // Layer3: 子虾私有技能      /root/.openclaw/workspace-lingganclaw/{agentId}/skills/
+    // Layer3: 智能体私有技能      /root/.openclaw/workspace-lingganclaw/{agentId}/skills/
     listSkills: publicProcedure
       .input(z.object({ adoptId: z.string().min(1).max(64) }))
       .query(async ({ input }) => {
         const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("灵虾实例不存在");
+        if (!claw) throw new Error("智能体实例不存在");
 
         // Hermes runtime (lgh-*) 走专属 skill provider，读 /root/.hermes/profiles/<name>/skills/
         if (String(input.adoptId).startsWith("lgh-")) {
@@ -1203,7 +1203,7 @@ export const clawRouter = router({
       }))
       .mutation(async ({ input, ctx }) => {
         const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("灵虾实例不存在");
+        if (!claw) throw new Error("智能体实例不存在");
         if (String(claw.userId) !== String(ctx.user!.id)) throw new Error("无权操作");
 
         const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
@@ -1232,7 +1232,7 @@ export const clawRouter = router({
 
         const userSkillsBase = `${openClawWorkspaceDir(runtimeAgentId)}/skills`;
         if (input.enable) {
-          // 使用软链接指向共享源目录，改技能时子虾自动获得最新版本，无需重新 toggle
+          // 使用软链接指向共享源目录，改技能时智能体自动获得最新版本，无需重新 toggle
           runCmd(`mkdir -p "${userSkillsBase}" && rm -rf "${userSkillLink}" 2>/dev/null || true && ln -sfn "${srcDir}" "${userSkillLink}"`);
         } else {
           // 删除软链接（不影响源目录）
@@ -1254,7 +1254,7 @@ export const clawRouter = router({
       }))
       .mutation(async ({ input, ctx }) => {
         const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("灵虾实例不存在");
+        if (!claw) throw new Error("智能体实例不存在");
         if (String(claw.userId) !== String(ctx.user!.id)) throw new Error("无权操作");
 
         const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";
@@ -1284,7 +1284,7 @@ export const clawRouter = router({
       }))
       .mutation(async ({ input, ctx }) => {
         const claw = await getClawByAdoptId(input.adoptId);
-        if (!claw) throw new Error("灵虾实例不存在");
+        if (!claw) throw new Error("智能体实例不存在");
         if (String(claw.userId) !== String(ctx.user!.id)) throw new Error("无权操作");
 
         const remoteHost = process.env.CLAW_REMOTE_HOST || "127.0.0.1";

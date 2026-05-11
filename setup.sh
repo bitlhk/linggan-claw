@@ -316,7 +316,7 @@ SQL
     echo "HERMES_HOME=$HOME/.hermes"
     echo "LINGXIA_INTERNAL_BASE_URL=http://127.0.0.1:$PORT_VALUE"
     echo ""
-    echo "# 灵虾路由"
+    echo "# 员工智能体路由"
     [[ -n "$DEMO_DOMAIN" ]] && echo "LINGGAN_CLAW_BASE_DOMAIN=$DEMO_DOMAIN"
     [[ -n "$DEMO_DOMAIN" ]] && echo "DEMO_ROUTE_DOMAIN=$DEMO_DOMAIN"
     [[ -n "$COOKIE_DOMAIN" ]] && echo "LINGGAN_CLAW_ENTRY_SCHEME=https" || echo "LINGGAN_CLAW_ENTRY_SCHEME=http"
@@ -366,7 +366,7 @@ elif [[ -n "$OPENCLAW_BIN" ]]; then
   OC_CONFIG="$OC_HOME/openclaw.json"
 
   if [[ -f "$OC_CONFIG" && -n "$GW_TOKEN" ]]; then
-    echo "  正在同步灵虾配置到 OpenClaw..."
+    echo "  正在同步员工智能体配置到 OpenClaw..."
     python3 << PYEOF
 import json
 from pathlib import Path
@@ -442,7 +442,7 @@ fi
 
 echo ""
 echo "  ─────────────────────────────────"
-echo "  灵虾初始化完成！"
+echo "  员工智能体初始化完成！"
 echo "  ─────────────────────────────────"
 echo ""
 echo "  启动方式："

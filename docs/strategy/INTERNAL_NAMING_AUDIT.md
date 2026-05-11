@@ -90,7 +90,7 @@ client/src/index.css
 示例：
 
 ```text
-tests/smoke/lingxia/
+tests/smoke/employee-agent/
 docs/testing/LINGXIA_UPGRADE_SMOKE.md
 scripts/smoke/lingxia-smoke.sh
 ```
@@ -390,7 +390,7 @@ OpenClaw gateway / workspace / model
 1. 改注释和脚本文案残留。
 2. 新增 `useAgentChat` / `AgentChatMessage` alias，不强制大规模 rename。
 3. Financial Harness 文案去 `Lingxia`，但路径和 env 先兼容。
-4. smoke 目录暂不移动，只把标题从 `Lingxia Smoke` 改为 `Employee Agent Smoke`。
+4. smoke 主目录已迁移到 `tests/smoke/employee-agent/`，旧 `tests/smoke/lingxia/` 保留 wrapper 入口。
 
 暂时不要动：
 

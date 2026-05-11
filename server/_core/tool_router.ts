@@ -530,7 +530,7 @@ export interface ToolContext {
   userId:   number;
   permissionProfile: "starter" | "plus" | "internal";
   sessionKey: string;
-  /** 子虾 workspace 目录（用于存放沙箱导出文件） */
+  /** 智能体 workspace 目录（用于存放沙箱导出文件） */
   workspaceDir?: string;
   /** 进度/状态事件发送函数（可选，SSE 可用时传入） */
   sendEvent?: (event: string, data: object) => void;
@@ -684,7 +684,7 @@ export async function routeTool(
       stderr = raw.stderr;
       truncated = raw.truncated;
 
-      // 将沙箱产出文件移至子虾 workspace sandbox-files/ 目录
+      // 将沙箱产出文件移至智能体 workspace sandbox-files/ 目录
       if (raw.outputFiles && raw.outputFiles.length > 0 && tmpOutputDir) {
         const workspaceDir = ctx.workspaceDir;
         if (workspaceDir) {

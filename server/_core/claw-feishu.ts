@@ -376,7 +376,7 @@ export function registerFeishuRoutes(app: express.Express) {
       if (!adoptId) return res.status(400).json({ error: "adoptId required" });
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
-      const result = await sendFeishuMessage(adoptId, "灵虾频道测试\n\n飞书频道已连接，后续定时任务可投递到这里。");
+      const result = await sendFeishuMessage(adoptId, "员工智能体频道测试\n\n飞书频道已连接，后续定时任务可投递到这里。");
       res.json(result.ok ? { ok: true } : { ok: false, error: result.error });
     } catch (error: any) {
       res.status(500).json({ ok: false, error: error?.message || "feishu test failed" });

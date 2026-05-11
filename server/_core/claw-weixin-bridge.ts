@@ -165,7 +165,7 @@ function extractText(msg: any): string {
   return "";
 }
 
-// 单个子虾的 polling loop
+// 单个智能体的 polling loop
 async function pollLoop(adoptId: string): Promise<void> {
   const acct = loadAccount(adoptId);
   if (!acct?.token) return;
@@ -299,8 +299,8 @@ async function pollLoop(adoptId: string): Promise<void> {
   console.log(`[WEIXIN-BRIDGE] ${adoptId} poll loop exited`);
 }
 
-// 启动所有已绑定子虾的 polling
-/** 外部调用：给指定子虾的微信用户发消息（供 platform tool 使用） */
+// 启动所有已绑定智能体的 polling
+/** 外部调用：给指定智能体的微信用户发消息（供 platform tool 使用） */
 // 跟踪已启动的 polling，防止重复启动
 const activePolls = new Set<string>();
 
@@ -310,7 +310,7 @@ export function stopPollForAccount(adoptId: string): void {
   console.log(`[WEIXIN-BRIDGE] stopped polling for ${adoptId}`);
 }
 
-/** 外部调用：为新绑定的子虾启动 polling（绑定成功时调用，无需重启服务） */
+/** 外部调用：为新绑定的智能体启动 polling（绑定成功时调用，无需重启服务） */
 export function startPollForAccount(adoptId: string): void {
   if (activePolls.has(adoptId)) return; // 已在 polling
   const acct = loadAccount(adoptId);
@@ -322,7 +322,7 @@ export function startPollForAccount(adoptId: string): void {
 
 export async function sendMessageToWeixin(adoptId: string, text: string): Promise<void> {
   const acct = loadAccount(adoptId);
-  if (!acct?.token) throw new Error("该子虾未绑定微信");
+  if (!acct?.token) throw new Error("该智能体未绑定微信");
   if (!acct.lastChatId) throw new Error("尚未收到过微信消息，无法回复");
   const trimmed = text.length > 4000 ? text.slice(0, 3990) + "\n..." : text;
   await sendToWeixin(acct, acct.lastChatId, trimmed, acct.lastContextToken || "");

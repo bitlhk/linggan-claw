@@ -2,7 +2,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const POLICY_FILE = ".lingxia-policies.json";
+const POLICY_SOURCE = "financial-agent-harness-manifest";
+const LEGACY_POLICY_SOURCE = "lingxia-financial-harness-manifest";
+const POLICY_FILE = process.env.FIN_HARNESS_POLICY_FILE || ".financial-agent-policies.json";
+const LEGACY_POLICY_FILE = ".lingxia-policies.json";
 const PUBLIC_SEARCH_MCPS = new Set(["brave", "bocha", "tavily", "web-search"]);
 const READ_TOOLS = new Set(["read", "grep", "glob", "search"]);
 const WRITE_TOOLS = new Set(["write", "edit", "bash", "shell", "delete", "move"]);
@@ -113,7 +116,7 @@ function policyFromSubject(manifest, subject, subjectType) {
   const allowedMcpServers = mcpIds(subject.mcpServers);
   return {
     version: 1,
-    source: "lingxia-financial-harness-manifest",
+    source: POLICY_SOURCE,
     manifestId: manifest.id,
     manifestVersion: manifest.version,
     subjectType,
@@ -147,7 +150,7 @@ function canonicalPolicy(policy) {
 function canonicalPolicyFile(profileRef, policies, updatedAt = "1970-01-01T00:00:00.000Z") {
   return {
     version: 1,
-    source: "lingxia-financial-harness-manifest",
+    source: POLICY_SOURCE,
     profileRef,
     updatedAt,
     policies: policies
@@ -162,10 +165,24 @@ function comparablePolicyFile(profileRef, policies) {
   return file;
 }
 
-function equalPolicyFiles(expected, actual) {
-  const normalized = actual && typeof actual === "object" ? { ...actual } : {};
+function normalizePolicySource(value) {
+  if (value === LEGACY_POLICY_SOURCE) return POLICY_SOURCE;
+  return value;
+}
+
+function normalizePolicyFileForCompare(file) {
+  const normalized = file && typeof file === "object" ? { ...file } : {};
   delete normalized.updatedAt;
-  return JSON.stringify(expected) === JSON.stringify(normalized);
+  normalized.source = normalizePolicySource(normalized.source);
+  normalized.policies = asArray(normalized.policies).map((policy) => ({
+    ...policy,
+    source: normalizePolicySource(policy?.source),
+  }));
+  return normalized;
+}
+
+function equalPolicyFiles(expected, actual) {
+  return JSON.stringify(normalizePolicyFileForCompare(expected)) === JSON.stringify(normalizePolicyFileForCompare(actual));
 }
 
 function validatePolicy(policy, where, errors, warnings) {
@@ -214,6 +231,8 @@ function buildProfilePolicies(seed) {
 function summarizeProfile(profileRef, policies, args, report) {
   const profileDir = path.join(args.profileRoot, profileRef);
   const policyPath = path.join(profileDir, POLICY_FILE);
+  const legacyPolicyPath = path.join(profileDir, LEGACY_POLICY_FILE);
+  const readPolicyPath = fs.existsSync(policyPath) ? policyPath : legacyPolicyPath;
   const configPath = path.join(profileDir, "config.yaml");
   const exists = fs.existsSync(profileDir);
   const configText = exists ? readTextIfExists(configPath) : "";
@@ -229,14 +248,14 @@ function summarizeProfile(profileRef, policies, args, report) {
     report.warnings.push(`${profileRef}: missing config.yaml`);
   }
 
-  if (fs.existsSync(policyPath)) {
+  if (fs.existsSync(readPolicyPath)) {
     try {
-      existingPolicy = readJson(policyPath);
+      existingPolicy = readJson(readPolicyPath);
       policyStatus = equalPolicyFiles(expectedComparable, existingPolicy) ? "ok" : "drift";
-      if (policyStatus === "drift") report.errors.push(`${profileRef}: ${POLICY_FILE} differs from manifest-derived policy`);
+      if (policyStatus === "drift") report.errors.push(`${profileRef}: ${path.basename(readPolicyPath)} differs from manifest-derived policy`);
     } catch (error) {
       policyStatus = "invalid";
-      report.errors.push(`${profileRef}: cannot parse ${POLICY_FILE}: ${error.message}`);
+      report.errors.push(`${profileRef}: cannot parse ${path.basename(readPolicyPath)}: ${error.message}`);
     }
   } else {
     report.warnings.push(`${profileRef}: ${POLICY_FILE} is missing`);

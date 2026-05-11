@@ -4,24 +4,29 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_SKILL_ROOT = "/home/ubuntu/.lingxia/hermes-runtime-skills/anthropic-financial-services/current";
+const DEFAULT_SKILL_ROOT = "/home/ubuntu/.employee-agent/hermes-runtime-skills/anthropic-financial-services/current";
+const LEGACY_SKILL_ROOT = "/home/ubuntu/.lingxia/hermes-runtime-skills/anthropic-financial-services/current";
 const DEFAULT_PROFILE_ROOT = "/home/ubuntu/.hermes/profiles";
 const DEFAULT_ENDPOINTS = ["http://127.0.0.1:18650", "http://127.0.0.1:8670"];
+const DEFAULT_EXECUTOR_SERVICE = "financial-agent-harness-executor.service";
+const LEGACY_EXECUTOR_SERVICE = "lingxia-financial-harness-executor.service";
 
 function parseArgs(argv) {
   const args = {
     manifest: process.env.FIN_HARNESS_MANIFEST_PATH || "",
     schemaRoot: process.env.FIN_HARNESS_SCHEMA_ROOT || "",
-    skillRoot: process.env.HERMES_RUNTIME_SKILL_ROOT || DEFAULT_SKILL_ROOT,
+    skillRoot: process.env.HERMES_RUNTIME_SKILL_ROOT || (fs.existsSync(DEFAULT_SKILL_ROOT) || !fs.existsSync(LEGACY_SKILL_ROOT) ? DEFAULT_SKILL_ROOT : LEGACY_SKILL_ROOT),
     profileRoot: process.env.HERMES_PROFILE_ROOT || DEFAULT_PROFILE_ROOT,
     endpoint: process.env.TASK_WORKBENCH_HARNESS_ENDPOINT
+      || process.env.FIN_HARNESS_ENDPOINT
       || process.env.LINGXIA_FIN_HARNESS_ENDPOINT
       || process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT
+      || process.env.FIN_HARNESS_EXECUTOR_ENDPOINT
       || process.env.LINGXIA_FIN_HARNESS_EXECUTOR_ENDPOINT
       || "",
     mode: "runtime",
     report: "",
-    service: "lingxia-financial-harness-executor.service",
+    service: process.env.FIN_HARNESS_EXECUTOR_SERVICE || process.env.LINGXIA_FIN_HARNESS_EXECUTOR_SERVICE || process.env.LINGXIA_FIN_HARNESS_SERVICE || DEFAULT_EXECUTOR_SERVICE,
     strict: false,
     json: false,
     skipEndpoint: false,
@@ -246,24 +251,32 @@ function tokenFromEnv() {
     || "";
 }
 
+function executorServiceCandidates(service) {
+  return service === DEFAULT_EXECUTOR_SERVICE ? [DEFAULT_EXECUTOR_SERVICE, LEGACY_EXECUTOR_SERVICE] : [service];
+}
+
 function tokenFromServiceEnv(service) {
   if (!service || process.platform === "win32") return "";
-  const completed = spawnSync("systemctl", ["--user", "show", service, "-p", "Environment"], {
-    encoding: "utf8",
-    timeout: 10_000,
-  });
-  if (completed.status !== 0) return "";
-  const raw = String(completed.stdout || "").trim().replace(/^Environment=/, "");
-  const env = {};
-  for (const part of raw.split(/\s+/)) {
-    const index = part.indexOf("=");
-    if (index > 0) env[part.slice(0, index)] = part.slice(index + 1);
+  for (const candidate of executorServiceCandidates(service)) {
+    const completed = spawnSync("systemctl", ["--user", "show", candidate, "-p", "Environment"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    if (completed.status !== 0) continue;
+    const raw = String(completed.stdout || "").trim().replace(/^Environment=/, "");
+    const env = {};
+    for (const part of raw.split(/\s+/)) {
+      const index = part.indexOf("=");
+      if (index > 0) env[part.slice(0, index)] = part.slice(index + 1);
+    }
+    const token = env.TASK_WORKBENCH_HARNESS_TOKEN
+      || env.TASK_WORKBENCH_HARNESS_EXECUTOR_TOKEN
+      || env.FIN_HARNESS_EXECUTOR_KEY
+      || env.HERMES_HTTP_KEY
+      || "";
+    if (token) return token;
   }
-  return env.TASK_WORKBENCH_HARNESS_TOKEN
-    || env.TASK_WORKBENCH_HARNESS_EXECUTOR_TOKEN
-    || env.FIN_HARNESS_EXECUTOR_KEY
-    || env.HERMES_HTTP_KEY
-    || "";
+  return "";
 }
 
 function checkService(report, args) {
@@ -275,15 +288,22 @@ function checkService(report, args) {
     pushCheck(report, "executor service", "warn", "systemd check skipped on Windows");
     return;
   }
-  const completed = spawnSync("systemctl", ["--user", "is-active", args.service], {
-    encoding: "utf8",
-    timeout: 10_000,
-  });
+  const serviceCandidates = executorServiceCandidates(args.service);
+  let completed;
+  let checkedService = args.service;
+  for (const service of serviceCandidates) {
+    completed = spawnSync("systemctl", ["--user", "is-active", service], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    checkedService = service;
+    if (completed.status === 0) break;
+  }
   const state = String(completed.stdout || completed.stderr || "").trim();
   if (completed.status === 0 && state === "active") {
-    pushCheck(report, "executor service", "pass", `${args.service} active`);
+    pushCheck(report, "executor service", "pass", `${checkedService} active`);
   } else {
-    pushCheck(report, "executor service", "fail", `${args.service} is ${state || "not active"}`);
+    pushCheck(report, "executor service", "fail", `${checkedService} is ${state || "not active"}`);
   }
 }
 

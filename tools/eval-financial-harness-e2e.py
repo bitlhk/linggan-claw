@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import argparse
+import os
 import subprocess
 import time
 import urllib.request
@@ -65,16 +66,30 @@ CASES = [
 
 
 def service_token() -> str:
-    raw = subprocess.check_output(
-        ["systemctl", "--user", "show", "lingxia-financial-harness-executor.service", "-p", "Environment"],
-        text=True,
-    )
-    env: dict[str, str] = {}
-    for part in raw.strip().removeprefix("Environment=").split(" "):
-        if "=" in part:
-            key, value = part.split("=", 1)
-            env[key] = value
-    return env.get("FIN_HARNESS_EXECUTOR_KEY") or env.get("HERMES_HTTP_KEY") or ""
+    service_names = [
+        os.getenv("FIN_HARNESS_EXECUTOR_SERVICE", ""),
+        os.getenv("LINGXIA_FIN_HARNESS_EXECUTOR_SERVICE", ""),
+        os.getenv("LINGXIA_FIN_HARNESS_SERVICE", ""),
+        "financial-agent-harness-executor.service",
+        "lingxia-financial-harness-executor.service",
+    ]
+    for service_name in dict.fromkeys(name for name in service_names if name):
+        try:
+            raw = subprocess.check_output(
+                ["systemctl", "--user", "show", service_name, "-p", "Environment"],
+                text=True,
+            )
+        except subprocess.CalledProcessError:
+            continue
+        env: dict[str, str] = {}
+        for part in raw.strip().removeprefix("Environment=").split(" "):
+            if "=" in part:
+                key, value = part.split("=", 1)
+                env[key] = value
+        token = env.get("FIN_HARNESS_EXECUTOR_KEY") or env.get("HERMES_HTTP_KEY") or ""
+        if token:
+            return token
+    return ""
 
 
 def parse_sse(text: str) -> list[dict[str, Any]]:

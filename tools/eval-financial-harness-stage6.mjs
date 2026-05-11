@@ -4,8 +4,10 @@ import path from "node:path";
 
 const endpoint = (
   process.env.TASK_WORKBENCH_HARNESS_ENDPOINT
+  || process.env.FIN_HARNESS_ENDPOINT
   || process.env.LINGXIA_FIN_HARNESS_ENDPOINT
   || process.env.TASK_WORKBENCH_HARNESS_EXECUTOR_ENDPOINT
+  || process.env.FIN_HARNESS_EXECUTOR_ENDPOINT
   || process.env.LINGXIA_FIN_HARNESS_EXECUTOR_ENDPOINT
   || "http://127.0.0.1:8670"
 ).replace(/\/+$/, "");

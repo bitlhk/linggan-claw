@@ -304,7 +304,7 @@ export function registerCronRoutes(app: express.Express) {
 
       const existing = await openClawCronProvider.listJobs(handle);
       if (existing.ok && existing.value.length >= 5) {
-        return res.status(400).json({ error: `每个子虾最多 5 个定时任务，当前已有 ${existing.value.length} 个` });
+        return res.status(400).json({ error: `每个智能体最多 5 个定时任务，当前已有 ${existing.value.length} 个` });
       }
 
       const result = await openClawCronProvider.addJob(handle, input);

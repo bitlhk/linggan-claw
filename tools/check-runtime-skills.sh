@@ -2,7 +2,12 @@
 set -euo pipefail
 
 MANIFEST_PATH="${1:-server/_core/agent/data/agent-manifests.seed.json}"
-SKILL_ROOT="${HERMES_RUNTIME_SKILL_ROOT:-/home/ubuntu/.lingxia/hermes-runtime-skills/anthropic-financial-services/current}"
+DEFAULT_SKILL_ROOT="/home/ubuntu/.employee-agent/hermes-runtime-skills/anthropic-financial-services/current"
+LEGACY_SKILL_ROOT="/home/ubuntu/.lingxia/hermes-runtime-skills/anthropic-financial-services/current"
+SKILL_ROOT="${HERMES_RUNTIME_SKILL_ROOT:-$DEFAULT_SKILL_ROOT}"
+if [[ -z "${HERMES_RUNTIME_SKILL_ROOT:-}" && ! -d "$SKILL_ROOT" && -d "$LEGACY_SKILL_ROOT" ]]; then
+  SKILL_ROOT="$LEGACY_SKILL_ROOT"
+fi
 
 if [[ ! -f "$MANIFEST_PATH" ]]; then
   echo "manifest file not found: $MANIFEST_PATH" >&2

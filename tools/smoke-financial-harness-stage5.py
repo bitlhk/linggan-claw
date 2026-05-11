@@ -16,6 +16,8 @@ EXECUTOR_PATH = ROOT / "financial-harness-executor.py"
 RECONCILE_PATH = ROOT / "reconcile-hermes-profile-policy.mjs"
 MANIFEST_PATH = ROOT / "agent-manifests.seed.json"
 DEFAULT_PROFILE_ROOT = Path("/home/ubuntu/.hermes/profiles")
+POLICY_FILE = ".financial-agent-policies.json"
+LEGACY_POLICY_FILE = ".lingxia-policies.json"
 
 
 def load_executor():
@@ -141,14 +143,16 @@ def copy_profile_root(source: Path, target: Path) -> None:
         src_dir = source / profile
         dst_dir = target / profile
         dst_dir.mkdir(parents=True, exist_ok=True)
-        for name in ["config.yaml", ".lingxia-policies.json"]:
+        for name in ["config.yaml", POLICY_FILE, LEGACY_POLICY_FILE]:
             src = src_dir / name
             if src.exists():
                 shutil.copy2(src, dst_dir / name)
 
 
 def run_policy_drift_smoke(profile_root: Path) -> dict[str, Any]:
-    source_policy = profile_root / "market-note-writer" / ".lingxia-policies.json"
+    source_policy = profile_root / "market-note-writer" / POLICY_FILE
+    if not source_policy.exists():
+        source_policy = profile_root / "market-note-writer" / LEGACY_POLICY_FILE
     if not source_policy.exists():
         return {
             "id": "policy_drift_detected",
@@ -156,10 +160,10 @@ def run_policy_drift_smoke(profile_root: Path) -> dict[str, Any]:
             "skipped": True,
             "error": f"policy root not available: {profile_root}",
         }
-    with tempfile.TemporaryDirectory(prefix="lingxia-stage5-policy-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="financial-agent-stage5-policy-") as tmp:
         tmp_root = Path(tmp)
         copy_profile_root(profile_root, tmp_root)
-        policy_file = tmp_root / "market-note-writer" / ".lingxia-policies.json"
+        policy_file = tmp_root / "market-note-writer" / source_policy.name
         data = json.loads(policy_file.read_text(encoding="utf-8"))
         data["policies"][0]["allowedMcpServers"] = ["brave"]
         policy_file.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

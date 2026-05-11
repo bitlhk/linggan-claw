@@ -261,7 +261,7 @@ function buildPMTools() {
     type: "function" as const,
     function: {
       name: "create_skill",
-      description: "根据用户需求生成一个可安装到当前子虾工作空间的技能。只在用户明确要求创建技能/插件/工具包时调用。",
+      description: "根据用户需求生成一个可安装到当前智能体工作空间的技能。只在用户明确要求创建技能/插件/工具包时调用。",
       parameters: {
         type: "object",
         properties: {

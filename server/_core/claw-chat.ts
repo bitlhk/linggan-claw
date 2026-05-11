@@ -287,7 +287,7 @@ export function registerChatStreamRoutes(app: express.Express) {
       }
     }
 
-    // 最小执行审计：记录谁在什么子虾上发起了什么请求（消息截断）
+    // 最小执行审计：记录谁在什么智能体上发起了什么请求（消息截断）
     appendLogAsync("claw-exec.log", {
       ts: new Date().toISOString(),
       event: "chat_stream_request",

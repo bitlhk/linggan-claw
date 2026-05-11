@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Lingxia Financial Harness API.
+Financial Agent Harness API.
 
-Runs on the SG Hermes node. It exposes one API to Lingxia Shanghai:
+Runs on the SG Hermes node. It exposes one API to the Employee Agent control plane:
 route asks the local Financial Harness profile for a plan; execute runs that
 plan against local Hermes worker profiles.
 """
@@ -31,10 +31,14 @@ if not AUTH_TOKEN:
     raise RuntimeError("FIN_HARNESS_EXECUTOR_KEY or HERMES_HTTP_KEY must be set; refusing to start")
 HERMES_KEY = os.getenv("HERMES_HTTP_KEY") or AUTH_TOKEN
 PLANNER_ENDPOINT = os.getenv("FIN_HARNESS_PLANNER_ENDPOINT", "http://127.0.0.1:8650").rstrip("/")
-SKILL_ROOT = Path(os.getenv(
-    "HERMES_RUNTIME_SKILL_ROOT",
-    "/home/ubuntu/.lingxia/hermes-runtime-skills/anthropic-financial-services/current",
-))
+DEFAULT_SKILL_ROOT = Path("/home/ubuntu/.employee-agent/hermes-runtime-skills/anthropic-financial-services/current")
+LEGACY_SKILL_ROOT = Path("/home/ubuntu/.lingxia/hermes-runtime-skills/anthropic-financial-services/current")
+if os.getenv("HERMES_RUNTIME_SKILL_ROOT"):
+    SKILL_ROOT = Path(os.getenv("HERMES_RUNTIME_SKILL_ROOT", ""))
+elif DEFAULT_SKILL_ROOT.exists() or not LEGACY_SKILL_ROOT.exists():
+    SKILL_ROOT = DEFAULT_SKILL_ROOT
+else:
+    SKILL_ROOT = LEGACY_SKILL_ROOT
 MANIFEST_PATH = Path(os.getenv(
     "FIN_HARNESS_MANIFEST_PATH",
     str(Path(__file__).with_name("agent-manifests.seed.json")),
@@ -883,7 +887,7 @@ def search_pack_source_research(
         "confidence": search_confidence(results, errors),
         "normalizedQuery": {"canonicalQuery": plain_text(original_prompt, 180)},
         "searchPlan": {
-            "planner": {"mode": "lingxia-rule-plus-fallback"},
+            "planner": {"mode": "financial-agent-rule-plus-fallback"},
             "rationale": "Generate several focused public-search queries, rank source quality, and fall back across providers when evidence is thin.",
             "queries": queries,
             "officialSourceHints": ["regulator", "exchange", "company official site", "annual report", "industry white paper"],
@@ -1117,7 +1121,7 @@ def build_docx_artifact(prompt: str, output: str, stage: dict[str, Any], search_
     styles["Normal"].font.name = "Microsoft YaHei"
     styles["Normal"].font.size = Pt(10.5)
     document.add_heading(title, level=0)
-    document.add_paragraph("由灵虾 Financial Agent 生成，供内部研究、讨论和人工复核使用。")
+    document.add_paragraph("由 Financial Agent Harness 生成，供内部研究、讨论和人工复核使用。")
 
     for raw_line in output.splitlines():
         line = raw_line.strip()
@@ -1244,7 +1248,7 @@ def build_stage_input(
         ])
 
     return "\n".join([
-        "# Lingxia Financial Harness Worker Input",
+        "# Financial Agent Harness Worker Input",
         "",
         "You are executing one stage selected by the Financial Harness.",
         "Follow your profile SOUL.md, allowed tools, and the runtime skills below.",
@@ -1529,7 +1533,7 @@ def route(payload: dict[str, Any]) -> dict[str, Any]:
     }, ensure_ascii=False)
     create = http_json(f"{PLANNER_ENDPOINT}/v1/runs", {
         "input": planner_input,
-        "session_id": f"lingxia_financial_harness_{int(time.time())}_{os.getpid()}",
+        "session_id": f"financial_agent_harness_{int(time.time())}_{os.getpid()}",
     }, timeout=30)
     run_id = create.get("run_id") or create.get("runId")
     if not run_id:

@@ -363,7 +363,7 @@ export function registerMiscRoutes(app: express.Express) {
   });
 
 
-  // ── 子虾使用量统计（从 claw-exec.log 解析）──
+  // ── 智能体使用量统计（从 claw-exec.log 解析）──
   app.get("/api/claw/admin/usage-stats", async (req, res) => {
     try {
       // 简单鉴权
