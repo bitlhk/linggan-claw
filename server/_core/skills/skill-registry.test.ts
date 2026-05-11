@@ -318,6 +318,42 @@ describe("FileSkillRegistry.reconcile", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("destroys generated runtime aliases so discovery cannot recreate the registry entry", async () => {
+    const root = tempRoot();
+    try {
+      const source = path.join(root, "data", "generated-skills", "lgc-test", "skill-md");
+      const runtime = path.join(root, ".openclaw", "workspace-trial_lgc-test", "skills", "skill-md");
+      const alias = path.join(root, ".openclaw", "workspace-trial_lgc-test", "skills", "smoke-original");
+      mkdirSync(source, { recursive: true });
+      mkdirSync(runtime, { recursive: true });
+      mkdirSync(alias, { recursive: true });
+      writeFileSync(path.join(source, "SKILL.md"), "# Smoke Skill\n\nReturns SKILL_OK.\n", "utf-8");
+      writeFileSync(path.join(runtime, "SKILL.md"), "# Smoke Skill\n\nReturns SKILL_OK.\n", "utf-8");
+      writeFileSync(path.join(alias, "SKILL.md"), "# Smoke Skill\n\nReturns SKILL_OK.\n", "utf-8");
+
+      const existing = makeSkill(root, "skill-md");
+      existing.source = {
+        kind: "generated",
+        skillId: "skill-md",
+        displayName: "Smoke Skill",
+        sourcePath: source,
+      };
+      existing.sync.runtimePath = runtime;
+      writeJson(path.join(root, "data", "skill-registry.json"), [existing]);
+
+      const destroyed = await registry(root).destroy("lgc-test", "skill-md");
+      expect(destroyed.ok).toBe(true);
+      expect(existsSync(source)).toBe(false);
+      expect(existsSync(runtime)).toBe(false);
+      expect(existsSync(alias)).toBe(false);
+      const rows = JSON.parse(readFileSync(path.join(root, "data", "skill-registry.json"), "utf-8"));
+      expect(rows).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("uses OpenClaw agent.workspace as runtime skills directory and syncs agent skill allowlist", async () => {
     const root = tempRoot();
     try {

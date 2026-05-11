@@ -5,6 +5,15 @@ import path from "path";
 import { parseSkillSourceDirectory, parseSkillSourceFiles } from "./skill-source";
 
 describe("parseSkillSourceFiles", () => {
+  it("uses fallback name for root-level SKILL.md instead of skill-md", () => {
+    const parsed = parseSkillSourceFiles([
+      { path: "SKILL.md", content: "# Smoke Skill\n\nReturns SKILL_OK." },
+    ], "smoke-skill-123");
+
+    expect(parsed.skillId).toBe("smoke-skill-123");
+    expect(parsed.displayName).toBe("Smoke Skill");
+  });
+
   it("parses generated skill files with SKILL.md", () => {
     const parsed = parseSkillSourceFiles([
       { path: "SKILL.md", content: "# 财报摘要助手\n\n帮助用户整理财报重点。" },

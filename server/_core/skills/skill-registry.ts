@@ -23,6 +23,7 @@ import type {
 } from "../../../shared/types/skill";
 import { APP_ROOT, OPENCLAW_HOME, bumpSessionEpoch, clearAgentSessionsCache, resolveRuntimeAgentId } from "../helpers";
 import { skillInstaller, type SkillInstaller } from "./skill-installer";
+import { parseSkillSourceDirectory } from "./skill-source";
 
 type RegistryOptions = {
   appRoot?: string;
@@ -168,6 +169,10 @@ function compareVersionString(a?: string, b?: string): number {
     if (li !== ri) return li > ri ? 1 : -1;
   }
   return left.localeCompare(right);
+}
+
+function normalizeSkillDisplayName(value?: string): string {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function runtimeIsStale(source: FileSummary, runtime: FileSummary, sourcePath?: string): boolean {
@@ -446,12 +451,39 @@ export class FileSkillRegistry implements SkillRegistry {
     if (!["uploaded", "generated"].includes(skill.source.kind)) {
       return err("permission_denied", "only uploaded or generated skills can be destroyed");
     }
-    const runtimePath = skill.sync.runtimePath || await this.runtimePath(adoptId, skillId);
-    if (existsSync(runtimePath)) rmSync(runtimePath, { recursive: true, force: true });
+    await this.removeRuntimeSkillCopies(adoptId, skill);
     if (skill.source.sourcePath && existsSync(skill.source.sourcePath)) rmSync(skill.source.sourcePath, { recursive: true, force: true });
     this.saveRegistry(rows.filter((x) => x !== skill));
     await this.invalidateRuntime(adoptId);
     return ok(undefined);
+  }
+
+  private async removeRuntimeSkillCopies(adoptId: string, skill: Skill): Promise<void> {
+    const runtimePath = skill.sync.runtimePath || await this.runtimePath(adoptId, skill.id);
+    if (existsSync(runtimePath)) rmSync(runtimePath, { recursive: true, force: true });
+
+    const root = await this.runtimeRoot(adoptId);
+    if (!existsSync(root)) return;
+
+    const expectedDisplayName = normalizeSkillDisplayName(skill.source.displayName);
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const candidate = path.join(root, entry.name);
+      if (candidate === runtimePath || !existsSync(path.join(candidate, "SKILL.md"))) continue;
+
+      let shouldRemove = entry.name === skill.id;
+      try {
+        const parsed = parseSkillSourceDirectory(candidate, entry.name);
+        const parsedDisplayName = normalizeSkillDisplayName(parsed.displayName);
+        shouldRemove = shouldRemove
+          || parsed.skillId === skill.id
+          || (skill.source.kind === "generated" && !!expectedDisplayName && parsedDisplayName === expectedDisplayName);
+      } catch {
+        // Ignore unreadable sibling directories; destroy should stay best-effort
+        // beyond the canonical registry/runtime paths.
+      }
+      if (shouldRemove) rmSync(candidate, { recursive: true, force: true });
+    }
   }
 
   async setEnabled(adoptId: string, skillId: string, enabled: boolean): Promise<SkillRegistryResult<Skill>> {

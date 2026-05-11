@@ -110,7 +110,8 @@ export function parseSkillSourceFiles(files: SkillSourceFile[], fallbackName = "
 
   const mdMeta = skillMd ? parseSkillMarkdown(textContent(skillMd.content, 16000)) : { title: "", description: "" };
   const fileStem = String(fallbackName || "generated-skill").replace(/\.(zip|skill)$/i, "");
-  const topDirs = Array.from(new Set(normalized.map((file) => file.path.split("/")[0]).filter(Boolean)));
+  const skillMdTopDir = skillMd?.path.includes("/") ? skillMd.path.split("/")[0] : "";
+  const topDirs = skillMdTopDir ? [skillMdTopDir] : [];
   const rawSkillId = String(manifest?.name || manifest?.id || (topDirs.length === 1 ? topDirs[0] : fileStem));
   const skillId = sanitizeSkillId(rawSkillId);
   const displayName = String(manifest?.displayName || manifest?.title || manifest?.name || mdMeta.title || fileStem).trim();
