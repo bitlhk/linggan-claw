@@ -48,6 +48,10 @@ export function makeChatRunKey(sessionKey: string, clientRunId: string): string 
   return `${sessionKey}:${clientRunId}`;
 }
 
+export function makeChatSessionRunKey(sessionKey: string): string {
+  return sessionKey;
+}
+
 function ttlMs(): number {
   const parsed = Number(process.env.CHAT_SEND_DEDUP_TTL_MS || "");
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TTL_MS;
@@ -76,7 +80,7 @@ export function markChatRunStarted(args: {
   if (!isChatSendDedupEnabled() || !args.clientRunId) return null;
   sweepExpired();
 
-  const key = makeChatRunKey(args.sessionKey, args.clientRunId);
+  const key = makeChatSessionRunKey(args.sessionKey);
   const existing = runs.get(key);
   if (existing) {
     existing.lastEventAt = now();
@@ -107,12 +111,12 @@ export function markChatRunStarted(args: {
 export function getChatRun(sessionKey: string, clientRunId?: string): ChatRunRecord | undefined {
   if (!clientRunId) return undefined;
   sweepExpired();
-  return runs.get(makeChatRunKey(sessionKey, clientRunId));
+  return runs.get(makeChatSessionRunKey(sessionKey));
 }
 
 export function touchChatRun(sessionKey: string, clientRunId?: string, reason?: string): void {
   if (!clientRunId) return;
-  const run = runs.get(makeChatRunKey(sessionKey, clientRunId));
+  const run = runs.get(makeChatSessionRunKey(sessionKey));
   if (!run) return;
   run.lastEventAt = now();
   if (reason) {
@@ -126,7 +130,7 @@ export function markChatRunComplete(
   reason: ChatRunCompleteReason,
 ): void {
   if (!clientRunId) return;
-  const key = makeChatRunKey(sessionKey, clientRunId);
+  const key = makeChatSessionRunKey(sessionKey);
   const run = runs.get(key);
   if (!run) return;
   runs.delete(key);

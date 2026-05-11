@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeRelPath, sanitizeFileName, generateFileToken, isPrivateUrl } from "./helpers";
+import {
+  buildRuntimeSessionKey,
+  buildSessionRegistryScope,
+  generateFileToken,
+  isPrivateUrl,
+  sanitizeFileName,
+  sanitizeRelPath,
+} from "./helpers";
 import { createHmac } from "crypto";
 
 // ── sanitizeRelPath ──
@@ -93,6 +100,37 @@ describe("isPrivateUrl", () => {
   it("handles invalid URLs gracefully", () => {
     expect(isPrivateUrl("not-a-url")).toBe(false);
     expect(isPrivateUrl("")).toBe(false);
+  });
+});
+
+// ── runtime session key ──
+
+describe("buildRuntimeSessionKey", () => {
+  it("keeps the legacy main session key when channel conversation is absent", () => {
+    expect(buildRuntimeSessionKey({ runtimeAgentId: "trial_lgc-abc" })).toBe("agent:trial_lgc-abc:main");
+    expect(buildRuntimeSessionKey({ runtimeAgentId: "trial_lgc-abc", epoch: 2 })).toBe("agent:trial_lgc-abc:main:e2");
+  });
+
+  it("uses channel and conversation id for isolated web conversations", () => {
+    expect(buildRuntimeSessionKey({
+      runtimeAgentId: "trial_lgc-abc",
+      channel: "web",
+      conversationId: "conv_123",
+    })).toBe("agent:trial_lgc-abc:web:conv_123");
+  });
+
+  it("normalizes unsafe channel and conversation id characters", () => {
+    expect(buildRuntimeSessionKey({
+      runtimeAgentId: "trial_lgc-abc",
+      channel: "Web UI",
+      conversationId: "../../conv 123",
+    })).toBe("agent:trial_lgc-abc:web_ui:conv_123");
+  });
+
+  it("builds a scoped registry key only when channel conversation is explicit", () => {
+    expect(buildSessionRegistryScope("web", "conv_123")).toBe("web:conv_123");
+    expect(buildSessionRegistryScope("web", "")).toBe("main");
+    expect(buildSessionRegistryScope("", "conv_123")).toBe("main");
   });
 });
 

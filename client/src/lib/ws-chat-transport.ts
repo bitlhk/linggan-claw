@@ -48,12 +48,19 @@ export class WsChatTransport implements ChatTransport {
   }
 
   async send(payload: ChatSendPayload, _signal?: AbortSignal): Promise<void> {
-    this.context = { ...this.context, adoptId: payload.adoptId };
-    const client = await this.ensureClient(payload.adoptId);
+    this.context = {
+      ...this.context,
+      adoptId: payload.adoptId,
+      channel: payload.channel,
+      conversationId: payload.conversationId,
+    };
+    const client = await this.ensureClient(payload.adoptId, payload.channel, payload.conversationId);
     this.state = "streaming";
     const sent = client.sendChat(payload.message, undefined, {
       clientRunId: payload.clientRunId,
       userMessageId: payload.userMessageId,
+      channel: payload.channel,
+      conversationId: payload.conversationId,
     });
     if (!sent) {
       throw new ChatTransportError(this.kind, "WebSocket chat send failed");
@@ -68,17 +75,24 @@ export class WsChatTransport implements ChatTransport {
     this.emit({ type: "transport.disconnected", transport: "ws", reason });
   }
 
-  private async ensureClient(adoptId: string): Promise<OpenClawWSClient> {
-    if (!this.client || this.context.adoptId !== adoptId) {
+  private async ensureClient(adoptId: string, channel?: string, conversationId?: string): Promise<OpenClawWSClient> {
+    if (
+      !this.client
+      || this.context.adoptId !== adoptId
+      || this.context.channel !== channel
+      || this.context.conversationId !== conversationId
+    ) {
       this.client?.disconnect();
-      this.client = new OpenClawWSClient(adoptId, this.apiBase);
+      this.client = new OpenClawWSClient(adoptId, this.apiBase, { channel, conversationId });
       this.client.setHandlers(
         (delta) => {
           if (delta.error) this.emit({ type: "transport.error", transport: "ws", message: delta.error });
         },
         (state) => {
           this.state = mapWsState(state);
-          if (state === "connected") this.emit({ type: "transport.connected", transport: "ws", adoptId } as ChatEvent);
+          if (state === "connected") {
+            this.emit({ type: "transport.connected", transport: "ws", adoptId, channel, conversationId } as ChatEvent);
+          }
         },
       );
       this.client.setRawHandler((payload) => this.emitMany(parseWirePayloadToChatEvents(payload)));

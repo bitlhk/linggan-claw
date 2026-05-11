@@ -23,6 +23,8 @@ export class OpenClawWSClient {
   private _state: WSState = "idle";
   private adoptId: string;
   private apiBase: string;
+  private channel: string;
+  private conversationId: string;
   private onMessage: MessageHandler | null = null;
   private onStateChange: StateHandler | null = null;
   // 跨重连保持的 raw 消息处理器：每次 ws.onmessage 收到原始 JSON 都会调用
@@ -33,9 +35,11 @@ export class OpenClawWSClient {
   private closed = false;
   private agentId: string | null = null;
 
-  constructor(adoptId: string, apiBase = "") {
+  constructor(adoptId: string, apiBase = "", options: { channel?: string; conversationId?: string } = {}) {
     this.adoptId = adoptId;
     this.apiBase = apiBase;
+    this.channel = options.channel || "";
+    this.conversationId = options.conversationId || "";
   }
 
   get state(): WSState {
@@ -66,7 +70,10 @@ export class OpenClawWSClient {
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const host = this.apiBase ? new URL(this.apiBase).host : window.location.host;
-      const url = `${protocol}//${host}/api/claw/ws?adoptId=${encodeURIComponent(this.adoptId)}`;
+      const params = new URLSearchParams({ adoptId: this.adoptId });
+      if (this.channel) params.set("channel", this.channel);
+      if (this.conversationId) params.set("conversationId", this.conversationId);
+      const url = `${protocol}//${host}/api/claw/ws?${params.toString()}`;
 
       try {
         this.ws = new WebSocket(url);
@@ -185,7 +192,7 @@ export class OpenClawWSClient {
     }
   }
 
-  sendChat(message: string, sessionKey?: string, meta?: { clientRunId?: string; userMessageId?: string }) {
+  sendChat(message: string, sessionKey?: string, meta?: { clientRunId?: string; userMessageId?: string; channel?: string; conversationId?: string }) {
     if (!this.ws || this._state !== "connected") return false;
     this.ws.send(JSON.stringify({
       type: "chat",
@@ -193,6 +200,8 @@ export class OpenClawWSClient {
       sessionKey,
       clientRunId: meta?.clientRunId,
       userMessageId: meta?.userMessageId,
+      channel: meta?.channel,
+      conversationId: meta?.conversationId,
     }));
     return true;
   }

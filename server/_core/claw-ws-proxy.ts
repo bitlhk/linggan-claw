@@ -22,7 +22,14 @@ import { createHash, generateKeyPairSync, sign, randomUUID } from "crypto";
 import { WsStreamWriter } from "./stream-writer";
 import { routeMessage } from "./intent-agent";
 import { createContext } from "./context";
-import { INTERNAL_BASE_URL, appendLogAsync, openClawAgentDir, openClawWorkspaceDir, readSessionEpoch } from "./helpers";
+import {
+  INTERNAL_BASE_URL,
+  appendLogAsync,
+  buildRuntimeSessionKey,
+  openClawAgentDir,
+  openClawWorkspaceDir,
+  readSessionEpoch,
+} from "./helpers";
 import { ResponseAccumulator } from "./response-accumulator";
 import { normalizeWsEvent } from "./runtime";
 import { buildRuntimeUserMessage, userLikelyUsesChinese } from "./tool_schema";
@@ -90,6 +97,8 @@ export function registerWSProxy(server: Server) {
 
       const adoptId = url.searchParams.get("adoptId") || "";
       if (!adoptId) { socket.write("HTTP/1.1 400 Bad Request\r\n\r\n"); socket.destroy(); return; }
+      const channel = url.searchParams.get("channel") || "";
+      const conversationId = url.searchParams.get("conversationId") || "";
 
       const { getClawByAdoptId } = await import("../db");
       const claw = await getClawByAdoptId(adoptId);
@@ -101,7 +110,7 @@ export function registerWSProxy(server: Server) {
       const agentId = existsSync(openClawAgentDir(trialId)) ? trialId : dbAgent;
 
       wss.handleUpgrade(req, socket, head, (ws) => {
-        wss.emit("connection", ws, req, { adoptId, agentId, userId: ctx.user!.id });
+        wss.emit("connection", ws, req, { adoptId, agentId, userId: ctx.user!.id, channel, conversationId });
       });
     } catch (err) {
       console.error("[WS] upgrade error:", err);
@@ -109,7 +118,7 @@ export function registerWSProxy(server: Server) {
     }
   });
 
-  wss.on("connection", (client: WebSocket, _req: IncomingMessage, meta: { adoptId: string; agentId: string; userId: number }) => {
+  wss.on("connection", (client: WebSocket, _req: IncomingMessage, meta: { adoptId: string; agentId: string; userId: number; channel?: string; conversationId?: string }) => {
     console.log("[WS] connected:", meta.adoptId);
 
     let gw: WebSocket | null = null;
@@ -297,7 +306,7 @@ export function registerWSProxy(server: Server) {
           sessionKey = msg.payload?.key;
           ready = true;
           console.log("[WS] ready:", meta.adoptId, "session:", sessionKey);
-          sendToClient({ type: "connected", agentId: meta.agentId, sessionKey });
+          sendToClient({ type: "connected", agentId: meta.agentId, sessionKey, channel: meta.channel, conversationId: meta.conversationId });
           for (const p of pending) gw!.send(p);
           pending = [];
           return;
@@ -309,9 +318,12 @@ export function registerWSProxy(server: Server) {
         // epoch>0 → agent:xxx:main:e{epoch}（reset 后用新 key 实现真正"新会话"）
         if (msg.type === "res" && msg.ok === true && !ready) {
           const epoch = readSessionEpoch(meta.adoptId);
-          const mainSessionKey = epoch > 0
-            ? `agent:${meta.agentId}:main:e${epoch}`
-            : `agent:${meta.agentId}:main`;
+          const mainSessionKey = buildRuntimeSessionKey({
+            runtimeAgentId: meta.agentId,
+            channel: meta.channel,
+            conversationId: meta.conversationId,
+            epoch,
+          });
           console.log("[WS] using session:", mainSessionKey, "epoch:", epoch);
           gw!.send(JSON.stringify({ type: "req", id: "init-session", method: "sessions.create", params: { agentId: meta.agentId, key: mainSessionKey } }));
           return;

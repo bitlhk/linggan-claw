@@ -34,15 +34,34 @@ describe("chat in-flight dedup registry", () => {
     expect(duplicate && "run" in duplicate ? duplicate.run.runId : "").toBe(first && "run" in first ? first.run.runId : "");
   });
 
+  it("allows only one active run per sessionKey", () => {
+    const first = markChatRunStarted({
+      sessionKey: "agent:a:web:conv-1",
+      clientRunId: "run-1",
+      transport: "ws",
+      message: "first",
+    });
+    expect(first?.status).toBe("started");
+
+    const concurrent = markChatRunStarted({
+      sessionKey: "agent:a:web:conv-1",
+      clientRunId: "run-2",
+      transport: "http",
+      message: "second",
+    });
+    expect(concurrent?.status).toBe("in_flight");
+    expect(concurrent && "run" in concurrent ? concurrent.run.clientRunId : "").toBe("run-1");
+  });
+
   it("does not dedup across different sessions", () => {
     expect(markChatRunStarted({
-      sessionKey: "agent:a:main",
+      sessionKey: "agent:a:web:conv-1",
       clientRunId: "run-1",
       transport: "ws",
     })?.status).toBe("started");
     expect(markChatRunStarted({
-      sessionKey: "agent:b:main",
-      clientRunId: "run-1",
+      sessionKey: "agent:a:web:conv-2",
+      clientRunId: "run-2",
       transport: "http",
     })?.status).toBe("started");
   });

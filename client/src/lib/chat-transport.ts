@@ -14,6 +14,8 @@ export type ChatTransportState =
 export type ChatSendPayload = {
   adoptId: string;
   message: string;
+  channel?: string;
+  conversationId?: string;
   userMessageId?: string;
   clientRunId?: string;
   memoryEnabled?: boolean;
@@ -25,6 +27,8 @@ export type ChatTransportContext = {
   userId?: number;
   adoptId?: string;
   agentId?: string;
+  channel?: string;
+  conversationId?: string;
   sessionKey?: string;
 };
 

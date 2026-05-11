@@ -22,6 +22,8 @@ type FirstEventWaiter = {
 export type UseLingxiaChatOptions = {
   adoptId?: string | null;
   apiBase?: string;
+  channel?: string;
+  conversationId?: string;
   isHermesRuntime?: boolean;
   memoryEnabled?: boolean;
   contextTurns?: number;
@@ -63,6 +65,8 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
   const {
     adoptId,
     apiBase = import.meta.env.VITE_API_URL || "",
+    channel,
+    conversationId,
     isHermesRuntime = false,
     memoryEnabled,
     contextTurns,
@@ -282,6 +286,8 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
     const payload = {
       adoptId,
       message,
+      channel,
+      conversationId,
       userMessageId: userId,
       clientRunId,
       memoryEnabled,
@@ -327,7 +333,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
         abortControllerRef.current = null;
       }
     }
-  }, [adoptId, contextTurns, dispatchEvent, isHermesRuntime, memoryEnabled, now, transports, waitForFirstEvent]);
+  }, [adoptId, channel, contextTurns, conversationId, dispatchEvent, isHermesRuntime, memoryEnabled, now, transports, waitForFirstEvent]);
 
   const abort = useCallback((reason?: string) => {
     abortControllerRef.current?.abort(reason);
@@ -358,4 +364,3 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
     dispatchEvent,
   };
 }
-

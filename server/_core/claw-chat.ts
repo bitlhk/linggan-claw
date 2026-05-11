@@ -8,6 +8,7 @@ import {
   requireClawOwner, resolveRuntimeAgentId, appendLogAsync,
   readSessionEpoch, bumpSessionEpoch, lookupSessionRegistry,
   upsertSessionRegistry, clearAgentSessionsCache, isPrivateUrl, APP_ROOT,
+  buildRuntimeSessionKey, buildSessionRegistryScope,
   OPENCLAW_BASE_HOME, openClawAgentDir, openClawWorkspaceDir
 } from "./helpers";
 import { ResponseAccumulator } from "./response-accumulator";
@@ -28,7 +29,7 @@ export function registerChatStreamRoutes(app: express.Express) {
   // 直连 Gateway /v1/chat/completions SSE，用 Node http 模块透传（避免 fetch 缓冲问题）
   app.post("/api/claw/chat-stream", clawChatLimiter, async (req, res) => {
     const routeEnterMs = Date.now();
-    let { adoptId, message, model, pendingToolContext, epochLabel } = req.body || {};
+    let { adoptId, message, model, pendingToolContext, epochLabel, channel, conversationId } = req.body || {};
     const clientRunId = normalizeClientRunId(req.body?.clientRunId);
     if (!adoptId || !message) {
       res.status(400).json({ error: "adoptId and message required" });
@@ -102,12 +103,15 @@ export function registerChatStreamRoutes(app: express.Express) {
       const trialAgentDirReset = openClawAgentDir(trialAgentId);
       const runtimeAgentIdReset = existsSync(trialAgentDirReset) ? trialAgentId : dbAgentId;
       const currentEpoch = readSessionEpoch(String(adoptId));
-      const currentSessionKey = lookupSessionRegistry(String(adoptId), runtimeAgentIdReset, currentEpoch)
-        || (currentEpoch > 0
-          ? `agent:${runtimeAgentIdReset}:main:e${currentEpoch}`
-          : `agent:${runtimeAgentIdReset}:main`);
-      const legacyMainSessionKey = `agent:${runtimeAgentIdReset}:main`;
-      const resetKeys = Array.from(new Set([currentSessionKey, legacyMainSessionKey].filter(Boolean)));
+      const sessionScope = buildSessionRegistryScope(channel, conversationId);
+      const currentSessionKey = lookupSessionRegistry(String(adoptId), runtimeAgentIdReset, currentEpoch, sessionScope)
+        || buildRuntimeSessionKey({ runtimeAgentId: runtimeAgentIdReset, channel, conversationId, epoch: currentEpoch });
+      const legacyMainSessionKey = buildRuntimeSessionKey({ runtimeAgentId: runtimeAgentIdReset });
+      const resetKeys = Array.from(new Set(
+        sessionScope === "main"
+          ? [currentSessionKey, legacyMainSessionKey].filter(Boolean)
+          : [currentSessionKey].filter(Boolean)
+      ));
       const gatewayResetResults: Array<{ key: string; ok: boolean; error?: string }> = resetKeys.map((key) => ({
         key,
         ok: false,
@@ -150,13 +154,12 @@ export function registerChatStreamRoutes(app: express.Express) {
       })();
 
       const epoch = bumpSessionEpoch(String(adoptId));
-      const nextSessionKey = epoch > 0
-        ? `agent:${runtimeAgentIdReset}:main:e${epoch}`
-        : `agent:${runtimeAgentIdReset}:main`;
+      const nextSessionKey = buildRuntimeSessionKey({ runtimeAgentId: runtimeAgentIdReset, channel, conversationId, epoch });
       clearAgentSessionsCache(runtimeAgentIdReset, remoteHomeReset);
       console.log("[reset] session reset completed", {
         adoptId,
         runtimeAgentId: runtimeAgentIdReset,
+        sessionScope,
         previousEpoch: currentEpoch,
         nextEpoch: epoch,
         currentSessionKey,
@@ -303,20 +306,11 @@ export function registerChatStreamRoutes(app: express.Express) {
     const dedupTrialAgentId = `trial_${String(adoptId)}`;
     const dedupTrialAgentDir = openClawAgentDir(dedupTrialAgentId);
     const dedupRuntimeAgentId = existsSync(dedupTrialAgentDir) ? dedupTrialAgentId : dedupDbAgentId;
-    let dedupSessionKey: string;
-    if (epochLabel && typeof epochLabel === "string" && epochLabel.trim().length > 0) {
-      const safeLabel = epochLabel.trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
-      dedupSessionKey = `agent:${dedupRuntimeAgentId}:main:${safeLabel}`;
-    } else {
-      const found = lookupSessionRegistry(String(adoptId), dedupRuntimeAgentId, dedupEpoch);
-      if (found) {
-        dedupSessionKey = found;
-      } else {
-        dedupSessionKey = dedupEpoch > 0
-          ? `agent:${dedupRuntimeAgentId}:main:e${dedupEpoch}`
-          : `agent:${dedupRuntimeAgentId}:main`;
-        upsertSessionRegistry(String(adoptId), dedupRuntimeAgentId, dedupSessionKey, dedupEpoch);
-      }
+    const sessionScope = buildSessionRegistryScope(channel, conversationId);
+    let dedupSessionKey = lookupSessionRegistry(String(adoptId), dedupRuntimeAgentId, dedupEpoch, sessionScope);
+    if (!dedupSessionKey) {
+      dedupSessionKey = buildRuntimeSessionKey({ runtimeAgentId: dedupRuntimeAgentId, channel, conversationId, epoch: dedupEpoch, epochLabel });
+      upsertSessionRegistry(String(adoptId), dedupRuntimeAgentId, dedupSessionKey, dedupEpoch, sessionScope);
     }
     const dedupStart = markChatRunStarted({
       sessionKey: dedupSessionKey,
@@ -334,6 +328,7 @@ export function registerChatStreamRoutes(app: express.Express) {
         __in_flight: true,
         transport: "http",
         sessionKey: dedupSessionKey,
+        sessionScope,
         clientRunId,
         runId: dedupStart.run.runId,
         startedAt: dedupStart.run.startedAt,
@@ -437,21 +432,14 @@ export function registerChatStreamRoutes(app: express.Express) {
         //   2) 注册表命中（epoch 复用已存在的 session key）
         //   3) 数字 epoch fallback（标准主聊天路径）
         let sessionKey: string;
-        if (epochLabel && typeof epochLabel === "string" && epochLabel.trim().length > 0) {
-          const safeLabel = epochLabel.trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
-          sessionKey = `agent:${runtimeAgentId}:main:${safeLabel}`;
+        const found = lookupSessionRegistry(String(adoptId), runtimeAgentId, epoch, sessionScope);
+        if (found) {
+          sessionKey = found;
         } else {
-          const found = lookupSessionRegistry(String(adoptId), runtimeAgentId, epoch);
-          if (found) {
-            sessionKey = found;
-          } else {
-            // 关键修复：epoch 变更后必须使用新 session key，避免复用旧上下文
-            // epoch=0 保持历史兼容；epoch>0 使用分代 key 实现真正"新会话"
-            sessionKey = epoch > 0
-              ? `agent:${runtimeAgentId}:main:e${epoch}`
-              : `agent:${runtimeAgentId}:main`;
-            upsertSessionRegistry(String(adoptId), runtimeAgentId, sessionKey, epoch);
-          }
+          // 关键修复：sessionKey 由 runtime + channel + conversation 决定。
+          // 缺省 channel/conversation 保持历史 main；网页新窗口走 web:{conversationId}。
+          sessionKey = buildRuntimeSessionKey({ runtimeAgentId, channel, conversationId, epoch, epochLabel });
+          upsertSessionRegistry(String(adoptId), runtimeAgentId, sessionKey, epoch, sessionScope);
         }
 
 const options = {

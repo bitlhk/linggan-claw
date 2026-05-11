@@ -138,10 +138,60 @@ export const writeSessionRegistry = (reg: Record<string, any>) => {
 export const getRegistryKey = (adoptId: string, runtimeAgentId: string) =>
   `${adoptId}:${runtimeAgentId}`;
 
-export const lookupSessionRegistry = (adoptId: string, runtimeAgentId: string, currentEpoch: number): string | null => {
+export const normalizeSessionPart = (value: unknown, maxLen = 96): string => {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9:_-]/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, maxLen);
+  return normalized.replace(/^_+|_+$/g, "");
+};
+
+export const normalizeSessionChannel = (value: unknown): string => {
+  const channel = normalizeSessionPart(value, 32).toLowerCase();
+  return channel || "main";
+};
+
+export const normalizeConversationId = (value: unknown): string => {
+  return normalizeSessionPart(value, 96);
+};
+
+export const buildSessionRegistryScope = (channel?: unknown, conversationId?: unknown): string => {
+  const normalizedChannel = normalizeSessionChannel(channel);
+  const normalizedConversationId = normalizeConversationId(conversationId);
+  if (normalizedChannel && normalizedChannel !== "main" && normalizedConversationId) {
+    return `${normalizedChannel}:${normalizedConversationId}`;
+  }
+  return "main";
+};
+
+export const buildRuntimeSessionKey = (args: {
+  runtimeAgentId: string;
+  channel?: unknown;
+  conversationId?: unknown;
+  epoch?: number;
+  epochLabel?: unknown;
+}): string => {
+  const runtimeAgentId = normalizeSessionPart(args.runtimeAgentId, 96);
+  const epoch = Number(args.epoch || 0) || 0;
+  const epochLabel = normalizeSessionPart(args.epochLabel, 64);
+  if (epochLabel) return `agent:${runtimeAgentId}:main:${epochLabel}`;
+
+  const channel = normalizeSessionChannel(args.channel);
+  const conversationId = normalizeConversationId(args.conversationId);
+  const base = channel !== "main" && conversationId
+    ? `agent:${runtimeAgentId}:${channel}:${conversationId}`
+    : `agent:${runtimeAgentId}:main`;
+  return epoch > 0 ? `${base}:e${epoch}` : base;
+};
+
+export const getScopedRegistryKey = (adoptId: string, runtimeAgentId: string, scope: string = "main") =>
+  scope && scope !== "main" ? `${adoptId}:${runtimeAgentId}:${scope}` : getRegistryKey(adoptId, runtimeAgentId);
+
+export const lookupSessionRegistry = (adoptId: string, runtimeAgentId: string, currentEpoch: number, scope: string = "main"): string | null => {
   try {
     const reg = readSessionRegistry();
-    const key = getRegistryKey(adoptId, runtimeAgentId);
+    const key = getScopedRegistryKey(adoptId, runtimeAgentId, scope);
     const entry = reg[key];
     if (!entry) return null;
     // skillEpoch 不匹配则 stale，强制重建
@@ -150,10 +200,10 @@ export const lookupSessionRegistry = (adoptId: string, runtimeAgentId: string, c
   } catch { return null; }
 };
 
-export const upsertSessionRegistry = (adoptId: string, runtimeAgentId: string, sessionKey: string, skillEpoch: number) => {
+export const upsertSessionRegistry = (adoptId: string, runtimeAgentId: string, sessionKey: string, skillEpoch: number, scope: string = "main") => {
   try {
     const reg = readSessionRegistry();
-    const key = getRegistryKey(adoptId, runtimeAgentId);
+    const key = getScopedRegistryKey(adoptId, runtimeAgentId, scope);
     reg[key] = { sessionKey, skillEpoch, createdAt: new Date().toISOString() };
     writeSessionRegistry(reg);
   } catch {}
@@ -168,16 +218,13 @@ export const resolveSessionKey = (
   runtimeAgentId: string,
   epoch: number,
   epochLabel?: string,
+  channel?: unknown,
+  conversationId?: unknown,
 ): string => {
-  if (epochLabel && typeof epochLabel === "string" && epochLabel.trim().length > 0) {
-    const safeLabel = epochLabel.trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
-    return `agent:${runtimeAgentId}:main:${safeLabel}`;
-  }
-  const found = lookupSessionRegistry(adoptId, runtimeAgentId, epoch);
+  const scope = buildSessionRegistryScope(channel, conversationId);
+  const found = lookupSessionRegistry(adoptId, runtimeAgentId, epoch, scope);
   if (found) return found;
-  return epoch > 0
-    ? `agent:${runtimeAgentId}:main:e${epoch}`
-    : `agent:${runtimeAgentId}:main`;
+  return buildRuntimeSessionKey({ runtimeAgentId, channel, conversationId, epoch, epochLabel });
 };
 
 export const invalidateSessionRegistry = (adoptId: string) => {

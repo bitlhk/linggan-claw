@@ -76,6 +76,7 @@ function markThinkingDone(msgs: any[]): any[] {
 // 用于 SSE 截断 recover 时精确匹配目标消息——用户在 recover 期间发新消息也不串
 const makeLxMsgId = () => `lx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const makeClientRunId = () => `run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+const makeConversationId = () => `conv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 type UploadedLingxiaAttachment = {
   name: string;
   path: string;
@@ -281,10 +282,7 @@ export default function Home() {
   const brand = useBrand();
   const { confirm, dialog } = useConfirmDialog();
   const [lingxiaInput, setLingxiaInput] = useState("");
-  const [lingxiaMsgs, setLingxiaMsgs] = useState<LxMsg[]>(() => {
-    try { const s = localStorage.getItem("lingxia-chat-history");
-return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
-  });
+  const [lingxiaMsgs, setLingxiaMsgs] = useState<LxMsg[]>([]);
   // 2026-04-29 批次 2 A3：mirror ref 用于 SSE 异步 handler 拿稳定 snapshot
   // React 18 concurrent 下 setState updater 不保证同步执行，不能在 updater 里抓 id 给外层用
   const lingxiaMsgsRef = useRef<LxMsg[]>(lingxiaMsgs);
@@ -372,6 +370,19 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
   // 合并：子域名优先，路径兜底
   const resolvedAdoptId = adoptIdFromHost || adoptIdFromPath;
   const isLingxiaSubdomain = !!resolvedAdoptId;
+  const webConversationId = useMemo(() => {
+    if (!resolvedAdoptId) return "";
+    const key = `lingxia_web_conversation_${resolvedAdoptId}`;
+    try {
+      const existing = sessionStorage.getItem(key);
+      if (existing) return existing;
+      const next = makeConversationId();
+      sessionStorage.setItem(key, next);
+      return next;
+    } catch {
+      return makeConversationId();
+    }
+  }, [resolvedAdoptId]);
 
   const { data: clawByAdoptId, isLoading: clawByAdoptLoading } = trpc.claw.getByAdoptId.useQuery(
     { adoptId: resolvedAdoptId || "" },
@@ -427,6 +438,8 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
   const chatV2Enabled = isLingxiaChatV2Enabled((user as any)?.id);
   const chatV2 = useLingxiaChat({
     adoptId: resolvedAdoptId,
+    channel: webConversationId ? "web" : undefined,
+    conversationId: webConversationId || undefined,
     isHermesRuntime,
     memoryEnabled: lingxiaMemoryEnabled === "yes",
     contextTurns: lingxiaContextTurns,
@@ -471,13 +484,13 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
 
   // 初始化 WSS 连接（后台自动尝试，不阻塞 UI）—— 仅 OpenClaw (lgc-*)
   useEffect(() => {
-    if (!resolvedAdoptId || isHermesRuntime || chatV2Enabled) return;
+    if (!resolvedAdoptId || !webConversationId || isHermesRuntime || chatV2Enabled) return;
     const apiBase = (import.meta as any).env?.VITE_API_URL || "";
-    const ws = new OpenClawWSClient(resolvedAdoptId, apiBase);
+    const ws = new OpenClawWSClient(resolvedAdoptId, apiBase, { channel: "web", conversationId: webConversationId });
     wsClientRef.current = ws;
     ws.connect().then((ok) => { if (ok) setWsConnected(true); });
     return () => { ws.disconnect(); wsClientRef.current = null; setWsConnected(false); };
-  }, [resolvedAdoptId, isHermesRuntime, chatV2Enabled]);
+  }, [resolvedAdoptId, webConversationId, isHermesRuntime, chatV2Enabled]);
   const lingxiaMsgViewportRef = useRef<HTMLDivElement | null>(null);
   const [lingxiaNearBottom, setLingxiaNearBottom] = useState(true);
   // 工具执行显性化状态
@@ -510,7 +523,7 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
   const [lingxiaSkillEditor, setLingxiaSkillEditor] = useState<{ id: string; content: string } | null>(null);
 
   // localStorage 会话持久化
-  const MSGS_KEY = resolvedAdoptId ? `lgc_msgs_${resolvedAdoptId}` : null;
+  const MSGS_KEY = resolvedAdoptId && webConversationId ? `lgc_msgs_${resolvedAdoptId}_${webConversationId}` : null;
   useEffect(() => {
     if (!MSGS_KEY) return;
     try {
@@ -520,6 +533,8 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
         // backfillLxMsgIds 会保留旧 id（如果有）或生成新 id，并兜底必填字段
         const normalized = backfillLxMsgIds(parsed);
         setLingxiaMsgs(normalized);
+      } else {
+        setLingxiaMsgs([]);
       }
     } catch {}
   }, [MSGS_KEY]);
@@ -882,7 +897,7 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
             } catch {}
           };
           wsClient.setRawHandler(wsHandler);
-        const sent = wsClient.sendChat(text, undefined, { clientRunId, userMessageId });
+        const sent = wsClient.sendChat(text, undefined, { clientRunId, userMessageId, channel: "web", conversationId: webConversationId });
         if (sent) {
           // WSS 响应超时检测：企业代理可能静默拦截 WSS 数据
           // 等待第一个有效事件，超时则降级到 HTTP SSE
@@ -923,7 +938,7 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         signal: controller.signal,
-        body: JSON.stringify({ adoptId: resolvedAdoptId, message: text, model: lingxiaModelId, clientRunId }),
+        body: JSON.stringify({ adoptId: resolvedAdoptId, message: text, model: lingxiaModelId, clientRunId, channel: "web", conversationId: webConversationId }),
       });
 
       if (!resp.ok || !resp.body) {
@@ -1323,7 +1338,7 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ adoptId: resolvedAdoptId, message: "/reset" }),
+        body: JSON.stringify({ adoptId: resolvedAdoptId, message: "/reset", channel: "web", conversationId: webConversationId }),
       });
 
       if (!resp.ok) throw new Error(`重置失败 (${resp.status})`);
@@ -1333,6 +1348,7 @@ return s ? backfillLxMsgIds(JSON.parse(s)) : []; } catch { return []; }
         setLingxiaMsgs([]);
       }
       localStorage.removeItem("lingxia-chat-history");
+      if (MSGS_KEY) localStorage.removeItem(MSGS_KEY);
       // 不需要断 WS：后端已通过 OpenClaw 原生 sessions.reset 换了 sessionId，
       // session key 不变，现有 WS 连接继续用即可，下次发消息打到新 sessionId 上
       toast.success("会话已重置（新会话）");
