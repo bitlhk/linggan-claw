@@ -195,7 +195,7 @@ export default function ClawHome() {
         if (status !== "active") throw new Error("创建时间较长，请刷新页面后重试");
       }
 
-      toast.success(result.reused ? `已为你打开${brand.name}` : "创建成功！");
+      toast.success(result.reused ? "已为你打开智能体工作台" : "申请成功！");
       await refetchClawMe();
       setLocation(`/claw/${adoptId}`);
     } catch (error: any) {
@@ -226,7 +226,7 @@ export default function ClawHome() {
         <div className="container flex items-center justify-between h-14 px-6">
           <div className="flex items-center gap-2.5">
             <BrandIcon size={32} />
-            <span className="text-base font-bold text-gray-900">{brand.name}</span>
+            <span className="text-base font-bold text-gray-900">企业智能体平台</span>
             <span className="text-xs text-muted-foreground hidden sm:inline">AI Agent Platform</span>
           </div>
           <div className="flex items-center gap-2">
@@ -293,8 +293,7 @@ export default function ClawHome() {
             </motion.div>
 
             <motion.h1 variants={fadeInUp} className="text-3xl md:text-5xl font-bold leading-tight mb-4">
-              <span className="text-gray-900">创建一个</span>
-              <span className="bg-gradient-to-r from-primary via-rose-500 to-primary bg-clip-text text-transparent">{brand.name}</span>
+              <span className="bg-gradient-to-r from-primary via-rose-500 to-primary bg-clip-text text-transparent">申请一个员工智能体</span>
             </motion.h1>
 
             <motion.p variants={fadeInUp} className="text-base text-muted-foreground mb-2 max-w-lg">
@@ -317,7 +316,7 @@ export default function ClawHome() {
                 <div className="space-y-3">
                   {adoptions.map((a: any) => {
                     const isHermes = String(a.adoptId || "").startsWith("lgh-");
-                    const runtimeLabel = isHermes ? "灵马" : `${brand.name}`;
+                    const runtimeLabel = isHermes ? "专业智能体" : "员工智能体";
                     const runtimeBadge = isHermes ? (
                       <><img src="/uploads/Hermes.png" alt="" className="w-3 h-3 inline-block mr-0.5 align-text-bottom" /> Hermes</>
                     ) : (
@@ -379,7 +378,7 @@ export default function ClawHome() {
                     </>
                   ) : (
                     <>
-                      创建智能体
+                      申请员工智能体
                       <ArrowRight className="w-4 h-4 ml-2" />
                     </>
                   )}
@@ -427,7 +426,7 @@ export default function ClawHome() {
               能力一览
             </motion.h2>
             <motion.p variants={fadeInUp} className="text-sm text-muted-foreground">
-              {`每只${brand.name}都是一个独立的 AI Agent 实例`}
+              每个员工智能体都是一个独立的 AI Agent 实例
             </motion.p>
           </motion.div>
 
