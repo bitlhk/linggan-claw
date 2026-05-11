@@ -470,7 +470,7 @@ export async function routeTaskWorkbenchPrompt(input: RouteInput): Promise<TaskW
         {
           role: "system",
           content: [
-            "你是灵虾任务工作台的入口 Router。你只做意图分流，不执行任务，不创建新 Agent。",
+            "你是员工智能体任务工作台的入口 Router。你只做意图分流，不执行任务，不创建新 Agent。",
             "当前可运行模板有三个：",
             "1. market_research_brief：金融市场研究简报，检索员筛选公开市场资料 → 分析师提炼趋势、机会与风险 → 写作员生成研究简报。",
             "2. meeting_prep_agent：客户会议准备，检索员整理客户与会议资料 → 分析师提炼客户画像与问题清单 → 写作员生成会前准备材料。",
