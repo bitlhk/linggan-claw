@@ -103,6 +103,7 @@ export function createPlaywrightTabAdapter(page, { consoleErrors = [] } = {}) {
     },
     __fetchJson: (path, options = {}) => pageFetch(path, options, "json"),
     __fetchText: (path, options = {}) => pageFetch(path, options, "text"),
+    __evaluate: (fn, arg) => page.evaluate(fn, arg),
     playwright: {
       waitForLoadState: async ({ state = "load", timeoutMs = 12000 } = {}) =>
         page.waitForLoadState(state, { timeout: timeoutMs }),

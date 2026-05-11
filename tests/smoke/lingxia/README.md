@@ -29,7 +29,7 @@ Current `runSmokeV2` additionally covers reversible L3 flows:
 - Schedule create / menu list / chat query / tenant isolation / delete.
 - Generated skill create / registry visible / menu visible / destroy / cleanup.
 - Generated artifact file create / workspace API visible / read / token download / workspace UI visible / cleanup.
-- Concurrent two-window chat stream probe when the adapter supports opening a sibling tab.
+- Concurrent two-window chat session isolation when the adapter supports opening a sibling tab. This now requires distinct `lingxia_web_conversation_<adoptId>` sessionStorage values and rejects shared chat history between sibling windows.
 
 ## Local Playwright Run
 

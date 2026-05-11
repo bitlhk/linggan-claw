@@ -408,6 +408,26 @@ async function createSiblingTab(tab, url) {
   return null;
 }
 
+async function getWebConversationSnapshot(tab, adoptId) {
+  if (typeof tab.__evaluate !== "function") return null;
+  return tab.__evaluate((id) => {
+    const conversationKey = `lingxia_web_conversation_${id}`;
+    const conversationId = window.sessionStorage.getItem(conversationKey) || "";
+    const messageKeys = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i) || "";
+      if (key.startsWith(`lgc_msgs_${id}_`)) messageKeys.push(key);
+    }
+    messageKeys.sort();
+    return {
+      conversationKey,
+      conversationId,
+      messageKey: conversationId ? `lgc_msgs_${id}_${conversationId}` : "",
+      messageKeys,
+    };
+  }, adoptId);
+}
+
 async function listRegistrySkills(tab, adoptId) {
   const resp = await browserFetchJson(tab, `/api/claw/skills/registry?adoptId=${encodeURIComponent(adoptId)}`);
   return Array.isArray(resp?.data?.items) ? resp.data.items : [];
@@ -655,6 +675,10 @@ export async function runConcurrentWindowSmoke({ tab, adoptId = DEFAULT_ADOPT_ID
     const markerA = `CONCURRENT_A_${String(runId || Date.now()).replace(/[^a-zA-Z0-9_]/g, "_").slice(-18)}`;
     const markerB = `CONCURRENT_B_${String(runId || Date.now()).replace(/[^a-zA-Z0-9_]/g, "_").slice(-18)}`;
     await safeNetworkIdle(sibling, 15000);
+    const sessionBefore = {
+      windowA: await getWebConversationSnapshot(tab, adoptId),
+      windowB: await getWebConversationSnapshot(sibling, adoptId),
+    };
 
     const [resultA, resultB] = await Promise.all([
       runChatAction({
@@ -683,15 +707,32 @@ export async function runConcurrentWindowSmoke({ tab, adoptId = DEFAULT_ADOPT_ID
     const sharedHistoryTabs = aHasA && aHasB && bHasA && bHasB;
     const wrongWindowA = !aHasA && aHasB;
     const wrongWindowB = !bHasB && bHasA;
+    const sessionAfter = {
+      windowA: await getWebConversationSnapshot(tab, adoptId),
+      windowB: await getWebConversationSnapshot(sibling, adoptId),
+    };
+    const conversationDistinct = Boolean(
+      sessionAfter.windowA?.conversationId &&
+      sessionAfter.windowB?.conversationId &&
+      sessionAfter.windowA.conversationId !== sessionAfter.windowB.conversationId
+    );
+    const messageStorageScoped = Boolean(
+      sessionAfter.windowA?.messageKey &&
+      sessionAfter.windowB?.messageKey &&
+      sessionAfter.windowA.messageKey !== sessionAfter.windowB.messageKey &&
+      sessionAfter.windowA.messageKeys?.includes(sessionAfter.windowA.messageKey) &&
+      sessionAfter.windowB.messageKeys?.includes(sessionAfter.windowB.messageKey)
+    );
 
     return {
-      ok: Boolean(resultA.ok && resultB.ok && (isolatedTabs || sharedHistoryTabs) && !wrongWindowA && !wrongWindowB),
+      ok: Boolean(resultA.ok && resultB.ok && isolatedTabs && conversationDistinct && !wrongWindowA && !wrongWindowB),
       skipped: false,
       markerA,
       markerB,
       resultA,
       resultB,
       visibility: { aHasA, aHasB, bHasA, bHasB, isolatedTabs, sharedHistoryTabs, wrongWindowA, wrongWindowB },
+      session: { before: sessionBefore, after: sessionAfter, conversationDistinct, messageStorageScoped },
     };
   } finally {
     if (typeof sibling.close === "function") {
@@ -752,7 +793,12 @@ export async function runSmokeV2({
   } else {
     cases.push(artifacts.concurrentWindows.resultA.ok ? pass("v2: concurrent window A reply") : fail("v2: concurrent window A reply", artifacts.concurrentWindows.resultA.reason || "window A did not complete"));
     cases.push(artifacts.concurrentWindows.resultB.ok ? pass("v2: concurrent window B reply") : fail("v2: concurrent window B reply", artifacts.concurrentWindows.resultB.reason || "window B did not complete"));
-    cases.push(artifacts.concurrentWindows.ok ? pass("v2: concurrent window stream isolation") : fail("v2: concurrent window stream isolation", "reply markers were missing or attached to the wrong window", { visibility: artifacts.concurrentWindows.visibility }));
+    cases.push(artifacts.concurrentWindows.ok
+      ? pass("v2: concurrent window stream isolation", { session: artifacts.concurrentWindows.session })
+      : fail("v2: concurrent window stream isolation", "reply markers were missing, attached to the wrong window, or windows shared one web conversationId", {
+        visibility: artifacts.concurrentWindows.visibility,
+        session: artifacts.concurrentWindows.session,
+      }));
   }
 
   cases.push(warn("v2: side effects", "Creates then deletes one schedule, one generated skill, and one generated artifact with a runId marker."));
@@ -767,7 +813,7 @@ export async function runSmokeV2({
     estimatedProductCoverage: 0.86,
     notes: [
       "Includes v1 navigation/chat/channel checks when includeV1 is true.",
-      "Adds complex dialogue, reversible schedule lifecycle, schedule tenant isolation, generated skill lifecycle, artifact file lifecycle/download, concurrent window stream probe, and cleanup verification.",
+      "Adds complex dialogue, reversible schedule lifecycle, schedule tenant isolation, generated skill lifecycle, artifact file lifecycle/download, concurrent window session isolation, and cleanup verification.",
     ],
   };
   return {
