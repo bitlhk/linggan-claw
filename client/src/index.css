@@ -11,8 +11,7 @@
 @import "@fontsource/noto-sans-sc/600.css";
 @import "@fontsource/noto-sans-sc/700.css";
 
-/* JetBrains Mono — 代码字体，带完整 fallback */
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+/* Code font stack uses local system fonts first; no external font request needed. */
 
 /* SettingsPage banking-fy sample layer.
    Keep this class-based so audited pages can move away from JSX inline styles

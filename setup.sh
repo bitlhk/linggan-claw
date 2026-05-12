@@ -288,7 +288,6 @@ SQL
   {
     echo "# ── 员工智能体配置（由 setup.sh 生成）──"
     echo "PORT=$PORT_VALUE"
-    echo "NODE_ENV=production"
     echo ""
     echo "# 访问"
     echo "FRONTEND_URL=$FRONTEND_URL"
@@ -411,7 +410,7 @@ echo "Step 3/4: 安装依赖"
 if [[ "$SKIP_INSTALL" == "true" ]]; then
   echo "  已跳过依赖安装。"
 else
-  if pnpm_cmd install --frozen-lockfile 2>/dev/null || pnpm_cmd install; then
+  if pnpm_cmd install --frozen-lockfile --reporter="${PNPM_REPORTER:-append-only}" 2>/dev/null || pnpm_cmd install --reporter="${PNPM_REPORTER:-append-only}"; then
     echo "  依赖已安装。"
   else
     echo "  依赖安装失败，请检查 Node.js / pnpm。"

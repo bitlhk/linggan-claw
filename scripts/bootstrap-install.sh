@@ -77,6 +77,27 @@ run() {
   fi
 }
 
+run_with_log() {
+  local label="$1"
+  local log_file="$2"
+  shift 2
+  if [[ "$DRY_RUN" == "true" ]]; then
+    printf "[dry-run] %q" "$1"
+    shift || true
+    for arg in "$@"; do printf " %q" "$arg"; done
+    printf "\n"
+    return
+  fi
+  echo "  $label..."
+  if "$@" >"$log_file" 2>&1; then
+    echo "  $label complete. Log: $log_file"
+  else
+    echo "  $label failed. Last log lines:" >&2
+    tail -80 "$log_file" >&2 || true
+    return 1
+  fi
+}
+
 sudo_cmd() {
   if [[ "$(id -u)" -eq 0 ]]; then
     "$@"
@@ -223,8 +244,8 @@ start_app() {
       log "Existing PM2 app linggan-claw detected; reusing it for this upgrade"
     fi
   fi
-  run bash -lc "cd '$INSTALL_DIR' && corepack pnpm check"
-  run bash -lc "cd '$INSTALL_DIR' && corepack pnpm build"
+  run_with_log "Type check" "/tmp/employee-agent-check.log" bash -lc "cd '$INSTALL_DIR' && corepack pnpm check"
+  run_with_log "Build" "/tmp/employee-agent-build.log" bash -lc "cd '$INSTALL_DIR' && corepack pnpm build"
   if [[ -f "$INSTALL_DIR/ecosystem.config.cjs" ]]; then
     run bash -lc "cd '$INSTALL_DIR' && pm2 start ecosystem.config.cjs --update-env || pm2 restart ecosystem.config.cjs --update-env"
     run pm2 save
