@@ -183,6 +183,11 @@ function removeOpenClawWeixinBinding(adoptId: string, claw: any): { accountId: s
   return target;
 }
 
+export function cleanupOpenClawWeixinBindingForAdopt(adoptId: string, claw: any): { removed: boolean; accountId: string; userId: string } {
+  const target = removeOpenClawWeixinBinding(adoptId, claw);
+  return { removed: Boolean(target.accountId), accountId: target.accountId, userId: target.userId };
+}
+
 function installHint(): string {
   return "请先在服务器安装并启用官方微信插件：npx -y @tencent-weixin/openclaw-weixin-cli install";
 }

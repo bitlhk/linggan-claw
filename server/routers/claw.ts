@@ -51,6 +51,7 @@ import { hermesProfileSkillsDir, resolveRuntimeAgentId } from "../_core/helpers"
 import { onboardBuiltinSkillsForAdopt } from "../_core/skills/skill-onboarding";
 import { skillRegistry } from "../_core/skills/skill-registry";
 import { parseSkillSourceDirectory } from "../_core/skills/skill-source";
+import { cleanupOpenClawWeixinBindingForAdopt } from "../_core/claw-weixin";
 import type { SkillSource } from "../../shared/types/skill";
 
 const openClawWorkspaceDir = (runtimeAgentId: string) => `${OPENCLAW_HOME}/workspace-${String(runtimeAgentId || "").trim()}`;
@@ -258,6 +259,7 @@ export const clawRouter = router({
         const workspacePath = openClawWorkspaceDir(runtimeAgentId);
         const skillsRemoved = pruneSkillRegistryForAdopt(adoptId);
         const configPruned = pruneOpenClawAgentConfig([String(row.agentId || ""), runtimeAgentId, `trial_${adoptId}`]);
+        const weixinCleanup = cleanupOpenClawWeixinBindingForAdopt(adoptId, row);
 
         try {
           if (existsSync(workspacePath)) rmSync(workspacePath, { recursive: true, force: true });
@@ -281,6 +283,7 @@ export const clawRouter = router({
             workspaceRemoved: !existsSync(workspacePath),
             skillsRemoved,
             configPruned,
+            weixinCleanup,
           },
         });
 
@@ -297,6 +300,7 @@ export const clawRouter = router({
             workspaceRemoved: !existsSync(workspacePath),
             skillsRemoved,
             configPruned,
+            weixinCleanup,
           },
         };
       }),
