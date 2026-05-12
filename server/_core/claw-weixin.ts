@@ -143,7 +143,7 @@ function upsertOpenClawWeixinBinding(params: {
   channelConfig.accounts[accountId] = {
     ...(channelConfig.accounts[accountId] || {}),
     enabled: true,
-    name: channelConfig.accounts[accountId]?.name || `Lingxia ${params.adoptId}`,
+    name: `Lingxia ${params.adoptId}`,
   };
   channelConfig.defaultAccount = channelConfig.defaultAccount || accountId;
   channelConfig.channelConfigUpdatedAt = new Date().toISOString();
@@ -168,6 +168,15 @@ function upsertOpenClawWeixinBinding(params: {
   config.bindings = nextBindings;
 
   writeOpenClawConfig(config);
+}
+
+async function triggerOfficialWeixinChannelReload(): Promise<void> {
+  try {
+    const accounts = await importWeixinPluginModule<{
+      triggerWeixinChannelReload: () => void;
+    }>("auth/accounts.js");
+    accounts.triggerWeixinChannelReload();
+  } catch {}
 }
 
 function removeOpenClawWeixinBinding(adoptId: string, claw: any): { accountId: string; userId: string } {
@@ -360,6 +369,7 @@ export function registerWeixinRoutes(app: express.Express) {
           if (reusable) {
             const userId = String(reusable.account?.userId || "").trim();
             upsertOpenClawWeixinBinding({ adoptId, claw, accountId: reusable.accountId, userId });
+            await triggerOfficialWeixinChannelReload();
             return res.json({ status: "confirmed", userId: userId || reusable.accountId, accountId: reusable.accountId });
           }
           return res.json({ status: "wait", message: result.message || "already connected but no local account was found" });
@@ -373,6 +383,7 @@ export function registerWeixinRoutes(app: express.Express) {
       const account = accountId ? loadOfficialAccount(accountId) : null;
       const userId = String(account?.userId || "").trim();
       upsertOpenClawWeixinBinding({ adoptId, claw, accountId, userId });
+      await triggerOfficialWeixinChannelReload();
       res.json({ status: "confirmed", userId: userId || accountId, accountId });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
