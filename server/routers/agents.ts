@@ -17,6 +17,7 @@ import {
   updateAgentHealth,
   updateAgentFields,
 } from "../db";
+import { auditActor, auditRequest, recordAuditBestEffort } from "../_core/audit-events";
 
 const providerTypes = [
   "openai-compatible",
@@ -266,7 +267,7 @@ export const bizAgentsRouter = router({
       adapterProtocol: z.enum(adapterProtocols).nullable().optional(),
       capabilitiesJson: z.string().nullable().optional(),
       endpointConfigJson: z.string().nullable().optional(),
-    })).mutation(async ({ input }) => {
+    })).mutation(async ({ input, ctx }) => {
       const existing = await getBusinessAgent(input.id);
       const nextApiToken = input.apiToken && input.apiToken.trim()
         ? input.apiToken.trim()
@@ -301,13 +302,48 @@ export const bizAgentsRouter = router({
         capabilitiesJson: input.capabilitiesJson || "[]",
         endpointConfigJson: input.endpointConfigJson || null,
       } as any);
+      await recordAuditBestEffort({
+        action: existing ? "agent.lifecycle.business_updated" : "agent.lifecycle.business_created",
+        ...auditActor(ctx.user),
+        ...auditRequest(ctx.req),
+        targetType: "business_agent",
+        targetId: input.id,
+        targetName: input.name,
+        runtimeType: providerType,
+        runtimeAgentId: input.remoteAgentId || input.localAgentId || input.id,
+        metadata: {
+          kind: input.kind,
+          enabled: input.enabled ?? 1,
+          providerType,
+          adapterProtocol,
+          apiUrlPresent: Boolean(input.apiUrl),
+          apiTokenUpdated: Boolean(input.apiToken && input.apiToken.trim()),
+          capabilitiesJsonPresent: Boolean(input.capabilitiesJson),
+          endpointConfigJsonPresent: Boolean(input.endpointConfigJson),
+        },
+      });
       return { ok: true };
     }),
-    delete: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ input }) => {
+    delete: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ input, ctx }) => {
+      const existing = await getBusinessAgent(input.id);
       await deleteBusinessAgent(input.id);
+      await recordAuditBestEffort({
+        action: "agent.lifecycle.business_deleted",
+        ...auditActor(ctx.user),
+        ...auditRequest(ctx.req),
+        targetType: "business_agent",
+        targetId: input.id,
+        targetName: existing?.name || null,
+        runtimeType: existing?.providerType || null,
+        runtimeAgentId: existing?.remoteAgentId || existing?.localAgentId || input.id,
+        metadata: {
+          kind: existing?.kind || null,
+          priorEnabled: existing?.enabled ?? null,
+        },
+      });
       return { ok: true };
     }),
-    setEnabled: adminProcedure.input(z.object({ id: z.string(), enabled: z.number().int() })).mutation(async ({ input }) => {
+    setEnabled: adminProcedure.input(z.object({ id: z.string(), enabled: z.number().int() })).mutation(async ({ input, ctx }) => {
       if (input.enabled) {
         const existing = await getBusinessAgent(input.id);
         assertBuiltinPresetAllowed({
@@ -315,7 +351,22 @@ export const bizAgentsRouter = router({
           adapterProtocol: existing?.adapterProtocol || inferAdapterProtocol({ id: input.id, kind: existing?.kind }),
         });
       }
+      const existing = await getBusinessAgent(input.id);
       await updateBusinessAgentEnabled(input.id, input.enabled);
+      await recordAuditBestEffort({
+        action: input.enabled ? "agent.lifecycle.business_enabled" : "agent.lifecycle.business_disabled",
+        ...auditActor(ctx.user),
+        ...auditRequest(ctx.req),
+        targetType: "business_agent",
+        targetId: input.id,
+        targetName: existing?.name || null,
+        runtimeType: existing?.providerType || null,
+        runtimeAgentId: existing?.remoteAgentId || existing?.localAgentId || input.id,
+        metadata: {
+          previousEnabled: existing?.enabled ?? null,
+          enabled: input.enabled,
+        },
+      });
       return { ok: true };
     }),
 });

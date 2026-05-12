@@ -2,6 +2,7 @@ import express from "express";
 import {
   requireClawOwner, readOpenclawJson,
 } from "./helpers";
+import { auditActor, auditRequest, recordAuditBestEffort } from "./audit-events";
 
 export function registerToolsPolicyRoutes(app: express.Express) {
 
@@ -59,6 +60,26 @@ export function registerToolsPolicyRoutes(app: express.Express) {
       const tools = agentCfg?.tools || {};
       const defaults = ocJson?.agents?.defaults || {};
       const sandbox = defaults?.sandbox || {};
+
+      await recordAuditBestEffort({
+        action: "browser.policy.viewed",
+        ...auditActor({ id: (claw as any).userId }),
+        ...auditRequest(req),
+        targetType: "agent",
+        targetId: adoptId,
+        targetName: String((claw as any).agentId || ""),
+        agentInstanceId: adoptId,
+        runtimeType: String(adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+        runtimeAgentId: String((claw as any).agentId || ""),
+        policyCode: String(tools.profile || "none"),
+        metadata: {
+          route: "tools.policy",
+          source: "openclaw_config",
+          allowCount: Array.isArray(tools.allow) ? tools.allow.length : 0,
+          denyCount: Array.isArray(tools.deny) ? tools.deny.length : 0,
+          sandboxMode: sandbox.mode || "none",
+        },
+      });
 
       return res.json({
         adoptId,
@@ -141,6 +162,25 @@ export function registerToolsPolicyRoutes(app: express.Express) {
           badge: "OpenClaw",
         }],
       };
+
+      await recordAuditBestEffort({
+        action: "browser.policy.effective_viewed",
+        ...auditActor({ id: (claw as any).userId }),
+        ...auditRequest(req),
+        targetType: "agent",
+        targetId: adoptId,
+        targetName: String((claw as any).agentId || ""),
+        agentInstanceId: adoptId,
+        runtimeType: String(adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+        runtimeAgentId: String((claw as any).agentId || ""),
+        policyCode: profile,
+        metadata: {
+          route: "tools.effective",
+          source: "openclaw_config",
+          groupCount: groups.length + 1,
+          sandboxAvailable: execGroup.tools[0].runtimeAvailable,
+        },
+      });
 
       return res.json({
         adoptId,

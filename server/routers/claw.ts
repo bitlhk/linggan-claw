@@ -49,6 +49,8 @@ import {
   writeClawExecAudit,
 } from "./helpers";
 import { hermesProfileSkillsDir, resolveRuntimeAgentId } from "../_core/helpers";
+import { getAuditBaselineHealth } from "../_core/audit-health";
+import { auditActor, auditErrorMetadata, auditRequest, recordAuditBestEffort, recordAuditRequired } from "../_core/audit-events";
 import { onboardBuiltinSkillsForAdopt } from "../_core/skills/skill-onboarding";
 import { skillRegistry } from "../_core/skills/skill-registry";
 import { parseSkillSourceDirectory } from "../_core/skills/skill-source";
@@ -190,6 +192,7 @@ export const clawRouter = router({
         if (Number(claw.userId) !== Number(ctx.user!.id)) {
           throw new Error("无权修改该智能体设置");
         }
+        const previousModel = String((claw as any).model || "");
 
         // 1) 保存到业务设置（用于页面回显）
         await upsertClawProfileSettings(Number(claw.id), {
@@ -220,6 +223,25 @@ export const clawRouter = router({
           obj[input.adoptId] = input.modelId;
           writeFileSync(op, JSON.stringify(obj, null, 2), "utf8");
         } catch (e) { console.warn("[switchModel] overrides persist failed:", e); }
+
+        await recordAuditBestEffort({
+          action: "model.switched",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "agent",
+          targetId: input.adoptId,
+          targetName: String((claw as any).agentId || input.adoptId),
+          agentInstanceId: input.adoptId,
+          runtimeType: String(input.adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeAgentId: String((claw as any).agentId || ""),
+          metadata: {
+            previousModel: previousModel || null,
+            model: input.modelId,
+            applied: applied.ok,
+            statusCode: applied.statusCode || null,
+            persistedToConfig: cfgApplied.ok,
+          },
+        });
 
         return {
           ok: true,
@@ -253,12 +275,31 @@ export const clawRouter = router({
         status: z.enum(["creating", "active", "expiring", "recycled", "failed"]).optional(),
         expiresAt: z.string().datetime().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        const before = await getClawAdoptionAdminById(input.id);
         await updateClawAdoptionAdmin(input.id, {
           permissionProfile: input.permissionProfile as any,
           ttlDays: input.ttlDays,
           status: input.status as any,
           expiresAt: input.expiresAt ? new Date(input.expiresAt) : undefined,
+        });
+        await recordAuditBestEffort({
+          action: "agent.lifecycle.admin_updated",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "agent",
+          targetId: before?.adoptId ? String(before.adoptId) : String(input.id),
+          targetName: before?.agentId ? String(before.agentId) : null,
+          agentInstanceId: before?.adoptId ? String(before.adoptId) : null,
+          runtimeType: before?.adoptId && String(before.adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeAgentId: before?.agentId ? String(before.agentId) : null,
+          metadata: {
+            id: input.id,
+            permissionProfile: input.permissionProfile || null,
+            ttlDays: input.ttlDays ?? null,
+            status: input.status || null,
+            expiresAt: input.expiresAt || null,
+          },
         });
         return { ok: true };
       }),
@@ -270,7 +311,20 @@ export const clawRouter = router({
         ttlDays: z.number().int().min(0).max(365).optional(),
         status: z.enum(["creating", "active", "expiring", "recycled", "failed"]).optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        await recordAuditBestEffort({
+          action: "agent.lifecycle.batch_admin_updated",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "agent_batch",
+          targetId: input.ids.join(","),
+          metadata: {
+            count: input.ids.length,
+            permissionProfile: input.permissionProfile || null,
+            ttlDays: input.ttlDays ?? null,
+            status: input.status || null,
+          },
+        });
         await batchUpdateClawAdoptionAdmin(input.ids, {
           permissionProfile: input.permissionProfile as any,
           ttlDays: input.ttlDays,
@@ -311,6 +365,30 @@ export const clawRouter = router({
 
         const deleted = await deleteClawAdoptionAdmin(input.id);
         bumpClawSessionEpochBestEffort(adoptId);
+        await recordAuditBestEffort({
+          action: "agent.lifecycle.deleted",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "agent",
+          targetId: adoptId,
+          targetName: String(row.agentId || ""),
+          agentInstanceId: adoptId,
+          runtimeType: adoptId.startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeAgentId,
+          metadata: {
+            id: input.id,
+            priorStatus: row.status,
+            workspaceRemoved: !existsSync(workspacePath),
+            agentStateRemoved: !existsSync(agentStatePath),
+            skillsRemoved,
+            configPruned,
+            weixinCleanup: {
+              removed: Boolean(weixinCleanup?.removed),
+              accountIdPresent: Boolean(weixinCleanup?.accountId),
+              userIdPresent: Boolean(weixinCleanup?.userId),
+            },
+          },
+        });
         writeClawExecAudit({
           adoptId,
           agentId: String(row.agentId || ""),
@@ -441,6 +519,8 @@ export const clawRouter = router({
         dbHealth.error = String(e?.message || e);
       }
 
+      const auditBaseline = await getAuditBaselineHealth();
+
       const channelLines = channelStatus.output.split(/\r?\n/).filter((line) => line.trim().startsWith("- "));
       const channels = channelLines.map((line) => ({
         raw: line.replace(/^\-\s*/, ""),
@@ -488,6 +568,7 @@ export const clawRouter = router({
           agentModelDrift,
         },
         database: dbHealth,
+        audit: auditBaseline,
       });
     }),
 
@@ -520,6 +601,21 @@ export const clawRouter = router({
           license: input.license || "MIT",
           packagePath: `${marketDir}/${status}/${input.skillId}`,
         });
+        await recordAuditBestEffort({
+          action: "skill.market.created",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "skill",
+          targetId: input.skillId,
+          targetName: input.name,
+          metadata: {
+            marketId: id,
+            status,
+            category: input.category || "general",
+            origin: input.origin || "opensource",
+            version: input.version || "1.0.0",
+          },
+        });
         return { ok: true, id };
       }),
 
@@ -530,33 +626,102 @@ export const clawRouter = router({
         status: z.enum(["approved", "rejected", "offline"]),
         reviewNote: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const item = await getSkillMarketItem(input.id);
         if (!item) throw new TRPCError({ code: "NOT_FOUND" });
-        const marketDir = openClawSkillMarketDir();
-        const { execSync } = await import("child_process");
-        const oldDir = item.packagePath || `${marketDir}/${item.status}/${item.skillId}`;
-        const newDir = `${marketDir}/${input.status}/${item.skillId}-${item.id}`;
-        if (oldDir !== newDir) {
-          try {
-            execSync(`mkdir -p ${newDir} && cp -r ${oldDir}/* ${newDir}/ 2>/dev/null; rm -rf ${oldDir}`, { stdio: "ignore" });
-          } catch {}
-        }
         if (input.status === "approved") {
-          const origin = String((item as any).origin || "opensource");
-          const approvedRows = await listSkillMarketItems("approved");
-          for (const row of approvedRows) {
-            if (Number(row.id) === Number(item.id)) continue;
-            if (String(row.skillId) !== String(item.skillId)) continue;
-            if (String((row as any).origin || "opensource") !== origin) continue;
-            await updateSkillMarketItem(Number(row.id), { status: "offline" });
-          }
+          await recordAuditRequired({
+            action: "skill.market.approved.requested",
+            ...auditActor(ctx.user),
+            ...auditRequest(ctx.req),
+            targetType: "skill",
+            targetId: String(item.skillId || item.id),
+            targetName: item.name || null,
+            metadata: {
+              marketId: input.id,
+              previousStatus: item.status || null,
+              reviewNotePresent: Boolean(input.reviewNote),
+            },
+          });
         }
-        await updateSkillMarketItem(input.id, {
-          status: input.status,
-          reviewNote: input.reviewNote || null,
-          packagePath: newDir,
-        });
+        try {
+          const marketDir = openClawSkillMarketDir();
+          const { execSync } = await import("child_process");
+          const oldDir = item.packagePath || `${marketDir}/${item.status}/${item.skillId}`;
+          const newDir = `${marketDir}/${input.status}/${item.skillId}-${item.id}`;
+          if (oldDir !== newDir) {
+            try {
+              execSync(`mkdir -p ${newDir} && cp -r ${oldDir}/* ${newDir}/ 2>/dev/null; rm -rf ${oldDir}`, { stdio: "ignore" });
+            } catch {}
+          }
+          if (input.status === "approved") {
+            const origin = String((item as any).origin || "opensource");
+            const approvedRows = await listSkillMarketItems("approved");
+            for (const row of approvedRows) {
+              if (Number(row.id) === Number(item.id)) continue;
+              if (String(row.skillId) !== String(item.skillId)) continue;
+              if (String((row as any).origin || "opensource") !== origin) continue;
+              await updateSkillMarketItem(Number(row.id), { status: "offline" });
+            }
+          }
+          await updateSkillMarketItem(input.id, {
+            status: input.status,
+            reviewNote: input.reviewNote || null,
+            packagePath: newDir,
+          });
+          if (input.status === "approved") {
+            await recordAuditRequired({
+              action: "skill.market.approved.completed",
+              ...auditActor(ctx.user),
+              ...auditRequest(ctx.req),
+              targetType: "skill",
+              targetId: String(item.skillId || item.id),
+              targetName: item.name || null,
+              metadata: {
+                marketId: input.id,
+                previousStatus: item.status || null,
+                status: input.status,
+                reviewNotePresent: Boolean(input.reviewNote),
+              },
+            });
+          } else {
+            await recordAuditBestEffort({
+              action: "skill.market.reviewed",
+              ...auditActor(ctx.user),
+              ...auditRequest(ctx.req),
+              targetType: "skill",
+              targetId: String(item.skillId || item.id),
+              targetName: item.name || null,
+              metadata: {
+                marketId: input.id,
+                previousStatus: item.status || null,
+                status: input.status,
+                reviewNotePresent: Boolean(input.reviewNote),
+              },
+            });
+          }
+        } catch (error) {
+          if (input.status === "approved") {
+            await recordAuditBestEffort({
+              action: "skill.market.approved.failed",
+              result: "failed",
+              severity: "high",
+              ...auditActor(ctx.user),
+              ...auditRequest(ctx.req),
+              targetType: "skill",
+              targetId: String(item.skillId || item.id),
+              targetName: item.name || null,
+              errorCode: "SKILL_MARKET_APPROVAL_FAILED",
+              metadata: {
+                marketId: input.id,
+                previousStatus: item.status || null,
+                reviewNotePresent: Boolean(input.reviewNote),
+                ...auditErrorMetadata(error),
+              },
+            });
+          }
+          throw error;
+        }
         return { ok: true };
       }),
 
@@ -649,13 +814,26 @@ export const clawRouter = router({
     // 删除
     adminDeleteMarketSkill: adminProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const item = await getSkillMarketItem(input.id);
         if (item?.packagePath) {
           const { execSync } = await import("child_process");
           try { execSync(`rm -rf ${item.packagePath}`, { stdio: "ignore" }); } catch {}
         }
         await deleteSkillMarketItem(input.id);
+        await recordAuditBestEffort({
+          action: "skill.market.deleted",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "skill",
+          targetId: String(item?.skillId || input.id),
+          targetName: item?.name || null,
+          metadata: {
+            marketId: input.id,
+            priorStatus: item?.status || null,
+            packagePathPresent: Boolean(item?.packagePath),
+          },
+        });
         return { ok: true };
       }),
 
@@ -679,6 +857,7 @@ export const clawRouter = router({
         const item = await getSkillMarketItem(input.marketId);
         if (!item || item.status !== "approved") throw new TRPCError({ code: "NOT_FOUND", message: "技能不存在或未上架" });
         await assertClawOwnerOrThrow(ctx, input.adoptId);
+        const claw = await getClawByAdoptId(input.adoptId);
         if (!item.packagePath || !existsSync(item.packagePath)) {
           throw new TRPCError({ code: "NOT_FOUND", message: "技能包源不存在" });
         }
@@ -702,6 +881,24 @@ export const clawRouter = router({
           scannedAt: new Date().toISOString(),
         });
         await incrementSkillDownload(input.marketId);
+        await recordAuditBestEffort({
+          action: "skill.installed",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "skill",
+          targetId: source.skillId,
+          targetName: source.displayName,
+          resourceType: "agent",
+          resourceId: input.adoptId,
+          agentInstanceId: input.adoptId,
+          runtimeType: "openclaw",
+          runtimeAgentId: String(claw?.agentId || ""),
+          metadata: {
+            marketplaceId: input.marketId,
+            version: source.version,
+            warningCount: parsed.warnings.length,
+          },
+        });
         return { ok: true, skillId: source.skillId, name: source.displayName, item: installed.value, warnings: parsed.warnings };
       }),
 
@@ -921,6 +1118,18 @@ export const clawRouter = router({
           entryUrl,
           expiresAt,
         });
+        await recordAuditBestEffort({
+          action: "agent.lifecycle.create_requested",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "agent",
+          targetId: adoptId,
+          targetName: agentId,
+          agentInstanceId: adoptId,
+          runtimeType: "openclaw",
+          runtimeAgentId: agentId,
+          metadata: { profile, ttlDays, lifecycle: ttlDays > 0 ? "temporary" : "long_lived", source: "web" },
+        });
 
         await appendClawAdoptionEvent({
           adoptionId,
@@ -949,6 +1158,23 @@ export const clawRouter = router({
             operatorId: null,
             detail: JSON.stringify(provision),
           });
+          await recordAuditBestEffort({
+            action: "agent.lifecycle.create_succeeded",
+            ...auditActor(ctx.user),
+            ...auditRequest(ctx.req),
+            targetType: "agent",
+            targetId: adoptId,
+            targetName: agentId,
+            agentInstanceId: adoptId,
+            runtimeType: "openclaw",
+            runtimeAgentId: agentId,
+            metadata: {
+              adoptionId,
+              profile,
+              ttlDays,
+              entryUrl,
+            },
+          });
 
           onboardBuiltinSkillsForAdopt(adoptId, agentId).catch((error) => {
             console.warn("[SKILL-ONBOARD] failed", {
@@ -972,6 +1198,21 @@ export const clawRouter = router({
             operatorType: "system",
             operatorId: null,
             detail: msg,
+          });
+          await recordAuditBestEffort({
+            action: "agent.lifecycle.create_failed",
+            result: "failed",
+            severity: "medium",
+            ...auditActor(ctx.user),
+            ...auditRequest(ctx.req),
+            targetType: "agent",
+            targetId: adoptId,
+            targetName: agentId,
+            agentInstanceId: adoptId,
+            runtimeType: "openclaw",
+            runtimeAgentId: agentId,
+            errorCode: "AGENT_CREATE_FAILED",
+            metadata: auditErrorMetadata(error),
           });
           throw new Error(`员工智能体创建失败：${msg}`);
         }
@@ -1388,6 +1629,20 @@ export const clawRouter = router({
         // 与个人技能安装链路对齐：技能变更后 bump epoch，触发聊天使用新技能快照
         bumpClawSessionEpochBestEffort(String(input.adoptId));
 
+        await recordAuditBestEffort({
+          action: input.enable ? "skill.enabled" : "skill.disabled",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "skill",
+          targetId: input.skillId,
+          resourceType: "agent",
+          resourceId: input.adoptId,
+          agentInstanceId: input.adoptId,
+          runtimeType: String(input.adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeAgentId,
+          metadata: { source: input.source },
+        });
+
         return { ok: true, skillId: input.skillId, enabled: input.enable };
       }),
 
@@ -1419,6 +1674,21 @@ export const clawRouter = router({
           fs.mkdirSync(skillDir, { recursive: true });
           fs.writeFileSync(`${skillDir}/SKILL.md`, input.skillMd, "utf8");
         }
+        await recordAuditBestEffort({
+          action: "skill.private.upserted",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "skill",
+          targetId: input.skillId,
+          resourceType: "agent",
+          resourceId: input.adoptId,
+          agentInstanceId: input.adoptId,
+          runtimeType: String(input.adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeAgentId: String(claw.agentId || ""),
+          metadata: {
+            skillMdBytes: Buffer.byteLength(input.skillMd, "utf8"),
+          },
+        });
         return { ok: true, skillId: input.skillId };
       }),
 
@@ -1445,6 +1715,18 @@ export const clawRouter = router({
           const fs = await import("fs");
           fs.rmSync(skillDir, { recursive: true, force: true });
         }
+        await recordAuditBestEffort({
+          action: "skill.private.deleted",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "skill",
+          targetId: input.skillId,
+          resourceType: "agent",
+          resourceId: input.adoptId,
+          agentInstanceId: input.adoptId,
+          runtimeType: String(input.adoptId).startsWith("lgh-") ? "hermes" : "openclaw",
+          runtimeAgentId: String(claw.agentId || ""),
+        });
         return { ok: true };
       }),
 

@@ -42,6 +42,7 @@ import { registerCoopUploadRoutes } from "./coop-upload";
 import { registerWSProxy } from "./claw-ws-proxy";
 import { registerIframeRoutes } from "./claw-iframe";
 import { registerMiscRoutes } from "./claw-misc";
+import { registerAuditExportRoutes } from "./audit-export-routes";
 import { registerAgentClusterLabRoutes } from "../_routes/agent-cluster-lab";
 import { registerTaskWorkbenchLabRoutes } from "../_routes/task-workbench-lab";
 import { APP_ROOT } from "./helpers";
@@ -213,6 +214,7 @@ async function startServer() {
   registerWSProxy(server);
   registerIframeRoutes(app);
   registerMiscRoutes(app);
+  registerAuditExportRoutes(app);
   registerAgentClusterLabRoutes(app);
   registerTaskWorkbenchLabRoutes(app);
 

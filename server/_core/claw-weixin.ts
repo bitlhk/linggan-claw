@@ -11,6 +11,7 @@ import path from "path";
 import { pathToFileURL } from "url";
 import { requireClawOwner, OPENCLAW_HOME, OPENCLAW_JSON_PATH, resolveRuntimeAgentId } from "./helpers";
 import { createOpenClawRuntimeAdapter } from "./runtime";
+import { auditActor, auditRequest, recordAuditBestEffort } from "./audit-events";
 
 const OPENCLAW_WEIXIN_CHANNEL = "openclaw-weixin";
 const OPENCLAW_WEIXIN_STATE_DIR = path.join(OPENCLAW_HOME, "openclaw-weixin");
@@ -370,6 +371,23 @@ export function registerWeixinRoutes(app: express.Express) {
             const userId = String(reusable.account?.userId || "").trim();
             upsertOpenClawWeixinBinding({ adoptId, claw, accountId: reusable.accountId, userId });
             await triggerOfficialWeixinChannelReload();
+            await recordAuditBestEffort({
+              action: "channel.weixin.bound",
+              ...auditActor({ id: claw.userId }),
+              ...auditRequest(req),
+              targetType: "agent",
+              targetId: adoptId,
+              targetName: String(claw.agentId || ""),
+              agentInstanceId: adoptId,
+              runtimeType: "openclaw",
+              runtimeAgentId: runtimeAgentIdFor(adoptId, claw),
+              channel: "weixin",
+              metadata: {
+                reusedAccount: true,
+                accountIdPresent: Boolean(reusable.accountId),
+                userIdPresent: Boolean(userId),
+              },
+            });
             return res.json({ status: "confirmed", userId: userId || reusable.accountId, accountId: reusable.accountId });
           }
           return res.json({ status: "wait", message: result.message || "already connected but no local account was found" });
@@ -384,6 +402,23 @@ export function registerWeixinRoutes(app: express.Express) {
       const userId = String(account?.userId || "").trim();
       upsertOpenClawWeixinBinding({ adoptId, claw, accountId, userId });
       await triggerOfficialWeixinChannelReload();
+      await recordAuditBestEffort({
+        action: "channel.weixin.bound",
+        ...auditActor({ id: claw.userId }),
+        ...auditRequest(req),
+        targetType: "agent",
+        targetId: adoptId,
+        targetName: String(claw.agentId || ""),
+        agentInstanceId: adoptId,
+        runtimeType: "openclaw",
+        runtimeAgentId: runtimeAgentIdFor(adoptId, claw),
+        channel: "weixin",
+        metadata: {
+          reusedAccount: false,
+          accountIdPresent: Boolean(accountId),
+          userIdPresent: Boolean(userId),
+        },
+      });
       res.json({ status: "confirmed", userId: userId || accountId, accountId });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -402,6 +437,21 @@ export function registerWeixinRoutes(app: express.Express) {
           callOpenClawRpc("channels.logout", { channel: OPENCLAW_WEIXIN_CHANNEL, accountId }, 25000);
         } catch {}
       }
+      await recordAuditBestEffort({
+        action: "channel.weixin.unbound",
+        ...auditActor({ id: claw.userId }),
+        ...auditRequest(req),
+        targetType: "agent",
+        targetId: adoptId,
+        targetName: String(claw.agentId || ""),
+        agentInstanceId: adoptId,
+        runtimeType: "openclaw",
+        runtimeAgentId: runtimeAgentIdFor(adoptId, claw),
+        channel: "weixin",
+        metadata: {
+          accountIdPresent: Boolean(accountId),
+        },
+      });
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

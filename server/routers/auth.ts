@@ -21,6 +21,7 @@ import {
   markPasswordResetTokenAsUsed,
 } from "../db";
 import { generateVerificationCode, sendVerificationCodeEmail, sendPasswordResetEmail } from "../_core/email";
+import { auditActor, auditRequest, recordAuditBestEffort, recordAuditRequired } from "../_core/audit-events";
 import { TEST_MODE, checkAndRecordIpAccess } from "./helpers";
 
 const isEmailVerificationRequired = () => process.env.EMAIL_VERIFICATION_REQUIRED !== "false";
@@ -53,8 +54,39 @@ export const authRouter = router({
           accessLevel: z.enum(["public_only", "all"]),
         })
       )
-      .mutation(async ({ input }) => {
-        await updateUserAccessLevel(input.userId, input.accessLevel);
+      .mutation(async ({ input, ctx }) => {
+        await recordAuditRequired({
+          action: "admin.user.access_changed.requested",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "user",
+          targetId: String(input.userId),
+          metadata: { accessLevel: input.accessLevel },
+        });
+        try {
+          await updateUserAccessLevel(input.userId, input.accessLevel);
+          await recordAuditRequired({
+            action: "admin.user.access_changed.completed",
+            ...auditActor(ctx.user),
+            ...auditRequest(ctx.req),
+            targetType: "user",
+            targetId: String(input.userId),
+            metadata: { accessLevel: input.accessLevel },
+          });
+        } catch (error) {
+          await recordAuditBestEffort({
+            action: "admin.user.access_changed.failed",
+            result: "failed",
+            severity: "high",
+            ...auditActor(ctx.user),
+            ...auditRequest(ctx.req),
+            targetType: "user",
+            targetId: String(input.userId),
+            errorCode: "ADMIN_ACCESS_CHANGE_FAILED",
+            metadata: { accessLevel: input.accessLevel, error: error instanceof Error ? error.message : String(error) },
+          });
+          throw error;
+        }
         return { success: true };
       }),
 
@@ -66,9 +98,38 @@ export const authRouter = router({
           password: z.string().min(6, "密码至少需要6个字符").max(100, "密码过长"),
         })
       )
-      .mutation(async ({ input }) => {
-        const hashedPassword = await bcrypt.hash(input.password, 10);
-        await updateUser(input.userId, { password: hashedPassword });
+      .mutation(async ({ input, ctx }) => {
+        await recordAuditRequired({
+          action: "admin.user.password_reset.requested",
+          ...auditActor(ctx.user),
+          ...auditRequest(ctx.req),
+          targetType: "user",
+          targetId: String(input.userId),
+        });
+        try {
+          const hashedPassword = await bcrypt.hash(input.password, 10);
+          await updateUser(input.userId, { password: hashedPassword });
+          await recordAuditRequired({
+            action: "admin.user.password_reset.completed",
+            ...auditActor(ctx.user),
+            ...auditRequest(ctx.req),
+            targetType: "user",
+            targetId: String(input.userId),
+          });
+        } catch (error) {
+          await recordAuditBestEffort({
+            action: "admin.user.password_reset.failed",
+            result: "failed",
+            severity: "high",
+            ...auditActor(ctx.user),
+            ...auditRequest(ctx.req),
+            targetType: "user",
+            targetId: String(input.userId),
+            errorCode: "ADMIN_PASSWORD_RESET_FAILED",
+            metadata: { error: error instanceof Error ? error.message : String(error) },
+          });
+          throw error;
+        }
         return { success: true };
       }),
     // 邮箱密码注册
@@ -233,12 +294,34 @@ export const authRouter = router({
         // 查找用户
         const user = await getUserByEmail(input.email);
         if (!user || !user.password) {
+          await recordAuditBestEffort({
+            action: "auth.login.failed",
+            result: "failed",
+            severity: "medium",
+            actorType: "anonymous",
+            actorEmail: input.email,
+            ...auditRequest(ctx.req),
+            errorCode: "AUTH_INVALID_CREDENTIALS",
+            metadata: { reason: "user_missing_or_password_unset" },
+          });
           throw new Error("邮箱或密码错误");
         }
 
         // 验证密码
         const isValid = await bcrypt.compare(input.password, user.password);
         if (!isValid) {
+          await recordAuditBestEffort({
+            action: "auth.login.failed",
+            result: "failed",
+            severity: "medium",
+            actorType: "anonymous",
+            actorEmail: input.email,
+            targetType: "user",
+            targetId: String(user.id),
+            ...auditRequest(ctx.req),
+            errorCode: "AUTH_INVALID_CREDENTIALS",
+            metadata: { reason: "bad_password" },
+          });
           throw new Error("邮箱或密码错误");
         }
 
@@ -253,6 +336,15 @@ export const authRouter = router({
         ctx.res.cookie(COOKIE_NAME, sessionToken, {
           ...cookieOptions,
           maxAge: 365 * 24 * 60 * 60 * 1000, // 1年
+        });
+
+        await recordAuditBestEffort({
+          action: "auth.login.success",
+          ...auditActor(user),
+          ...auditRequest(ctx.req),
+          targetType: "user",
+          targetId: String(user.id),
+          metadata: { method: "password" },
         });
 
         return {
@@ -321,6 +413,15 @@ export const authRouter = router({
         // 6. 发送重置邮件
         await sendPasswordResetEmail(email, resetToken, requestOrigin);
 
+        await recordAuditBestEffort({
+          action: "auth.password_reset.requested",
+          ...auditActor(user),
+          ...auditRequest(ctx.req),
+          targetType: "user",
+          targetId: String(user.id),
+          metadata: { delivery: "email" },
+        });
+
         return { success: true };
       }),
 
@@ -332,7 +433,7 @@ export const authRouter = router({
           newPassword: z.string().min(6, "密码至少需要6个字符").max(100, "密码过长"),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { token, newPassword } = input;
 
         // 1. 验证token
@@ -357,6 +458,14 @@ export const authRouter = router({
 
         // 5. 标记token为已使用
         await markPasswordResetTokenAsUsed(token);
+
+        await recordAuditBestEffort({
+          action: "auth.password_reset.completed",
+          ...auditActor(user),
+          ...auditRequest(ctx.req),
+          targetType: "user",
+          targetId: String(user.id),
+        });
 
         return { success: true };
       }),

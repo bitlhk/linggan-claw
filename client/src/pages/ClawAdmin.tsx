@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck, Building2, Trash2, KeyRound, UserCog, Activity, Server, Database, Radio, GitBranch } from "lucide-react";
+import { Loader2, ArrowLeft, Search, Users, Settings, RefreshCw, Sparkles, Zap, BarChart3, ShieldCheck, Building2, Trash2, KeyRound, UserCog, Activity, Server, Database, Radio, GitBranch, Download, FileText, Eye } from "lucide-react";
 import { UsageStatsTab } from "@/components/pages/UsageStatsTab";
 import { TenantAuditTab } from "@/components/pages/TenantAuditTab";
 import { BizAgentsPanel } from "@/components/BizAgentsPanel";
@@ -76,7 +76,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 const formatBytes = (value?: number) => {
   const n = Number(value || 0);
-  if (!n) return "-";
+  if (n <= 0) return "0 B";
+  if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 };
@@ -91,6 +92,15 @@ const formatUptime = (value?: number) => {
   const hours = Math.floor(minutes / 60);
   if (hours < 48) return `${hours} 小时`;
   return `${Math.floor(hours / 24)} 天`;
+};
+
+const formatAuditJson = (value: unknown) => {
+  if (value === undefined || value === null) return "{}";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 };
 
 const HealthBadge = ({ ok, warn, label }: { ok?: boolean; warn?: boolean; label?: string }) => (
@@ -327,6 +337,17 @@ export default function ClawAdmin() {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [passwordTarget, setPasswordTarget] = useState<any | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const [selectedAuditEvent, setSelectedAuditEvent] = useState<any | null>(null);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditFilters, setAuditFilters] = useState({
+    q: "",
+    category: "all",
+    action: "",
+    result: "all",
+    severity: "all",
+    from: "",
+    to: "",
+  });
 
   useEffect(() => {
     const previous = document.body.getAttribute("data-admin-light");
@@ -496,6 +517,40 @@ export default function ClawAdmin() {
     refetchInterval: activeTab === "health" ? 30000 : false,
   });
   const authUsers = Array.isArray(authUsersData) ? authUsersData : [];
+  const auditQueryInput = {
+    page: auditPage,
+    pageSize: 50,
+    q: auditFilters.q.trim() || undefined,
+    category: auditFilters.category === "all" ? undefined : auditFilters.category,
+    action: auditFilters.action.trim() || undefined,
+    result: auditFilters.result === "all" ? undefined : auditFilters.result as any,
+    severity: auditFilters.severity === "all" ? undefined : auditFilters.severity as any,
+    from: auditFilters.from ? new Date(auditFilters.from).toISOString() : undefined,
+    to: auditFilters.to ? new Date(auditFilters.to).toISOString() : undefined,
+  };
+  const { data: auditEventsData, isLoading: auditEventsLoading, refetch: refetchAuditEvents } = trpc.audit.listEvents.useQuery(auditQueryInput, {
+    enabled: activeTab === "security-audit",
+    retry: false,
+  });
+  const { data: auditExportsData, refetch: refetchAuditExports } = trpc.audit.listExports.useQuery(undefined, {
+    enabled: activeTab === "security-audit",
+    retry: false,
+  });
+  const createAuditExportMutation = trpc.audit.createExport.useMutation({
+    onSuccess: (data) => {
+      refetchAuditExports();
+      refetchAuditEvents();
+      toast.success(`导出已生成：${data.rowCount} 行`);
+    },
+    onError: (e: any) => toast.error(e?.message || "导出失败"),
+  });
+  const auditRows = Array.isArray((auditEventsData as any)?.rows) ? (auditEventsData as any).rows : [];
+  const auditTotal = Number((auditEventsData as any)?.total || 0);
+  const auditExports = Array.isArray(auditExportsData) ? auditExportsData : [];
+  const requestAuditExport = (format: "csv" | "json") => {
+    const { page: _page, pageSize: _pageSize, ...filters } = auditQueryInput;
+    createAuditExportMutation.mutate({ ...filters, format });
+  };
   const setUserPasswordMutation = trpc.auth.setUserPassword.useMutation({
     onSuccess: () => {
       toast.success("密码已更新");
@@ -521,6 +576,11 @@ export default function ClawAdmin() {
 
   const summary = listData?.summary;
   const rows = listData?.rows || [];
+  const healthData = systemHealth as any;
+  const auditHealth = healthData?.audit;
+  const auditTables = Array.isArray(auditHealth?.tables) ? auditHealth.tables : [];
+  const auditPresentCount = auditTables.filter((table: any) => table.exists).length;
+  const auditExpectedCount = auditTables.length || 4;
 
   const toggleSelect = (id: number) => {
     setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
@@ -537,6 +597,7 @@ export default function ClawAdmin() {
     { value: "usage", label: "使用统计", description: "访问与使用趋势", icon: BarChart3 },
     { value: "accounts", label: "账号管理", description: "管理员与登录密码", icon: UserCog },
     { value: "health", label: "系统健康", description: "OpenClaw 与平台状态", icon: Activity },
+    { value: "security-audit", label: "安全审计", description: "Ledger 查询与导出", icon: ShieldCheck },
     { value: "settings", label: "系统设置", description: "智能体运行配置", icon: Settings },
     { value: "brand", label: "品牌设置", description: "名称、视觉与身份", icon: Sparkles },
     { value: "collab", label: "智能体协作", description: "协作能力管理", icon: Zap },
@@ -1087,7 +1148,7 @@ export default function ClawAdmin() {
                 </div>
               ) : systemHealth ? (
                 <div className="space-y-5">
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                     <HealthMetricCard
                       icon={Server}
                       title="平台服务"
@@ -1117,6 +1178,14 @@ export default function ClawAdmin() {
                       value={(systemHealth as any).database?.ok ? "connected" : "failed"}
                       desc={`技能 ${(systemHealth as any).database?.skillMarketApproved ?? "-"} 个 · 子智能体 ${(systemHealth as any).database?.claws?.active ?? "-"}/${(systemHealth as any).database?.claws?.total ?? "-"}`}
                       ok={Boolean((systemHealth as any).database?.ok && ((systemHealth as any).database?.tables || []).every((t: any) => t.exists))}
+                    />
+                    <HealthMetricCard
+                      icon={ShieldCheck}
+                      title="Audit Ledger"
+                      value={auditHealth?.ok ? "ready" : "attention"}
+                      desc={`tables ${auditPresentCount}/${auditExpectedCount} · DLQ ${formatBytes(auditHealth?.dlq?.bytes)} · failures ${auditHealth?.recentFailures?.length ?? "-"}`}
+                      ok={Boolean(auditHealth?.ok)}
+                      warn={Boolean(auditHealth && !auditHealth.ok)}
                     />
                   </div>
 
@@ -1159,6 +1228,34 @@ export default function ClawAdmin() {
 
                   <Card className="p-5">
                     <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900">Audit Ledger Baseline</h3>
+                      <HealthBadge ok={Boolean(auditHealth?.ok)} warn={Boolean(auditHealth && !auditHealth.ok)} />
+                    </div>
+                    {auditHealth ? (
+                      <div className="space-y-4">
+                        <div className="grid gap-3 lg:grid-cols-4">
+                          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs"><div className="text-muted-foreground">Rows</div><div className="mt-1 font-mono text-sm font-semibold text-gray-900">{auditHealth.ledger?.rowCount ?? 0}</div></div>
+                          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs"><div className="text-muted-foreground">Oldest</div><div className="mt-1 font-mono text-[11px] text-gray-900">{auditHealth.ledger?.oldestEventTime ? new Date(auditHealth.ledger.oldestEventTime).toLocaleString("zh-CN") : "-"}</div></div>
+                          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs"><div className="text-muted-foreground">Newest</div><div className="mt-1 font-mono text-[11px] text-gray-900">{auditHealth.ledger?.newestEventTime ? new Date(auditHealth.ledger.newestEventTime).toLocaleString("zh-CN") : "-"}</div></div>
+                          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs"><div className="text-muted-foreground">DLQ</div><div className="mt-1 font-mono text-sm font-semibold text-gray-900">{auditHealth.dlq?.eventCount ?? 0} events · {formatBytes(auditHealth.dlq?.bytes)}</div></div>
+                        </div>
+                        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                          <div className="grid grid-cols-[minmax(180px,1fr)_80px_90px_minmax(130px,160px)_minmax(130px,160px)] border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500"><span>Table</span><span>Status</span><span>Rows</span><span>Oldest</span><span>Newest</span></div>
+                          {auditTables.map((table: any) => (
+                            <div key={table.name} className="grid grid-cols-[minmax(180px,1fr)_80px_90px_minmax(130px,160px)_minmax(130px,160px)] items-center border-b border-gray-100 px-3 py-2 text-xs last:border-b-0"><span className="font-mono text-gray-800">{table.name}</span><span><HealthBadge ok={table.exists} label={table.exists ? "exists" : "missing"} /></span><span className="font-mono text-gray-700">{table.rowCount ?? "-"}</span><span className="font-mono text-[11px] text-gray-600">{table.oldest ? new Date(table.oldest).toLocaleDateString("zh-CN") : "-"}</span><span className="font-mono text-[11px] text-gray-600">{table.newest ? new Date(table.newest).toLocaleDateString("zh-CN") : "-"}</span></div>
+                          ))}
+                        </div>
+                        <div className="grid gap-4 xl:grid-cols-2">
+                          <div className="rounded-xl border border-gray-200 bg-white p-4 text-xs"><div className="mb-2 flex items-center justify-between"><span className="font-semibold text-gray-900">Runtime DB Grants</span><HealthBadge ok={Boolean(auditHealth.permissions?.ok)} warn={!auditHealth.permissions?.ok} /></div><div className="font-mono text-gray-700">{auditHealth.permissions?.currentUser || "unknown"}</div><div className="mt-2 text-muted-foreground">Grant count: {auditHealth.permissions?.grantCount ?? 0}</div>{(auditHealth.permissions?.forbiddenPrivileges || []).length > 0 ? (<div className="mt-2 flex flex-wrap gap-1.5">{auditHealth.permissions.forbiddenPrivileges.map((priv: string) => <span key={priv} className="rounded-full bg-red-50 px-2 py-1 font-mono text-[11px] text-red-700">{priv}</span>)}</div>) : null}</div>
+                          <div className="rounded-xl border border-gray-200 bg-white p-4 text-xs"><div className="mb-2 flex items-center justify-between"><span className="font-semibold text-gray-900">Recent Failures</span><span className="text-muted-foreground">{auditHealth.recentFailures?.length || 0}</span></div>{(auditHealth.recentFailures || []).slice(0, 3).map((event: any) => (<div key={event.eventId} className="mb-2 rounded-lg bg-gray-50 px-3 py-2 last:mb-0"><div className="truncate font-mono text-gray-800">{event.action}</div><div className="mt-1 text-[11px] text-muted-foreground">{event.result} · {event.severity} · {event.eventTime ? new Date(event.eventTime).toLocaleString("zh-CN") : "-"}</div></div>))}{(auditHealth.recentFailures || []).length === 0 ? <div className="rounded-lg bg-gray-50 px-3 py-3 text-center text-muted-foreground">No failure events</div> : null}</div>
+                        </div>
+                        {(auditHealth.warnings || []).length > 0 ? <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">{auditHealth.warnings.join(" · ")}</div> : null}
+                      </div>
+                    ) : (<div className="rounded-lg bg-gray-50 px-3 py-3 text-center text-xs text-muted-foreground">No audit baseline data</div>)}
+                  </Card>
+
+                  <Card className="p-5">
+                    <div className="mb-3 flex items-center justify-between">
                       <h3 className="text-sm font-semibold text-gray-900">频道明细</h3>
                       <HealthBadge ok={Boolean((systemHealth as any).channels?.ok)} warn={!((systemHealth as any).channels?.ok)} />
                     </div>
@@ -1180,10 +1277,233 @@ export default function ClawAdmin() {
               )}
             </Card>
           </TabsContent>
+          <TabsContent value="security-audit" className="space-y-4">
+            <Card className="admin-panel-card p-6">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">安全审计</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">查询 Enterprise Audit Ledger，并生成短期受控导出文件。</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" className="admin-secondary-action" onClick={() => { refetchAuditEvents(); refetchAuditExports(); }}>
+                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                    刷新
+                  </Button>
+                  <Button size="sm" variant="outline" className="admin-secondary-action" disabled={createAuditExportMutation.isPending} onClick={() => requestAuditExport("json")}>
+                    <FileText className="mr-1.5 h-3.5 w-3.5" />
+                    JSON
+                  </Button>
+                  <Button size="sm" disabled={createAuditExportMutation.isPending} onClick={() => requestAuditExport("csv")}>
+                    {createAuditExportMutation.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
+                    CSV
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-7">
+                <div className="xl:col-span-2">
+                  <Label className="text-xs">关键词</Label>
+                  <Input
+                    value={auditFilters.q}
+                    onChange={(e) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, q: e.target.value })); }}
+                    placeholder="event/action/email/target"
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Category</Label>
+                  <Select value={auditFilters.category} onValueChange={(value) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, category: value })); }}>
+                    <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部</SelectItem>
+                      <SelectItem value="auth">auth</SelectItem>
+                      <SelectItem value="admin">admin</SelectItem>
+                      <SelectItem value="agent">agent</SelectItem>
+                      <SelectItem value="channel">channel</SelectItem>
+                      <SelectItem value="model">model</SelectItem>
+                      <SelectItem value="skill">skill</SelectItem>
+                      <SelectItem value="tool">tool</SelectItem>
+                      <SelectItem value="browser">browser</SelectItem>
+                      <SelectItem value="audit">audit</SelectItem>
+                      <SelectItem value="system">system</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Action</Label>
+                  <Input
+                    value={auditFilters.action}
+                    onChange={(e) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, action: e.target.value })); }}
+                    placeholder="auth.login.success"
+                    className="mt-1 h-9"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Result</Label>
+                  <Select value={auditFilters.result} onValueChange={(value) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, result: value })); }}>
+                    <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部</SelectItem>
+                      <SelectItem value="success">success</SelectItem>
+                      <SelectItem value="failed">failed</SelectItem>
+                      <SelectItem value="denied">denied</SelectItem>
+                      <SelectItem value="warning">warning</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Severity</Label>
+                  <Select value={auditFilters.severity} onValueChange={(value) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, severity: value })); }}>
+                    <SelectTrigger className="mt-1 h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部</SelectItem>
+                      <SelectItem value="info">info</SelectItem>
+                      <SelectItem value="low">low</SelectItem>
+                      <SelectItem value="medium">medium</SelectItem>
+                      <SelectItem value="high">high</SelectItem>
+                      <SelectItem value="critical">critical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">开始</Label>
+                  <Input type="datetime-local" value={auditFilters.from} onChange={(e) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, from: e.target.value })); }} className="mt-1 h-9" />
+                </div>
+                <div>
+                  <Label className="text-xs">结束</Label>
+                  <Input type="datetime-local" value={auditFilters.to} onChange={(e) => { setAuditPage(1); setAuditFilters((prev) => ({ ...prev, to: e.target.value })); }} className="mt-1 h-9" />
+                </div>
+              </div>
+
+              <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
+                <span>共 {auditTotal} 条，当前第 {auditPage} 页</span>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" className="h-8" disabled={auditPage <= 1} onClick={() => setAuditPage((p) => Math.max(1, p - 1))}>上一页</Button>
+                  <Button size="sm" variant="outline" className="h-8" disabled={auditPage * 50 >= auditTotal} onClick={() => setAuditPage((p) => p + 1)}>下一页</Button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+                <div className="grid min-w-[1040px] grid-cols-[170px_90px_240px_90px_90px_minmax(160px,1fr)_minmax(120px,180px)_74px] border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+                  <span>Time</span><span>Category</span><span>Action</span><span>Result</span><span>Severity</span><span>Actor / Target</span><span>Agent</span><span>Detail</span>
+                </div>
+                {auditEventsLoading ? (
+                  <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    正在加载审计事件
+                  </div>
+                ) : auditRows.length > 0 ? auditRows.map((event: any) => (
+                  <div key={event.eventId} className="grid min-w-[1040px] grid-cols-[170px_90px_240px_90px_90px_minmax(160px,1fr)_minmax(120px,180px)_74px] items-center border-b border-gray-100 px-3 py-2 text-xs last:border-b-0">
+                    <span className="font-mono text-[11px] text-gray-600">{event.eventTime ? new Date(event.eventTime).toLocaleString("zh-CN") : "-"}</span>
+                    <span className="truncate font-mono text-gray-700">{event.category}</span>
+                    <span className="truncate font-mono text-gray-900" title={event.action}>{event.action}</span>
+                    <span><HealthBadge ok={event.result === "success"} warn={event.result === "warning"} label={event.result} /></span>
+                    <span className="font-mono text-gray-700">{event.severity}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-gray-800">{event.actorEmail || event.actorName || event.actorUserId || event.actorType}</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">{event.targetType || "-"}:{event.targetName || event.targetId || "-"}</span>
+                    </span>
+                    <span className="truncate font-mono text-[11px] text-gray-600">{event.agentInstanceId || event.runtimeAgentId || "-"}</span>
+                    <span>
+                      <Button size="sm" variant="outline" className="h-8 w-8 p-0" title="查看详情" onClick={() => setSelectedAuditEvent(event)}>
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                    </span>
+                  </div>
+                )) : (
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground">暂无审计事件</div>
+                )}
+              </div>
+            </Card>
+
+            <Card className="admin-panel-card p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900">导出记录</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">下载会重新校验权限、过期时间和文件哈希，并写入下载审计事件。</p>
+                </div>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+                <div className="grid min-w-[760px] grid-cols-[minmax(180px,1fr)_80px_90px_120px_170px_110px] border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500">
+                  <span>Export</span><span>Format</span><span>Rows</span><span>Size</span><span>Expires</span><span>Action</span>
+                </div>
+                {auditExports.length > 0 ? auditExports.map((item: any) => (
+                  <div key={item.exportId} className="grid min-w-[760px] grid-cols-[minmax(180px,1fr)_80px_90px_120px_170px_110px] items-center border-b border-gray-100 px-3 py-2 text-xs last:border-b-0">
+                    <span className="truncate font-mono text-gray-800">{item.exportId}</span>
+                    <span className="font-mono text-gray-700">{item.format}</span>
+                    <span className="font-mono text-gray-700">{item.rowCount}</span>
+                    <span className="font-mono text-gray-700">{formatBytes(item.fileSizeBytes)}</span>
+                    <span className="font-mono text-[11px] text-gray-600">{item.expiresAt ? new Date(item.expiresAt).toLocaleString("zh-CN") : "-"}</span>
+                    <span>
+                      <Button size="sm" variant="outline" className="h-8" onClick={() => { window.location.href = item.downloadUrl; }}>
+                        <Download className="mr-1.5 h-3.5 w-3.5" />
+                        下载
+                      </Button>
+                    </span>
+                  </div>
+                )) : (
+                  <div className="px-4 py-8 text-center text-sm text-muted-foreground">暂无导出记录</div>
+                )}
+              </div>
+            </Card>
+          </TabsContent>
           <TabsContent value="tenant-audit" className="space-y-4">            <TenantAuditTab />          </TabsContent>
           </section>
         </Tabs>
       </main>
+      <Dialog open={!!selectedAuditEvent} onOpenChange={(open) => { if (!open) setSelectedAuditEvent(null); }}>
+        <DialogContent className="max-h-[85vh] overflow-hidden border-border/60 bg-white p-0 shadow-xl sm:max-w-3xl">
+          <DialogHeader className="border-b border-border/60 px-5 py-4">
+            <DialogTitle className="text-base font-semibold text-gray-900">审计事件详情</DialogTitle>
+            <DialogDescription className="font-mono text-xs">
+              {selectedAuditEvent?.eventId || "-"}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedAuditEvent ? (
+            <div className="max-h-[68vh] overflow-y-auto px-5 py-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                {[
+                  ["Time", selectedAuditEvent.eventTime ? new Date(selectedAuditEvent.eventTime).toLocaleString("zh-CN") : "-"],
+                  ["Category", selectedAuditEvent.category],
+                  ["Action", selectedAuditEvent.action],
+                  ["Result", selectedAuditEvent.result],
+                  ["Severity", selectedAuditEvent.severity],
+                  ["Actor", selectedAuditEvent.actorEmail || selectedAuditEvent.actorName || selectedAuditEvent.actorUserId || selectedAuditEvent.actorType || "-"],
+                  ["Target", `${selectedAuditEvent.targetType || "-"}:${selectedAuditEvent.targetName || selectedAuditEvent.targetId || "-"}`],
+                  ["Resource", `${selectedAuditEvent.resourceType || "-"}:${selectedAuditEvent.resourceName || selectedAuditEvent.resourceId || "-"}`],
+                  ["Agent", selectedAuditEvent.agentInstanceId || selectedAuditEvent.runtimeAgentId || "-"],
+                  ["Request", selectedAuditEvent.requestId || "-"],
+                  ["Correlation", selectedAuditEvent.correlationId || "-"],
+                  ["IP", selectedAuditEvent.ip || "-"],
+                  ["Error Code", selectedAuditEvent.errorCode || "-"],
+                  ["Policy Code", selectedAuditEvent.policyCode || "-"],
+                  ["Risk Type", selectedAuditEvent.riskType || "-"],
+                  ["Tool", selectedAuditEvent.toolName || "-"],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
+                    <div className="text-muted-foreground">{label}</div>
+                    <div className="mt-1 break-words font-mono text-gray-900">{String(value || "-")}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4">
+                <div className="mb-2 text-xs font-semibold text-gray-900">Metadata</div>
+                <pre className="max-h-80 overflow-auto rounded-lg border border-gray-200 bg-gray-950 p-3 text-xs leading-5 text-gray-100">
+                  {formatAuditJson(selectedAuditEvent.metadataJson)}
+                </pre>
+                {selectedAuditEvent.metadataTruncated ? (
+                  <div className="mt-2 rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+                    metadata 已截断，导出文件同样只包含截断后的安全内容。
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter className="border-t border-border/60 px-5 py-4">
+            <Button variant="outline" onClick={() => setSelectedAuditEvent(null)}>关闭</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
         <AlertDialogContent className="border-border/60 bg-white p-0 shadow-xl sm:max-w-md">
           <AlertDialogHeader>

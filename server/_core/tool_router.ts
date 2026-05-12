@@ -521,6 +521,130 @@ function enqueueAudit(record: ToolExecutionAuditRecord) {
   }
 }
 
+async function recordToolLedgerEvent(
+  record: ToolExecutionAuditRecord,
+  outcome: {
+    result: "success" | "failed" | "denied";
+    severity?: "info" | "low" | "medium" | "high";
+    action: string;
+    errorCode?: string;
+  },
+) {
+  try {
+    const { recordAuditEvent, redactAuditMetadata } = await import("./audit-ledger");
+    const safeCommand = sanitizeToolCommand(record.command, redactAuditMetadata);
+    const safeArgs = sanitizeToolArgs(record.args, redactAuditMetadata);
+    const safeCwd = typeof record.cwd === "string" ? String(redactAuditMetadata(record.cwd)) : null;
+    const auditResult = await recordAuditEvent({
+      action: outcome.action,
+      result: outcome.result,
+      severity: outcome.severity || (outcome.result === "success" ? "info" : "medium"),
+      actorType: "user",
+      actorUserId: record.userId ?? null,
+      targetType: "tool",
+      targetId: record.originalToolName,
+      targetName: record.originalToolName,
+      resourceType: "agent",
+      resourceId: record.requestId ?? null,
+      agentInstanceId: record.requestId ?? null,
+      runtimeType: "openclaw",
+      runtimeAgentId: record.agentId ?? null,
+      detailType: "audit_tool_events",
+      detailId: record.auditId,
+      errorCode: outcome.errorCode ?? null,
+      policyCode: record.denyReason ?? null,
+      toolName: record.originalToolName,
+      metadata: {
+        legacyAuditId: record.auditId,
+        toolCallId: record.toolCallId,
+        profile: record.profile,
+        routedToolName: record.routedToolName,
+        policyDecision: record.policyDecision,
+        executor: record.executor,
+        exitCode: record.exitCode ?? null,
+        stdoutBytes: record.stdoutBytes ?? null,
+        stderrBytes: record.stderrBytes ?? null,
+        truncated: Boolean(record.truncated),
+        durationMs: record.durationMs ?? null,
+      },
+      mode: "sync",
+    });
+    if (!auditResult.persisted) return;
+
+    const { getDb } = await import("../db");
+    const db = await getDb();
+    if (!db) return;
+    const { auditToolEvents } = await import("../../drizzle/schema");
+    await db.insert(auditToolEvents).values({
+      eventId: auditResult.eventId,
+      toolType: record.routedToolName === "sandbox_exec" ? "shell" : "tool",
+      toolName: record.originalToolName,
+      originalToolName: record.originalToolName,
+      routedToolName: record.routedToolName,
+      executor: record.executor,
+      policyDecision: record.policyDecision,
+      denyReason: record.denyReason ?? null,
+      command: safeCommand,
+      argsJson: safeArgs === undefined ? null : { args: safeArgs },
+      cwd: safeCwd,
+      timeoutMs: record.timeoutMs ?? null,
+      exitCode: record.exitCode ?? null,
+      stdoutBytes: record.stdoutBytes ?? null,
+      stderrBytes: record.stderrBytes ?? null,
+      truncated: Boolean(record.truncated),
+      durationMs: record.durationMs ?? null,
+      metadataJson: {
+        legacyAuditId: record.auditId,
+        deniedReasonPresent: Boolean(record.deniedReason),
+      },
+    } as any);
+  } catch (error) {
+    auditLog({
+      event: "audit_tool_ledger_error",
+      auditId: record.auditId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function sanitizeToolCommand(
+  command: string | undefined,
+  redact: (value: unknown) => unknown,
+): string | null {
+  if (!command) return null;
+  const redacted = String(redact(command));
+  return redacted.length > 2048 ? `${redacted.slice(0, 2048)}...[TRUNCATED]` : redacted;
+}
+
+function sanitizeToolArgs(
+  args: unknown,
+  redact: (value: unknown) => unknown,
+): unknown {
+  if (args === undefined || args === null) return undefined;
+  const redacted = redactToolArgSecrets(redact(args));
+  const json = JSON.stringify(redacted);
+  if (Buffer.byteLength(json, "utf8") <= 4096) return redacted;
+  return {
+    truncated: true,
+    preview: json.slice(0, 2048),
+    originalBytes: Buffer.byteLength(json, "utf8"),
+  };
+}
+
+function redactToolArgSecrets(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  const secretFlag = /^(?:--?)?(?:password|token|secret|api[-_]?key|cookie|authorization|credential|private[-_]?key|gatewayToken|botToken)$/i;
+  return value.map((item, index) => {
+    if (typeof item !== "string") return item;
+    const previous = value[index - 1];
+    if (typeof previous === "string" && secretFlag.test(previous.replace(/^-+/, ""))) return "[REDACTED]";
+    if (/^(--?(?:password|token|secret|api[-_]?key|cookie|authorization|credential|private[-_]?key|gatewayToken|botToken)=)/i.test(item)) {
+      return item.replace(/^(--?[^=]+=).+$/i, "$1[REDACTED]");
+    }
+    return item;
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 主路由入口───────────────────────────────────────────────────────────────────
 
@@ -589,6 +713,22 @@ export async function routeTool(
         executor: "none",
         createdAt: Date.now(),
       });
+      recordToolLedgerEvent({
+        auditId, requestId: ctx.adoptId, userId: ctx.userId, agentId: ctx.agentId,
+        profile: ctx.permissionProfile, toolCallId: req.id,
+        originalToolName, routedToolName,
+        command: input.cmd ?? undefined, args: input.args ?? undefined,
+        cwd: input.cwd ?? undefined, timeoutMs: TOOL_POLICY.sandboxExec.timeoutMs,
+        policyDecision: "deny", denyReason: "rate_limited",
+        deniedReason: denyMsg,
+        executor: "none",
+        createdAt: Date.now(),
+      }, {
+        action: "tool.execution.denied",
+        result: "denied",
+        severity: "medium",
+        errorCode: "TOOL_RATE_LIMITED",
+      });
       return result;
     }
   }
@@ -629,6 +769,25 @@ export async function routeTool(
       deniedReason,
       executor: "none",
       createdAt: Date.now(),
+    });
+    recordToolLedgerEvent({
+      auditId, requestId: ctx.adoptId, userId: ctx.userId, agentId: ctx.agentId,
+      profile: ctx.permissionProfile, toolCallId: req.id,
+      originalToolName, routedToolName,
+      command: input.cmd ?? undefined,
+      args: input.args ?? undefined,
+      cwd: input.cwd ?? undefined,
+      timeoutMs: TOOL_POLICY.sandboxExec.timeoutMs,
+      policyDecision: "deny",
+      denyReason: policy.denyReason,
+      deniedReason,
+      executor: "none",
+      createdAt: Date.now(),
+    }, {
+      action: "tool.execution.denied",
+      result: "denied",
+      severity: "medium",
+      errorCode: "TOOL_POLICY_DENIED",
     });
 
     auditLog({
@@ -745,6 +904,28 @@ export async function routeTool(
     truncated,
     durationMs,
     createdAt: Date.now(),
+  });
+  recordToolLedgerEvent({
+    auditId, requestId: ctx.adoptId, userId: ctx.userId, agentId: ctx.agentId,
+    profile: ctx.permissionProfile, toolCallId: req.id,
+    originalToolName, routedToolName,
+    command: input.cmd ?? undefined,
+    args: input.args ?? undefined,
+    cwd: input.cwd ?? undefined,
+    timeoutMs: input.timeoutMs ?? TOOL_POLICY.sandboxExec.timeoutMs,
+    policyDecision: "allow",
+    executor: routedToolName as ExecutorName,
+    exitCode,
+    stdoutBytes: (stdout ?? "").length,
+    stderrBytes: (stderr ?? "").length,
+    truncated,
+    durationMs,
+    createdAt: Date.now(),
+  }, {
+    action: (exitCode ?? 1) === 0 && !errorType ? "tool.execution.completed" : "tool.execution.failed",
+    result: (exitCode ?? 1) === 0 && !errorType ? "success" : "failed",
+    severity: (exitCode ?? 1) === 0 && !errorType ? "info" : "medium",
+    errorCode: errorType ? "TOOL_EXECUTION_ERROR" : undefined,
   });
 
   auditLog({
