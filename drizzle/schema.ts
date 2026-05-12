@@ -1,4 +1,4 @@
-import { bigint, boolean, index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/mysql-core';
+import { bigint, boolean, index, int, json, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from 'drizzle-orm/mysql-core';
 
 /**
  * Core user table backing auth flow.
@@ -556,6 +556,144 @@ export type InsertToolExecutionAudit = typeof toolExecutionAudits.$inferInsert;
 /**
  * 业务 Agent 配置表（可配置的协作广场业务能力）
  */
+// Enterprise Audit Ledger v1
+export const auditEvents = mysqlTable("audit_events", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  eventId: varchar("event_id", { length: 64 }).notNull().unique(),
+  eventTime: timestamp("event_time").notNull(),
+  category: varchar("category", { length: 64 }).notNull(),
+  action: varchar("action", { length: 128 }).notNull(),
+  result: mysqlEnum("result", ["success", "failed", "denied", "warning"]).notNull().default("success"),
+  severity: mysqlEnum("severity", ["info", "low", "medium", "high", "critical"]).notNull().default("info"),
+  actorType: varchar("actor_type", { length: 32 }).notNull().default("user"),
+  actorUserId: int("actor_user_id"),
+  actorName: varchar("actor_name", { length: 128 }),
+  actorEmail: varchar("actor_email", { length: 320 }),
+  actorRole: varchar("actor_role", { length: 64 }),
+  actorOrgId: varchar("actor_org_id", { length: 64 }),
+  actorDepartmentId: varchar("actor_department_id", { length: 64 }),
+  targetType: varchar("target_type", { length: 64 }),
+  targetId: varchar("target_id", { length: 128 }),
+  targetName: varchar("target_name", { length: 256 }),
+  resourceType: varchar("resource_type", { length: 64 }),
+  resourceId: varchar("resource_id", { length: 128 }),
+  resourceName: varchar("resource_name", { length: 256 }),
+  workspaceId: varchar("workspace_id", { length: 128 }),
+  agentInstanceId: varchar("agent_instance_id", { length: 128 }),
+  runtimeType: varchar("runtime_type", { length: 64 }),
+  runtimeAgentId: varchar("runtime_agent_id", { length: 128 }),
+  requestId: varchar("request_id", { length: 128 }),
+  sessionId: varchar("session_id", { length: 128 }),
+  correlationId: varchar("correlation_id", { length: 128 }),
+  ip: varchar("ip", { length: 45 }),
+  userAgent: text("user_agent"),
+  source: varchar("source", { length: 64 }).notNull().default("platform"),
+  environment: varchar("environment", { length: 64 }),
+  detailType: varchar("detail_type", { length: 64 }),
+  detailId: varchar("detail_id", { length: 128 }),
+  errorCode: varchar("error_code", { length: 64 }),
+  policyCode: varchar("policy_code", { length: 64 }),
+  riskType: varchar("risk_type", { length: 64 }),
+  channel: varchar("channel", { length: 64 }),
+  toolName: varchar("tool_name", { length: 128 }),
+  metadataJson: json("metadata_json").$type<Record<string, unknown> | null>(),
+  metadataTruncated: boolean("metadata_truncated").notNull().default(false),
+  metadataOriginalBytes: int("metadata_original_bytes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  eventTimeIdx: index("idx_audit_events_time").on(table.eventTime),
+  actorIdx: index("idx_audit_events_actor").on(table.actorUserId, table.eventTime),
+  categoryIdx: index("idx_audit_events_category").on(table.category, table.action, table.eventTime),
+  targetIdx: index("idx_audit_events_target").on(table.targetType, table.targetId),
+  agentIdx: index("idx_audit_events_agent").on(table.agentInstanceId, table.runtimeAgentId),
+  severityIdx: index("idx_audit_events_severity").on(table.severity, table.result, table.eventTime),
+  correlationIdx: index("idx_audit_events_correlation").on(table.correlationId),
+  errorCodeIdx: index("idx_audit_events_error_code").on(table.errorCode),
+  policyCodeIdx: index("idx_audit_events_policy_code").on(table.policyCode),
+}));
+
+export const auditToolEvents = mysqlTable("audit_tool_events", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  eventId: varchar("event_id", { length: 64 }).notNull().unique(),
+  toolType: varchar("tool_type", { length: 64 }).notNull(),
+  toolName: varchar("tool_name", { length: 128 }).notNull(),
+  originalToolName: varchar("original_tool_name", { length: 128 }),
+  routedToolName: varchar("routed_tool_name", { length: 128 }),
+  executor: varchar("executor", { length: 64 }),
+  policyDecision: mysqlEnum("policy_decision", ["allow", "deny", "rewrite"]).notNull(),
+  denyReason: varchar("deny_reason", { length: 128 }),
+  command: text("command"),
+  argsJson: json("args_json").$type<Record<string, unknown> | null>(),
+  cwd: varchar("cwd", { length: 512 }),
+  url: text("url"),
+  method: varchar("method", { length: 16 }),
+  timeoutMs: int("timeout_ms"),
+  exitCode: int("exit_code"),
+  stdoutBytes: int("stdout_bytes"),
+  stderrBytes: int("stderr_bytes"),
+  truncated: boolean("truncated").notNull().default(false),
+  durationMs: int("duration_ms"),
+  metadataJson: json("metadata_json").$type<Record<string, unknown> | null>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  toolTypeIdx: index("idx_audit_tool_type").on(table.toolType, table.toolName),
+  policyIdx: index("idx_audit_tool_policy").on(table.policyDecision),
+  createdIdx: index("idx_audit_tool_created").on(table.createdAt),
+}));
+
+export const auditSecurityFindings = mysqlTable("audit_security_findings", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  findingId: varchar("finding_id", { length: 64 }).notNull().unique(),
+  eventId: varchar("event_id", { length: 64 }),
+  findingType: varchar("finding_type", { length: 128 }).notNull(),
+  severity: mysqlEnum("severity", ["low", "medium", "high", "critical"]).notNull().default("medium"),
+  status: mysqlEnum("status", ["open", "acknowledged", "resolved", "ignored"]).notNull().default("open"),
+  title: varchar("title", { length: 256 }).notNull(),
+  description: text("description"),
+  evidenceJson: json("evidence_json").$type<Record<string, unknown> | null>(),
+  targetType: varchar("target_type", { length: 64 }),
+  targetId: varchar("target_id", { length: 128 }),
+  handledBy: int("handled_by"),
+  handledAt: timestamp("handled_at"),
+  handledNote: text("handled_note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  statusIdx: index("idx_audit_findings_status").on(table.status, table.severity),
+  typeIdx: index("idx_audit_findings_type").on(table.findingType),
+  eventIdx: index("idx_audit_findings_event").on(table.eventId),
+  createdIdx: index("idx_audit_findings_created").on(table.createdAt),
+}));
+
+export const auditExports = mysqlTable("audit_exports", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  exportId: varchar("export_id", { length: 64 }).notNull().unique(),
+  actorUserId: int("actor_user_id").notNull(),
+  actorEmail: varchar("actor_email", { length: 320 }),
+  filtersJson: json("filters_json").$type<Record<string, unknown> | null>(),
+  format: mysqlEnum("format", ["csv", "json", "xlsx"]).notNull().default("csv"),
+  rowCount: int("row_count").notNull().default(0),
+  storageKey: varchar("storage_key", { length: 128 }).notNull(),
+  fileHash: varchar("file_hash", { length: 64 }).notNull(),
+  fileSizeBytes: bigint("file_size_bytes", { mode: "number" }).notNull(),
+  encrypted: boolean("encrypted").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at"),
+}, (table) => ({
+  actorIdx: index("idx_audit_exports_actor").on(table.actorUserId, table.createdAt),
+  createdIdx: index("idx_audit_exports_created").on(table.createdAt),
+  storageIdx: index("idx_audit_exports_storage_key").on(table.storageKey),
+}));
+
+export type AuditEvent = typeof auditEvents.$inferSelect;
+export type InsertAuditEvent = typeof auditEvents.$inferInsert;
+export type AuditToolEvent = typeof auditToolEvents.$inferSelect;
+export type InsertAuditToolEvent = typeof auditToolEvents.$inferInsert;
+export type AuditSecurityFinding = typeof auditSecurityFindings.$inferSelect;
+export type InsertAuditSecurityFinding = typeof auditSecurityFindings.$inferInsert;
+export type AuditExport = typeof auditExports.$inferSelect;
+export type InsertAuditExport = typeof auditExports.$inferInsert;
+
 export const businessAgents = mysqlTable("business_agents", {
   id:            varchar("id", { length: 64 }).primaryKey(),
   name:          varchar("name", { length: 128 }).notNull(),
