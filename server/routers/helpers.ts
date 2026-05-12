@@ -87,6 +87,23 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
     const cfg = JSON.parse(raw || "{}");
     const providers = cfg?.models?.providers || {};
     const out: ClawModelOption[] = [];
+    const defaultsModel = cfg?.agents?.defaults?.model || {};
+    const defaultsPrimary = String(defaultsModel?.primary || "").trim();
+    const modelAllowlist = cfg?.agents?.defaults?.models && typeof cfg.agents.defaults.models === "object"
+      ? Object.keys(cfg.agents.defaults.models).map((id) => String(id).trim()).filter(Boolean)
+      : [];
+
+    if (modelAllowlist.length > 0) {
+      return modelAllowlist.map((id) => ({
+        id,
+        name: id,
+        desc: "agents.defaults.models",
+        isDefault: id === defaultsPrimary,
+      })).map((item, index, arr) => {
+        if (arr.some((m) => m.isDefault)) return item;
+        return index === 0 ? { ...item, isDefault: true } : item;
+      });
+    }
 
     // 1) providers.models
     for (const [providerId, provider] of Object.entries<any>(providers)) {
@@ -104,7 +121,6 @@ export function getAvailableClawModelsFromConfig(): ClawModelOption[] {
     }
 
     // 2) agents.defaults.model.primary（即使 providers.models 为空也纳入）
-    const defaultsPrimary = String(cfg?.agents?.defaults?.model?.primary || "").trim();
     if (defaultsPrimary) {
       out.push({ id: defaultsPrimary, name: defaultsPrimary, desc: "defaults.primary", isDefault: true });
     }
