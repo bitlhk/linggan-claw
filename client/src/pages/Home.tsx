@@ -4,9 +4,9 @@
  * The linggan homepage code has been removed (dead code on this server).
  */
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { OpenClawWSClient } from "@/lib/openclaw-ws";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { toast } from "sonner";
 import { useBrand } from "@/lib/useBrand";
 import { trpc } from "@/lib/trpc";
@@ -26,7 +26,7 @@ import { LINGXIA_SIDEBAR_NAV } from "@/config/navigation";
 import { sidebarIconMap } from "@/config/icons";
 import { applySettings as applyUiSettings, getSettings, subscribeSettings } from "@/lib/settings";
 import { useLingxiaChat } from "@/hooks/useLingxiaChat";
-import { formatModelName, getModelProviderLabel } from "@/lib/modelDisplay";
+import { formatModelName } from "@/lib/modelDisplay";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 
 
@@ -77,6 +77,127 @@ function markThinkingDone(msgs: any[]): any[] {
 const makeLxMsgId = () => `lx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const makeClientRunId = () => `run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 const makeConversationId = () => `conv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+const webConversationStorageKey = (userId: string, adoptId: string) => `lingxia_web_conversation_${userId}_${adoptId}`;
+const legacyWebConversationStorageKey = (adoptId: string) => `lingxia_web_conversation_${adoptId}`;
+const webMessagesStorageKey = (userId: string, adoptId: string, conversationId: string) => `lgc_msgs_${userId}_${adoptId}_${conversationId}`;
+const legacyWebMessagesStorageKey = (adoptId: string, conversationId: string) => `lgc_msgs_${adoptId}_${conversationId}`;
+const webSessionIndexStorageKey = (userId: string, adoptId: string) => `lingxia_web_sessions_${userId}_${adoptId}`;
+const webHiddenSessionsStorageKey = (userId: string, adoptId: string) => `lingxia_web_sessions_hidden_${userId}_${adoptId}`;
+
+type WebChatSessionRecord = {
+  conversationId: string;
+  sessionKey?: string;
+  sessionId?: string;
+  title: string;
+  preview: string;
+  messageCount: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+function normalizeSessionText(text: string) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
+function stripSessionMessagePrefix(text: string) {
+  return String(text || "")
+    .replace(/^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}\s+GMT[+-]\d+\]\s*/g, "")
+    .trim();
+}
+
+function truncateSessionText(text: string, max = 28) {
+  const normalized = normalizeSessionText(stripSessionMessagePrefix(text));
+  if (!normalized) return "";
+  return normalized.length > max ? `${normalized.slice(0, max)}...` : normalized;
+}
+
+function inferSessionTitle(messages: Array<{ role?: string; text?: string }>) {
+  const firstUser = messages.find((m) => m.role === "user" && normalizeSessionText(m.text || ""));
+  return truncateSessionText(firstUser?.text || "", 24) || "新对话";
+}
+
+function inferSessionPreview(messages: Array<{ text?: string }>) {
+  const last = [...messages].reverse().find((m) => normalizeSessionText(m.text || ""));
+  return truncateSessionText(last?.text || "", 42);
+}
+
+function readWebSessionIndex(key: string): WebChatSessionRecord[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item) => item?.conversationId) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeWebSessionIndex(key: string, sessions: WebChatSessionRecord[]) {
+  try {
+    localStorage.setItem(key, JSON.stringify(sessions.slice(0, 30)));
+  } catch {}
+}
+
+function readHiddenWebSessions(key: string): Set<string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+    return new Set(Array.isArray(parsed) ? parsed.map((item) => String(item)).filter(Boolean) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeHiddenWebSessions(key: string, hidden: Set<string>) {
+  try {
+    localStorage.setItem(key, JSON.stringify(Array.from(hidden).slice(0, 200)));
+  } catch {}
+}
+
+function mergeWebSessionRecords(local: WebChatSessionRecord[], remote: WebChatSessionRecord[], hidden: Set<string>) {
+  const byConversation = new Map<string, WebChatSessionRecord>();
+  for (const item of [...local, ...remote]) {
+    if (!item?.conversationId || hidden.has(item.conversationId)) continue;
+    const previous = byConversation.get(item.conversationId);
+    const itemHasBackendSession = Boolean(item.sessionKey);
+    const previousHasBackendSession = Boolean(previous?.sessionKey);
+    if (!previous || (itemHasBackendSession && !previousHasBackendSession) || itemHasBackendSession || Number(item.updatedAt || 0) >= Number(previous.updatedAt || 0)) {
+      byConversation.set(item.conversationId, { ...previous, ...item });
+    } else if (item.sessionKey && !previous.sessionKey) {
+      byConversation.set(item.conversationId, { ...previous, sessionKey: item.sessionKey, sessionId: item.sessionId });
+    }
+  }
+  return Array.from(byConversation.values()).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 30);
+}
+
+function formatSessionUpdatedAt(ts: number) {
+  if (!Number.isFinite(ts) || ts <= 0) return "";
+  const date = new Date(ts);
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  if (sameDay) return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+function uniqueSessionTitle(session: WebChatSessionRecord, allSessions: WebChatSessionRecord[]) {
+  const title = session.title || "未命名会话";
+  const sameTitle = allSessions.filter((item) => (item.title || "未命名会话") === title);
+  if (sameTitle.length <= 1) return title;
+  const time = formatSessionUpdatedAt(session.updatedAt);
+  if (time) return `${title} · ${time}`;
+  return `${title} · ${session.conversationId.slice(-4)}`;
+}
+
+function sessionDebugId(session: WebChatSessionRecord) {
+  const raw = session.sessionId || session.sessionKey || session.conversationId;
+  const text = String(raw || "").trim();
+  return text ? text.slice(-8) : "";
+}
+
+function compactModelDisplayName(name: string) {
+  const text = String(name || "").trim();
+  if (!text) return "";
+  const parts = text.split("/").map((part) => part.trim()).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : text;
+}
+
 type UploadedLingxiaAttachment = {
   name: string;
   path: string;
@@ -338,6 +459,9 @@ export default function Home() {
   const coopBadgeCount = (coopPending?.pendingMyApproval || 0) + (coopPending?.awaitingMyConsolidation || 0);
 
   const [collabOpen, setCollabOpen] = useState(false);
+  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
+  const [sessionSwitchingId, setSessionSwitchingId] = useState<string | null>(null);
+  const sessionMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const initial = getSettings();
@@ -352,6 +476,23 @@ export default function Home() {
   useEffect(() => {
     applyUiSettings({ navCollapsed: sidebarCollapsed, navWidth: sidebarWidth });
   }, [sidebarCollapsed, sidebarWidth]);
+
+  useEffect(() => {
+    if (!sessionMenuOpen) return;
+    const onPointerDown = (event: MouseEvent | PointerEvent) => {
+      if (sessionMenuRef.current?.contains(event.target as Node)) return;
+      setSessionMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSessionMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [sessionMenuOpen]);
   const [lingxiaOpenSections, setLingxiaOpenSections] = useState<Set<string>>(new Set(["soul"]));
   const toggleLingxiaSection = (s: string) => setLingxiaOpenSections(prev => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
   const [lingxiaTopSettingsOpen, setLingxiaTopSettingsOpen] = useState(false);
@@ -370,19 +511,29 @@ export default function Home() {
   // 合并：子域名优先，路径兜底
   const resolvedAdoptId = adoptIdFromHost || adoptIdFromPath;
   const isLingxiaSubdomain = !!resolvedAdoptId;
-  const webConversationId = useMemo(() => {
-    if (!resolvedAdoptId) return "";
-    const key = `lingxia_web_conversation_${resolvedAdoptId}`;
-    try {
-      const existing = sessionStorage.getItem(key);
-      if (existing) return existing;
-      const next = makeConversationId();
-      sessionStorage.setItem(key, next);
-      return next;
-    } catch {
-      return makeConversationId();
+  const userStorageId = user?.id != null ? String(user.id) : "";
+  const [webConversationId, setWebConversationId] = useState("");
+  useEffect(() => {
+    if (!resolvedAdoptId || !userStorageId) {
+      setWebConversationId("");
+      return;
     }
-  }, [resolvedAdoptId]);
+    const key = webConversationStorageKey(userStorageId, resolvedAdoptId);
+    const legacyKey = legacyWebConversationStorageKey(resolvedAdoptId);
+    try {
+      const existing = localStorage.getItem(key);
+      if (existing) {
+        setWebConversationId(existing);
+        return;
+      }
+      const legacy = sessionStorage.getItem(legacyKey) || localStorage.getItem(legacyKey);
+      const conversationId = legacy || makeConversationId();
+      localStorage.setItem(key, conversationId);
+      setWebConversationId(conversationId);
+    } catch {
+      setWebConversationId(makeConversationId());
+    }
+  }, [resolvedAdoptId, userStorageId]);
   // lgh-* 是 Hermes，lgj-* 是 JiuwenClaw；二者都不走 OpenClaw WSS，直接走 HTTP SSE。
   const isHermesRuntime = String(resolvedAdoptId || "").startsWith("lgh-");
   const isJiuwenRuntime = String(resolvedAdoptId || "").startsWith("lgj-");
@@ -418,6 +569,11 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableModels, clawSettings]);
 
+  const selectedLingxiaModelName = useMemo(() => {
+    const model = (availableModels || []).find((m: any) => m.id === lingxiaModelId) as any;
+    return compactModelDisplayName(String(model?.name || "").trim() || formatModelName(lingxiaModelId || "default"));
+  }, [availableModels, lingxiaModelId]);
+
   const switchModelMutation = trpc.claw.switchModel.useMutation({
     retry: false,
     onSuccess: () => toast.success("模型已切换"),
@@ -438,7 +594,22 @@ export default function Home() {
   // 只有 streamSeqRef.current === myStreamSeq 时才写 state；否则视为 stale 事件早退。
   const streamSeqRef = useRef(0);
   const wsClientRef = useRef<OpenClawWSClient | null>(null);
+  const restoredSessionKeyRef = useRef<string>("");
+  const pendingConversationRestoreRef = useRef<{ conversationId: string; messages: any[] } | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const MSGS_KEY = resolvedAdoptId && userStorageId && webConversationId ? webMessagesStorageKey(userStorageId, resolvedAdoptId, webConversationId) : null;
+  const LEGACY_MSGS_KEY = resolvedAdoptId && webConversationId ? legacyWebMessagesStorageKey(resolvedAdoptId, webConversationId) : null;
+  const SESSION_INDEX_KEY = resolvedAdoptId && userStorageId ? webSessionIndexStorageKey(userStorageId, resolvedAdoptId) : null;
+  const HIDDEN_SESSION_KEY = resolvedAdoptId && userStorageId ? webHiddenSessionsStorageKey(userStorageId, resolvedAdoptId) : null;
+  useEffect(() => {
+    if (!MSGS_KEY || !LEGACY_MSGS_KEY) return;
+    try {
+      if (!localStorage.getItem(MSGS_KEY)) {
+        const legacy = localStorage.getItem(LEGACY_MSGS_KEY);
+        if (legacy) localStorage.setItem(MSGS_KEY, legacy);
+      }
+    } catch {}
+  }, [MSGS_KEY, LEGACY_MSGS_KEY]);
 
   const chatV2Enabled = isLingxiaChatV2Enabled((user as any)?.id);
   const chatV2 = useLingxiaChat({
@@ -449,9 +620,257 @@ export default function Home() {
     memoryEnabled: lingxiaMemoryEnabled === "yes",
     contextTurns: lingxiaContextTurns,
     runtimeMode: chatRuntimeMode,
+    historyStorageKey: MSGS_KEY || undefined,
   });
   const activeLingxiaMsgs = chatV2Enabled ? chatV2.messages : lingxiaMsgs;
   const activeLingxiaStreaming = chatV2Enabled ? chatV2.isStreaming : lingxiaStreaming;
+  const [webSessions, setWebSessions] = useState<WebChatSessionRecord[]>([]);
+  const lastBackendHistoryRefreshRef = useRef("");
+
+  useEffect(() => {
+    if (!SESSION_INDEX_KEY) {
+      setWebSessions([]);
+      return;
+    }
+    if (!isDirectHttpRuntime) {
+      setWebSessions([]);
+      return;
+    }
+    const hidden = HIDDEN_SESSION_KEY ? readHiddenWebSessions(HIDDEN_SESSION_KEY) : new Set<string>();
+    setWebSessions(readWebSessionIndex(SESSION_INDEX_KEY).filter((item) => !hidden.has(item.conversationId)).sort((a, b) => b.updatedAt - a.updatedAt));
+  }, [SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime]);
+
+  const refreshBackendWebSessions = useCallback(async () => {
+    if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return [];
+    const apiBase = import.meta.env.VITE_API_URL || "";
+    const response = await fetch(`${apiBase}/api/claw/chat-history/sessions?adoptId=${encodeURIComponent(resolvedAdoptId)}&limit=60`, {
+      credentials: "include",
+    });
+    if (!response.ok) return [];
+    const data = await response.json().catch(() => null);
+    if (!data?.sessions) return [];
+    const hidden = HIDDEN_SESSION_KEY ? readHiddenWebSessions(HIDDEN_SESSION_KEY) : new Set<string>();
+    const remote = (Array.isArray(data.sessions) ? data.sessions : []) as WebChatSessionRecord[];
+    const backendSessions = remote
+      .filter((item) => item?.conversationId && item.sessionKey && !hidden.has(item.conversationId) && Number(item.messageCount || 0) > 0)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 30);
+    writeWebSessionIndex(SESSION_INDEX_KEY, backendSessions);
+    setWebSessions(backendSessions);
+    return backendSessions;
+  }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime]);
+
+  useEffect(() => {
+    if (!resolvedAdoptId || !SESSION_INDEX_KEY || isDirectHttpRuntime) return;
+    let cancelled = false;
+    refreshBackendWebSessions().catch(() => {});
+    return () => { cancelled = true; void cancelled; };
+  }, [resolvedAdoptId, SESSION_INDEX_KEY, HIDDEN_SESSION_KEY, isDirectHttpRuntime, refreshBackendWebSessions]);
+
+  useEffect(() => {
+    if (isDirectHttpRuntime || activeLingxiaStreaming || !webConversationId || activeLingxiaMsgs.length === 0) return;
+    const meaningfulMessages = activeLingxiaMsgs.filter((m: any) => normalizeSessionText(m.text || ""));
+    if (meaningfulMessages.length === 0) return;
+    const refreshKey = `${webConversationId}:${meaningfulMessages.length}`;
+    if (lastBackendHistoryRefreshRef.current === refreshKey) return;
+    lastBackendHistoryRefreshRef.current = refreshKey;
+    const timer = window.setTimeout(() => {
+      void refreshBackendWebSessions().catch(() => {});
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [activeLingxiaMsgs, activeLingxiaStreaming, isDirectHttpRuntime, refreshBackendWebSessions, webConversationId]);
+
+  useEffect(() => {
+    if (!isDirectHttpRuntime) return;
+    if (!SESSION_INDEX_KEY || !webConversationId || activeLingxiaMsgs.length === 0) return;
+    const meaningfulMessages = activeLingxiaMsgs.filter((m: any) => normalizeSessionText(m.text || ""));
+    if (meaningfulMessages.length === 0) return;
+    const now = Date.now();
+    const title = inferSessionTitle(activeLingxiaMsgs as any);
+    const preview = inferSessionPreview(activeLingxiaMsgs as any);
+    const existing = readWebSessionIndex(SESSION_INDEX_KEY);
+    const previous = existing.find((item) => item.conversationId === webConversationId);
+    const nextRecord: WebChatSessionRecord = {
+      conversationId: webConversationId,
+      sessionKey: previous?.sessionKey,
+      sessionId: previous?.sessionId,
+      title: previous?.sessionKey && previous.title ? previous.title : title,
+      preview: previous?.sessionKey && previous.preview ? previous.preview : preview,
+      messageCount: meaningfulMessages.length,
+      createdAt: previous?.createdAt || now,
+      updatedAt: now,
+    };
+    const next = [
+      nextRecord,
+      ...existing.filter((item) => item.conversationId !== webConversationId),
+    ].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 30);
+    writeWebSessionIndex(SESSION_INDEX_KEY, next);
+    setWebSessions(next);
+  }, [SESSION_INDEX_KEY, webConversationId, activeLingxiaMsgs, isDirectHttpRuntime]);
+
+  const currentSessionTitle = useMemo(() => {
+    const current = webSessions.find((item) => item.conversationId === webConversationId);
+    if (current?.title) return current.title;
+    return activeLingxiaMsgs.length > 0 ? inferSessionTitle(activeLingxiaMsgs as any) : "新对话";
+  }, [activeLingxiaMsgs, webConversationId, webSessions]);
+
+  const restoreLingxiaMessages = (messages: any[]) => {
+    const nextMessages = backfillLxMsgIds(messages || []);
+    if (chatV2Enabled) {
+      chatV2.restore(nextMessages);
+    } else {
+      setLingxiaToolCalls([]);
+      setLingxiaMsgs(nextMessages);
+    }
+  };
+
+  const activateWebConversation = (conversationId: string, restoredMessages?: any[]) => {
+    if (!resolvedAdoptId || !userStorageId) return;
+    const nextMessages = restoredMessages ? restoredMessages.slice(-100) : [];
+    try {
+      localStorage.setItem(webConversationStorageKey(userStorageId, resolvedAdoptId), conversationId);
+      if (restoredMessages) {
+        localStorage.setItem(webMessagesStorageKey(userStorageId, resolvedAdoptId, conversationId), JSON.stringify(nextMessages));
+      }
+    } catch {}
+    if (conversationId === webConversationId) {
+      pendingConversationRestoreRef.current = null;
+      restoreLingxiaMessages(nextMessages);
+    } else {
+      pendingConversationRestoreRef.current = { conversationId, messages: nextMessages };
+    }
+    setWebConversationId(conversationId);
+    setLingxiaInput("");
+    setMentionedUsers([]);
+    setLingxiaNearBottom(true);
+  };
+
+  useEffect(() => {
+    const pending = pendingConversationRestoreRef.current;
+    if (!pending || pending.conversationId !== webConversationId) return;
+    pendingConversationRestoreRef.current = null;
+    restoreLingxiaMessages(pending.messages);
+  }, [webConversationId, chatV2Enabled, chatV2]);
+
+  useEffect(() => {
+    if (!resolvedAdoptId || !webConversationId || activeLingxiaStreaming) return;
+    const session = webSessions.find((item) => item.conversationId === webConversationId);
+    if (!session?.sessionKey || restoredSessionKeyRef.current === session.sessionKey) return;
+    restoredSessionKeyRef.current = session.sessionKey;
+    const apiBase = import.meta.env.VITE_API_URL || "";
+    let cancelled = false;
+    fetch(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(session.sessionKey)}`, {
+      credentials: "include",
+    })
+      .then((r) => r.ok ? r.json() : null)
+      .then((payload) => {
+        if (cancelled || !Array.isArray(payload?.messages)) return;
+        activateWebConversation(webConversationId, payload.messages);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeLingxiaStreaming, resolvedAdoptId, webConversationId, webSessions]);
+
+  const startNewLingxiaConversation = () => {
+    if (activeLingxiaStreaming) {
+      toast.error("请先停止当前回复");
+      return;
+    }
+    if (sessionSwitchingId) return;
+    setSessionMenuOpen(false);
+    activateWebConversation(makeConversationId());
+  };
+
+  const switchLingxiaConversation = async (conversationId: string) => {
+    if (sessionSwitchingId) return;
+    if (activeLingxiaStreaming) {
+      toast.error("请先停止当前回复");
+      return;
+    }
+    setSessionSwitchingId(conversationId);
+    const session = webSessions.find((item) => item.conversationId === conversationId);
+    if (!session?.sessionKey || !resolvedAdoptId) {
+      activateWebConversation(conversationId);
+      setSessionMenuOpen(false);
+      setSessionSwitchingId(null);
+      return;
+    }
+    const apiBase = import.meta.env.VITE_API_URL || "";
+    try {
+      const [messagesResp, activateResp] = await Promise.all([
+        fetch(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(session.sessionKey)}`, {
+          credentials: "include",
+        }),
+        fetch(`${apiBase}/api/claw/chat-history/activate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ adoptId: resolvedAdoptId, sessionKey: session.sessionKey }),
+        }),
+      ]);
+      if (!messagesResp.ok) throw new Error(`读取历史失败 (${messagesResp.status})`);
+      if (!activateResp.ok) throw new Error(`激活历史会话失败 (${activateResp.status})`);
+      const payload = await messagesResp.json();
+      restoredSessionKeyRef.current = session.sessionKey;
+      activateWebConversation(conversationId, Array.isArray(payload?.messages) ? payload.messages : []);
+      setSessionMenuOpen(false);
+    } catch (error: any) {
+      toast.error(error?.message || "切换历史会话失败");
+    } finally {
+      setSessionSwitchingId(null);
+    }
+  };
+
+  const deleteLingxiaConversation = async (conversationId: string) => {
+    if (sessionSwitchingId) return;
+    if (!SESSION_INDEX_KEY || !resolvedAdoptId || !userStorageId) return;
+    if (activeLingxiaStreaming) {
+      toast.error("请先停止当前回复");
+      return;
+    }
+    const session = webSessions.find((item) => item.conversationId === conversationId);
+    const ok = await confirm({
+      title: "删除会话？",
+      description: `会话「${session?.title || "未命名会话"}」会从当前浏览器历史记录中移除。`,
+      confirmText: "删除",
+      variant: "danger",
+    });
+    if (!ok) return;
+    setSessionMenuOpen(false);
+
+    const next = webSessions.filter((item) => item.conversationId !== conversationId);
+    writeWebSessionIndex(SESSION_INDEX_KEY, next);
+    setWebSessions(next);
+    if (HIDDEN_SESSION_KEY) {
+      const hidden = readHiddenWebSessions(HIDDEN_SESSION_KEY);
+      hidden.add(conversationId);
+      writeHiddenWebSessions(HIDDEN_SESSION_KEY, hidden);
+    }
+    try {
+      localStorage.removeItem(webMessagesStorageKey(userStorageId, resolvedAdoptId, conversationId));
+      localStorage.removeItem(legacyWebMessagesStorageKey(resolvedAdoptId, conversationId));
+    } catch {}
+    if (conversationId === webConversationId) {
+      const nextSession = next[0];
+      if (nextSession?.sessionKey && !isDirectHttpRuntime) {
+        const apiBase = import.meta.env.VITE_API_URL || "";
+        try {
+          const response = await fetch(`${apiBase}/api/claw/chat-history/messages?adoptId=${encodeURIComponent(resolvedAdoptId)}&sessionKey=${encodeURIComponent(nextSession.sessionKey)}`, {
+            credentials: "include",
+          });
+          const payload = response.ok ? await response.json().catch(() => null) : null;
+          restoredSessionKeyRef.current = nextSession.sessionKey;
+          activateWebConversation(nextSession.conversationId, Array.isArray(payload?.messages) ? payload.messages : []);
+        } catch {
+          activateWebConversation(nextSession.conversationId);
+        }
+      } else {
+        activateWebConversation(nextSession?.conversationId || makeConversationId());
+      }
+    }
+    toast.success("会话已删除");
+  };
+
   const uploadLingxiaAttachments = async (files: File[]): Promise<UploadedLingxiaAttachment[]> => {
     if (!files.length) return [];
     if (!resolvedAdoptId) throw new Error("缺少员工智能体实例 ID");
@@ -529,11 +948,14 @@ export default function Home() {
   const [lingxiaSkillEditor, setLingxiaSkillEditor] = useState<{ id: string; content: string } | null>(null);
 
   // localStorage 会话持久化
-  const MSGS_KEY = resolvedAdoptId && webConversationId ? `lgc_msgs_${resolvedAdoptId}_${webConversationId}` : null;
   useEffect(() => {
     if (!MSGS_KEY) return;
     try {
-      const saved = localStorage.getItem(MSGS_KEY);
+      let saved = localStorage.getItem(MSGS_KEY);
+      if (!saved && LEGACY_MSGS_KEY) {
+        saved = localStorage.getItem(LEGACY_MSGS_KEY);
+        if (saved) localStorage.setItem(MSGS_KEY, saved);
+      }
       if (saved) {
         const parsed = JSON.parse(saved);
         // backfillLxMsgIds 会保留旧 id（如果有）或生成新 id，并兜底必填字段
@@ -543,7 +965,7 @@ export default function Home() {
         setLingxiaMsgs([]);
       }
     } catch {}
-  }, [MSGS_KEY]);
+  }, [MSGS_KEY, LEGACY_MSGS_KEY]);
   useEffect(() => {
     if (!MSGS_KEY) return;
     try {
@@ -1356,8 +1778,12 @@ export default function Home() {
       }
       localStorage.removeItem("lingxia-chat-history");
       if (MSGS_KEY) localStorage.removeItem(MSGS_KEY);
-      // 不需要断 WS：后端已通过 OpenClaw 原生 sessions.reset 换了 sessionId，
-      // session key 不变，现有 WS 连接继续用即可，下次发消息打到新 sessionId 上
+      if (resolvedAdoptId && userStorageId) {
+        const nextConversationId = makeConversationId();
+        localStorage.setItem(webConversationStorageKey(userStorageId, resolvedAdoptId), nextConversationId);
+        setWebConversationId(nextConversationId);
+      }
+      // 后端已重置旧会话；前端同时切到新的 conversationId，避免下次打开继续命中旧本地历史。
       toast.success("会话已重置（新会话）");
     } catch (error: any) {
       toast.error(error?.message || "重置会话失败");
@@ -1496,6 +1922,8 @@ export default function Home() {
               setActivePage={setActivePage}
               collapsed={sidebarCollapsed}
               coopBadge={coopBadgeCount}
+              onOpenAgentMarket={() => setCollabOpen((open) => !open)}
+              agentMarketOpen={collabOpen}
             />
 
             {/* 旧侧栏能力暂留（Phase B 迁移），当前隐藏 */}
@@ -1536,98 +1964,154 @@ export default function Home() {
           {/* 全局顶部栏 */}
           <TopBar
             activePage={activePage}
-            center={activePage === "chat" ? (
+            afterPage={activePage === "chat" ? (
               <>
-                <Select value={lingxiaModelId} onValueChange={(v) => {
-                  setLingxiaModelId(v);
-                  if (!user) { toast.error("请先登录"); return; }
-                  switchModelMutation.mutate({ adoptId: resolvedAdoptId!, modelId: v });
-                }}>
-                  <SelectTrigger
-                    size="sm"
-                    className="focus:ring-0 focus:ring-offset-0"
+                <span className="lingxia-topbar__sep">›</span>
+                <div ref={sessionMenuRef} style={{ position: "relative", minWidth: 0 }}>
+                  <button
+                    type="button"
+                    title="切换历史会话"
+                    className="lingxia-session-title-trigger"
+                    onClick={() => setSessionMenuOpen((open) => !open)}
                     style={{
-                      height: 30,
-                      paddingLeft: 12,
-                      paddingRight: 10,
-                      background: "var(--oc-bg-active)",
-                      border: "1px solid var(--oc-border)",
-                      color: "var(--oc-text-primary)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      maxWidth: 260,
+                      height: 28,
+                      padding: "0 6px",
+                      border: "none",
+                      borderRadius: 6,
+                      background: sessionMenuOpen ? "var(--oc-bg-active)" : "transparent",
+                      color: "var(--oc-text-secondary)",
                       fontSize: "var(--oc-text-sm)",
-                      fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", "Consolas", ui-monospace, monospace',
-                      fontWeight: "var(--oc-weight-medium)",
-                      borderRadius: "var(--oc-radius-md)",
-                      minWidth: 220,
+                      cursor: "pointer",
                     }}
                   >
-                    <SelectValue placeholder="选择模型" />
-                  </SelectTrigger>
-                  <SelectContent
-                    style={{
-                      background: "var(--oc-bg)",
-                      border: "1px solid var(--oc-border)",
-                      borderRadius: 10,
-                      minWidth: 300,
-                      boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
-                      padding: "4px",
-                    }}
-                  >
-                    {(availableModels || []).map((m: any) => {
-                      const modelName = String(m.name || "").trim() || formatModelName(m.id);
-                      const provider = getModelProviderLabel(m.id);
-                      return (
-                        <SelectItem
-                          key={m.id}
-                          value={m.id}
-                          className="lingxia-model-item"
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentSessionTitle}</span>
+                    <span style={{ fontSize: 10, opacity: 0.7 }}>{sessionMenuOpen ? "▲" : "▼"}</span>
+                  </button>
+                  {sessionMenuOpen ? (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "calc(100% + 8px)",
+                        left: 0,
+                        width: 320,
+                        maxHeight: 420,
+                        overflowY: "auto",
+                        background: "var(--oc-panel)",
+                        border: "1px solid var(--oc-border)",
+                        borderRadius: 8,
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
+                        padding: 4,
+                        zIndex: 80,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "5px 8px 7px" }}>
+                        <span style={{ color: "var(--oc-text-tertiary)", fontSize: "var(--oc-text-xs)" }}>历史会话</span>
+                        <button
+                          type="button"
+                          onClick={startNewLingxiaConversation}
+                          disabled={activeLingxiaStreaming || !!sessionSwitchingId}
                           style={{
-                            fontSize: "var(--oc-text-sm)",
-                            fontFamily: '"SF Mono", "Cascadia Code", "Fira Code", "Consolas", ui-monospace, monospace',
-                            fontWeight: "var(--oc-weight-medium)",
-                            borderRadius: 6,
-                            padding: "7px 10px",
-                            cursor: "pointer",
+                            border: "none",
+                            background: "transparent",
+                            color: "var(--oc-accent)",
+                            fontSize: "var(--oc-text-xs)",
+                            cursor: activeLingxiaStreaming || sessionSwitchingId ? "not-allowed" : "pointer",
+                            opacity: activeLingxiaStreaming || sessionSwitchingId ? 0.45 : 1,
                           }}
                         >
-                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            {m.isDefault && (
-                              <span style={{ color: "var(--oc-accent)", fontSize: "var(--oc-text-2xs)", flexShrink: 0 }}>★</span>
-                            )}
-                            <span style={{ color: "var(--oc-text-primary)" }}>{modelName}</span>
-                            {provider && (
-                              <span style={{ color: "var(--oc-text-secondary)", fontSize: "var(--oc-text-xs)", opacity: 0.6 }}>
-                                · {provider}
-                              </span>
-                            )}
-                          </span>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-                <button
-                  onClick={resetLingxiaSession}
-                  disabled={activeLingxiaStreaming}
-                  className="lingxia-topbar-btn"
-                  style={{ height: 30, padding: "0 12px", borderRadius: "var(--oc-radius-md)", fontSize: "var(--oc-text-sm)", whiteSpace: "nowrap" }}
-                >
-                  重置会话
-                </button>
+                          新建
+                        </button>
+                      </div>
+                      {webSessions.length === 0 ? (
+                        <div style={{ padding: "18px 10px", color: "var(--oc-text-tertiary)", fontSize: "var(--oc-text-sm)", textAlign: "center" }}>
+                          暂无历史会话
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          {webSessions.map((session) => {
+                            const active = session.conversationId === webConversationId;
+                            const switching = sessionSwitchingId === session.conversationId;
+                            const displayTitle = uniqueSessionTitle(session, webSessions);
+                            const debugId = sessionDebugId(session);
+                            return (
+                              <div
+                                key={session.conversationId}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => void switchLingxiaConversation(session.conversationId)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    void switchLingxiaConversation(session.conversationId);
+                                  }
+                                }}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  minHeight: 48,
+                                  padding: "6px 8px",
+                                  borderRadius: 6,
+                                  background: active ? "var(--oc-bg-active)" : "transparent",
+                                  border: "1px solid transparent",
+                                  cursor: sessionSwitchingId ? "wait" : "pointer",
+                                  opacity: sessionSwitchingId && !switching ? 0.55 : 1,
+                                }}
+                              >
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                                    <span style={{ color: "var(--oc-text-primary)", fontSize: "var(--oc-text-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                      {displayTitle}
+                                    </span>
+                                    {debugId ? (
+                                      <span style={{ color: "var(--oc-text-tertiary)", fontSize: "10px", fontFamily: "var(--oc-font-mono)", flexShrink: 0 }}>
+                                        #{debugId}
+                                      </span>
+                                    ) : null}
+                                    {active ? <span style={{ width: 5, height: 5, borderRadius: 999, background: "var(--oc-accent)", flexShrink: 0 }} /> : null}
+                                  </div>
+                                  <div style={{ marginTop: 3, color: "var(--oc-text-tertiary)", fontSize: "var(--oc-text-xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {switching ? "正在切换..." : (session.preview || `${session.messageCount} 条消息`)}
+                                  </div>
+                                </div>
+                                <span style={{ color: "var(--oc-text-tertiary)", fontSize: "var(--oc-text-xs)", flexShrink: 0 }}>
+                                  {formatSessionUpdatedAt(session.updatedAt)}
+                                </span>
+                                <button
+                                  type="button"
+                                  title="删除会话"
+                                  disabled={!!sessionSwitchingId}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void deleteLingxiaConversation(session.conversationId);
+                                  }}
+                                  style={{
+                                    border: "none",
+                                    background: "transparent",
+                                    color: "var(--oc-text-tertiary)",
+                                    cursor: sessionSwitchingId ? "not-allowed" : "pointer",
+                                    fontSize: 15,
+                                    lineHeight: 1,
+                                    padding: "2px 4px",
+                                    borderRadius: 5,
+                                    opacity: sessionSwitchingId ? 0.35 : 0.75,
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               </>
-            ) : undefined}
-            right={activePage === "chat" ? (
-              <button
-                onClick={() => {
-                  setCollabOpen(true);
-                }}
-                className={`lingxia-topbar-btn ${collabOpen ? "is-active" : ""}`}
-                style={{ height: 30, padding: "0 12px", display: "flex", alignItems: "center", gap: 6, borderRadius: "var(--oc-radius-md)", fontSize: "var(--oc-text-sm)", whiteSpace: "nowrap" }}
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-                </svg>
-                智能体广场
-              </button>
             ) : undefined}
           />
 
@@ -1777,10 +2261,72 @@ export default function Home() {
               placeholder={`Message ${lingxiaDisplayName || brand.name}…`}
               maxLength={4000}
               messages={activeLingxiaMsgs as any}
-              onNewChat={resetLingxiaSession}
+              onNewChat={startNewLingxiaConversation}
               onUserMention={(u) => {
                 setMentionedUsers((prev) => prev.some((x) => x.userId === u.userId) ? prev : [...prev, u]);
               }}
+              rightControls={(
+                <Select value={lingxiaModelId} onValueChange={(v) => {
+                  setLingxiaModelId(v);
+                  if (!user) { toast.error("请先登录"); return; }
+                  switchModelMutation.mutate({ adoptId: resolvedAdoptId!, modelId: v });
+                }}>
+                  <SelectTrigger
+                    size="sm"
+                    aria-label="选择模型"
+                    className="lingxia-composer-model-select focus:ring-0 focus:ring-offset-0"
+                    disabled={!availableModels || availableModels.length === 0 || activeLingxiaStreaming}
+                    style={{
+                      height: 28,
+                      minWidth: 0,
+                      maxWidth: 180,
+                      paddingLeft: 6,
+                      paddingRight: 4,
+                      background: "transparent",
+                      border: "none",
+                      boxShadow: "none",
+                      color: "var(--oc-text-secondary)",
+                      fontSize: "var(--oc-text-sm)",
+                      fontWeight: "var(--oc-weight-normal)",
+                      borderRadius: 6,
+                    }}
+                  >
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {selectedLingxiaModelName}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent
+                    style={{
+                      background: "var(--oc-bg)",
+                      border: "1px solid var(--oc-border)",
+                      borderRadius: 10,
+                      minWidth: 240,
+                      boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
+                      padding: "4px",
+                    }}
+                  >
+                    {(availableModels || []).map((m: any) => {
+                      const modelName = compactModelDisplayName(String(m.name || "").trim() || formatModelName(m.id));
+                      return (
+                        <SelectItem
+                          key={m.id}
+                          value={m.id}
+                          className="lingxia-model-item"
+                          style={{
+                            fontSize: "var(--oc-text-sm)",
+                            fontWeight: "var(--oc-weight-medium)",
+                            borderRadius: 6,
+                            padding: "7px 10px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span style={{ color: "var(--oc-text-primary)" }}>{modelName}</span>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              )}
             />
 
           </main>

@@ -22,6 +22,7 @@ type ChannelId = "wechat" | "feishu" | "wecom";
 
 type CronJobV2 = {
   id: string;
+  runtime?: "openclaw" | "hermes" | "jiuwenclaw";
   name: string;
   description?: string;
   enabled: boolean;
@@ -47,6 +48,7 @@ type CronJobV2 = {
       targetLabel?: string;
     }>;
   };
+  meta?: Record<string, any>;
 };
 
 type CronRunV2 = {
@@ -63,6 +65,11 @@ type CronRunV2 = {
 };
 
 type PreviewRun = { runAt: string; wakeAt?: string };
+type CronCapabilities = {
+  scheduleKinds?: Array<"interval" | "once" | "cron">;
+  supportsRunNow?: boolean;
+  supportedChannels?: ChannelId[];
+};
 
 type CreateScheduleKind = "daily" | "interval" | "once" | "cron";
 
@@ -281,6 +288,7 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [createForm, setCreateForm] = useState<CreateForm>(EMPTY_CREATE_FORM);
+  const [capabilities, setCapabilities] = useState<CronCapabilities | null>(null);
 
   const latestRunByJob = useMemo(() => {
     const map = new Map<string, CronRunV2>();
@@ -305,6 +313,7 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
       const runJson = await runResp.json();
       setJobs(Array.isArray(jobJson?.jobs) ? jobJson.jobs : []);
       setRuns(Array.isArray(runJson?.runs) ? runJson.runs : []);
+      setCapabilities(jobJson?.capabilities || null);
     } catch (err: any) {
       setError(err?.message || T.loadFailed);
     } finally {
@@ -315,6 +324,24 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
   useEffect(() => {
     load();
   }, [aid]);
+
+  const supportsScheduleKind = (kind: CreateScheduleKind) => {
+    const kinds = capabilities?.scheduleKinds;
+    if (!kinds || kinds.length === 0) return true;
+    if (kind === "daily") return kinds.includes("cron");
+    return kinds.includes(kind as any);
+  };
+
+  useEffect(() => {
+    if (!capabilities?.scheduleKinds?.length) return;
+    if (supportsScheduleKind(createForm.scheduleKind)) return;
+    const fallback: CreateScheduleKind = capabilities.scheduleKinds.includes("interval")
+      ? "interval"
+      : capabilities.scheduleKinds.includes("once")
+        ? "once"
+        : "cron";
+    setCreateForm((form) => ({ ...form, scheduleKind: fallback }));
+  }, [capabilities, createForm.scheduleKind]);
 
   async function runNow(job: CronJobV2) {
     if (!aid || runningJobId) return;
@@ -494,10 +521,10 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
                   value={createForm.scheduleKind}
                   onChange={(e) => setCreateForm((f) => ({ ...f, scheduleKind: e.target.value as CreateScheduleKind }))}
                 >
-                  <option value="daily">{T.daily}</option>
-                  <option value="interval">{T.interval}</option>
-                  <option value="once">{T.once}</option>
-                  <option value="cron">{T.cronExpr}</option>
+                  {supportsScheduleKind("daily") && <option value="daily">{T.daily}</option>}
+                  {supportsScheduleKind("interval") && <option value="interval">{T.interval}</option>}
+                  {supportsScheduleKind("once") && <option value="once">{T.once}</option>}
+                  {supportsScheduleKind("cron") && <option value="cron">{T.cronExpr}</option>}
                 </select>
               </label>
               {createForm.scheduleKind === "daily" ? (
@@ -582,6 +609,8 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
             const target = job.delivery?.targets?.[0];
             const latest = latestRunByJob.get(job.id);
             const activePreview = previewJobId === job.id;
+            const canRunNow = job.meta?.runNowSupported !== false && capabilities?.supportsRunNow !== false;
+            const canToggle = job.meta?.updateSupported !== false && job.runtime !== "jiuwenclaw";
             return (
               <div className="schedule-v2-row-group" key={job.id}>
                 <div className="schedule-v2-row">
@@ -611,13 +640,13 @@ export function SchedulePageV2({ adoptId }: { adoptId?: string }) {
                   </div>
 
                   <div className="schedule-v2-actions">
-                    <button className="schedule-v2-icon-btn" onClick={() => runNow(job)} disabled={runningJobId === job.id} title={T.runNow}>
+                    <button className="schedule-v2-icon-btn" onClick={() => runNow(job)} disabled={!canRunNow || runningJobId === job.id} title={T.runNow}>
                       <Play size={14} /> {T.run}
                     </button>
                     <button className="schedule-v2-icon-btn" onClick={() => togglePreview(job)} title={T.previewFuture}>
                       {activePreview ? <ChevronDown size={14} /> : <Eye size={14} />} {T.preview}
                     </button>
-                    <button className="schedule-v2-icon-btn" onClick={() => toggleJob(job)} title={job.enabled ? T.disable : T.enable}>
+                    <button className="schedule-v2-icon-btn" onClick={() => toggleJob(job)} disabled={!canToggle} title={job.enabled ? T.disable : T.enable}>
                       <PauseCircle size={14} /> {job.enabled ? T.disable : T.enable}
                     </button>
                     <button className="schedule-v2-icon-btn schedule-v2-icon-btn--danger" onClick={() => removeJob(job)} title={T.delete}>

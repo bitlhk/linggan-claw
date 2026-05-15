@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, type KeyboardEvent } from "react";
+import { useRef, useState, useCallback, useEffect, type KeyboardEvent, type ReactNode } from "react";
 
 type MentionUser = {
   userId: number;
@@ -22,6 +22,7 @@ type ChatInputProps = {
   maxLength?: number;
   messages?: Array<{ role: string; text: string; timeLabel: string }>;
   onUserMention?: (user: MentionUser) => void;
+  rightControls?: ReactNode;
 };
 
 export function ChatInput({
@@ -36,6 +37,7 @@ export function ChatInput({
   maxLength = 4000,
   messages = [],
   onUserMention,
+  rightControls,
 }: ChatInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -508,6 +510,7 @@ export function ChatInput({
           </div>
 
           <div className="flex items-center gap-1">
+            {rightControls}
             <button onClick={onNewChat} title="新对话" className="lingxia-toolbar-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>

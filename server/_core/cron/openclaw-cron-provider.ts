@@ -2,6 +2,7 @@ import { Cron } from "croner";
 import type {
   ChannelId,
   CronDeliveryConfig,
+  CronDeliveryTarget,
   CronJob,
   CronJobInput,
   CronProvider,
@@ -15,6 +16,7 @@ import type {
 } from "@shared/types/cron";
 import { createOpenClawRuntimeAdapter } from "../runtime";
 import { getCronDeliveryChannel } from "../cron-delivery";
+import { getWeixinStatus } from "../claw-weixin";
 import { getUserBoundChannels } from "./channel-binding-query";
 import { normalizeChannelId } from "./channel-provider-registry";
 
@@ -25,6 +27,13 @@ type RuntimeRpc = {
 export type OpenClawCronProviderOptions = {
   runtime?: RuntimeRpc;
   getBoundChannels?: (handle: CronProviderHandle) => Promise<ChannelId[]>;
+  getWeixinStatus?: (adoptId: string) => {
+    bound: boolean;
+    needsReactivation?: boolean;
+    accountId?: string;
+    userId?: string;
+    targetLabel?: string;
+  };
   now?: () => Date;
 };
 
@@ -100,27 +109,43 @@ function channelLabel(channelId: ChannelId) {
   return "企业微信";
 }
 
-function deliveryConfigFromRaw(adoptId: string, jobId: string): CronDeliveryConfig {
+function deliveryConfigFromRaw(adoptId: string, jobId: string, rawDelivery?: any): {
+  config: CronDeliveryConfig;
+  deliveryMissing: boolean;
+  deliveryManagedBy?: "openclaw-native" | "lingxia-sidecar";
+} {
   const configured = getCronDeliveryChannel(adoptId, jobId);
   const normalized = normalizeChannelId(configured || "");
   const channelId = normalized;
-  if (!channelId) {
-    return { targets: [] };
+  if (channelId) {
+    return {
+      config: {
+        targets: [{
+          channelId,
+          channelLabel: channelLabel(channelId),
+        }],
+      },
+      deliveryMissing: false,
+      deliveryManagedBy: "lingxia-sidecar",
+    };
   }
-  return {
-    targets: [{
-      channelId,
-      channelLabel: channelLabel(channelId),
-    }],
-  };
-}
 
-function openClawExecutionOnlyDelivery(): Record<string, any> {
-  // Lingxia owns channel delivery via ChannelProvider/cron-delivery.
-  // OpenClaw should only execute the scheduled agent turn; passing "wechat"
-  // to OpenClaw delivery marks the run as failed because OpenClaw does not
-  // know Lingxia's channel IDs.
-  return { mode: "none" };
+  if (rawDelivery?.mode === "announce" && rawDelivery?.channel === "openclaw-weixin") {
+    return {
+      config: {
+        targets: [{
+          channelId: "wechat",
+          channelLabel: "微信",
+          targetId: typeof rawDelivery?.to === "string" ? rawDelivery.to : undefined,
+          targetLabel: "微信",
+        }],
+      },
+      deliveryMissing: false,
+      deliveryManagedBy: "openclaw-native",
+    };
+  }
+
+  return { config: { targets: [] }, deliveryMissing: true };
 }
 
 export function openClawJobToCronJob(raw: any, handle: CronProviderHandle): CronJob {
@@ -130,7 +155,7 @@ export function openClawJobToCronJob(raw: any, handle: CronProviderHandle): Cron
   const updatedAtMs = Number(raw?.updatedAtMs || raw?.updated_at_ms || createdAtMs || Date.now());
   const state = raw?.state || {};
   const lastStatus = String(state.lastStatus || state.lastRunStatus || "");
-  const deliveryMissing = !getCronDeliveryChannel(handle.adoptId, id);
+  const delivery = deliveryConfigFromRaw(handle.adoptId, id, raw?.delivery);
   const schedule = cronScheduleFromOpenClawSchedule(raw?.schedule || {});
   const nextRunAtMs = Number(state.nextRunAtMs || 0);
   const lastRunAtMs = Number(state.lastRunAtMs || 0);
@@ -154,7 +179,7 @@ export function openClawJobToCronJob(raw: any, handle: CronProviderHandle): Cron
       totalRuns: typeof state.totalRuns === "number" ? state.totalRuns : undefined,
       successRuns: typeof state.successRuns === "number" ? state.successRuns : undefined,
     },
-    delivery: deliveryConfigFromRaw(handle.adoptId, id),
+    delivery: delivery.config,
     wakeOffsetSeconds: undefined,
     meta: {
       agentId: raw?.agentId,
@@ -162,7 +187,8 @@ export function openClawJobToCronJob(raw: any, handle: CronProviderHandle): Cron
       wakeMode: raw?.wakeMode,
       consecutiveErrors: state.consecutiveErrors,
       lastError: state.lastError,
-      deliveryMissing,
+      deliveryMissing: delivery.deliveryMissing,
+      deliveryManagedBy: delivery.deliveryManagedBy,
       createdAtMs: raw?.createdAtMs,
       updatedAtMs: raw?.updatedAtMs,
     },
@@ -258,16 +284,49 @@ export class OpenClawCronProvider implements CronProvider {
   readonly runtime = "openclaw";
   private readonly runtimeClient: RuntimeRpc;
   private readonly getBoundChannelsForHandle: (handle: CronProviderHandle) => Promise<ChannelId[]>;
+  private readonly getWeixinStatusForAdopt: NonNullable<OpenClawCronProviderOptions["getWeixinStatus"]>;
   private readonly now: () => Date;
 
   constructor(options: OpenClawCronProviderOptions = {}) {
     this.runtimeClient = options.runtime || createOpenClawRuntimeAdapter();
     this.getBoundChannelsForHandle = options.getBoundChannels || ((handle) => getUserBoundChannels(handle.userId, handle.adoptId));
+    this.getWeixinStatusForAdopt = options.getWeixinStatus || getWeixinStatus;
     this.now = options.now || (() => new Date());
   }
 
   capabilities(): CronProviderCapabilities {
     return OPENCLAW_CRON_CAPABILITIES;
+  }
+
+  private deliveryForTarget(handle: CronProviderHandle, target: CronDeliveryTarget): CronResult<{
+    rawDelivery: Record<string, any>;
+    deliveryManagedBy: "openclaw-native" | "lingxia-sidecar";
+  }> {
+    if (target.channelId === "wechat") {
+      const status = this.getWeixinStatusForAdopt(handle.adoptId);
+      if (!status.bound || status.needsReactivation) {
+        return validationFailed("wechat is not active; please bind or reactivate it in 频道页 first");
+      }
+      if (!status.accountId || !status.userId) {
+        return validationFailed("wechat binding is missing OpenClaw accountId or userId");
+      }
+      return ok({
+        rawDelivery: {
+          mode: "announce",
+          channel: "openclaw-weixin",
+          accountId: status.accountId,
+          to: status.userId,
+        },
+        deliveryManagedBy: "openclaw-native",
+      });
+    }
+
+    // Feishu delivery is still handled by Lingxia's sidecar dispatcher until the
+    // OpenClaw native channel contract is verified for that provider.
+    return ok({
+      rawDelivery: { mode: "none" },
+      deliveryManagedBy: "lingxia-sidecar",
+    });
   }
 
   async listJobs(handle: CronProviderHandle): Promise<CronResult<CronJob[]>> {
@@ -311,6 +370,9 @@ export class OpenClawCronProvider implements CronProvider {
       return validationFailed("prompt is required for OpenClaw cron jobs");
     }
 
+    const delivery = this.deliveryForTarget(handle, target);
+    if (!delivery.ok) return delivery;
+
     try {
       const payload = {
         name: input.name.trim(),
@@ -319,12 +381,17 @@ export class OpenClawCronProvider implements CronProvider {
         schedule: openClawScheduleFromCronSchedule(input.schedule),
         payload: { kind: "agentTurn", message: input.prompt || "" },
         sessionTarget: input.meta?.sessionTarget || "isolated",
-        delivery: openClawExecutionOnlyDelivery(),
+        delivery: delivery.value.rawDelivery,
         agentId: handle.agentId,
       };
       const response = this.runtimeClient.callRpc("cron.add", payload);
-      const rawJob = (response as any)?.job || response;
-      return ok(openClawJobToCronJob(rawJob, handle));
+      const rawJob = {
+        ...((response as any)?.job || response),
+        delivery: ((response as any)?.job || response)?.delivery || payload.delivery,
+      };
+      const job = openClawJobToCronJob(rawJob, handle);
+      job.meta = { ...(job.meta || {}), deliveryManagedBy: delivery.value.deliveryManagedBy };
+      return ok(job);
     } catch (error: any) {
       return runtimeUnavailable(`cron.add failed: ${error?.message || error}`);
     }
@@ -333,6 +400,7 @@ export class OpenClawCronProvider implements CronProvider {
   async updateJob(handle: CronProviderHandle, id: string, patch: Partial<CronJobInput>): Promise<CronResult<CronJob>> {
     try {
       const rawPatch: Record<string, any> = {};
+      let deliveryManagedBy: "openclaw-native" | "lingxia-sidecar" | undefined;
       if (patch.name !== undefined) rawPatch.name = patch.name;
       if (patch.description !== undefined) rawPatch.description = patch.description;
       if (patch.enabled !== undefined) rawPatch.enabled = patch.enabled;
@@ -341,11 +409,19 @@ export class OpenClawCronProvider implements CronProvider {
       if (patch.delivery !== undefined) {
         const target = patch.delivery.targets[0];
         if (!target) return validationFailed("delivery target is required");
-        rawPatch.delivery = openClawExecutionOnlyDelivery();
+        const delivery = this.deliveryForTarget(handle, target);
+        if (!delivery.ok) return delivery;
+        rawPatch.delivery = delivery.value.rawDelivery;
+        deliveryManagedBy = delivery.value.deliveryManagedBy;
       }
       const response = this.runtimeClient.callRpc("cron.update", { id, patch: rawPatch });
-      const rawJob = (response as any)?.job || response;
-      return ok(openClawJobToCronJob(rawJob, handle));
+      const rawJob = {
+        ...((response as any)?.job || response),
+        ...(rawPatch.delivery && !((response as any)?.job || response)?.delivery ? { delivery: rawPatch.delivery } : {}),
+      };
+      const job = openClawJobToCronJob(rawJob, handle);
+      if (deliveryManagedBy) job.meta = { ...(job.meta || {}), deliveryManagedBy };
+      return ok(job);
     } catch (error: any) {
       return runtimeUnavailable(`cron.update failed: ${error?.message || error}`);
     }

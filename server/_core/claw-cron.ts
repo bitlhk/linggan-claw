@@ -1,13 +1,15 @@
 import express from "express";
-import { requireClawOwner, resolveRuntimeAgentId } from "./helpers";
+import { isJiuwenClawAdoptId, requireClawOwner, resolveRuntimeAgentId } from "./helpers";
 import { hermesCron, type CronProviderHandle } from "./hermes-cron";
 import { OpenClawCronProvider } from "./cron/openclaw-cron-provider";
+import { JiuwenClawCronProvider } from "./cron/jiuwenclaw-cron-provider";
 import { startCronRunWatcher } from "./cron/cron-run-watcher";
 import { deleteCronDeliveryConfig, saveCronDeliveryConfig } from "./cron-delivery";
 import { normalizeChannelId } from "./cron/channel-provider-registry";
 import type { CronJobInput, CronProviderHandle as SharedCronProviderHandle, CronSchedule } from "@shared/types/cron";
 
 const openClawCronProvider = new OpenClawCronProvider();
+const jiuwenClawCronProvider = new JiuwenClawCronProvider();
 
 function isHermesAdopt(adoptId: string): boolean {
   return String(adoptId || "").startsWith("lgh-");
@@ -29,6 +31,16 @@ function toOpenClawHandle(claw: any): SharedCronProviderHandle {
     agentId: resolveRuntimeAgentId(adoptId, (claw as any).agentId),
     userId: Number(claw.userId || 0),
     runtime: "openclaw",
+  };
+}
+
+function toJiuwenClawHandle(claw: any): SharedCronProviderHandle {
+  const adoptId = String(claw.adoptId || "");
+  return {
+    adoptId,
+    agentId: resolveRuntimeAgentId(adoptId, (claw as any).agentId),
+    userId: Number(claw.userId || 0),
+    runtime: "jiuwenclaw",
   };
 }
 
@@ -124,6 +136,7 @@ function validateCronInputSafety(input: CronJobInput): string | null {
 function providerErrorStatus(kind?: string) {
   if (kind === "validation_failed") return 400;
   if (kind === "not_found") return 404;
+  if (kind === "not_implemented") return 501;
   return 500;
 }
 
@@ -143,6 +156,21 @@ export function registerCronRoutes(app: express.Express) {
           enabled: true,
           runtime: "hermes",
           jobs: jobs.length,
+          enabledJobs: enabled.length,
+          nextRunAt: nextRunIso || undefined,
+          nextWakeAtMs: nextRunIso ? new Date(nextRunIso).getTime() : undefined,
+        });
+      }
+
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const listed = await jiuwenClawCronProvider.listJobs(toJiuwenClawHandle(claw));
+        if (!listed.ok) return res.status(providerErrorStatus(listed.error.kind)).json({ error: listed.error.detail });
+        const enabled = listed.value.filter((j) => j.enabled);
+        const nextRunIso = enabled.map((j) => j.state.nextRunAt).filter(Boolean).sort()[0];
+        return res.json({
+          enabled: true,
+          runtime: "jiuwenclaw",
+          jobs: listed.value.length,
           enabledJobs: enabled.length,
           nextRunAt: nextRunIso || undefined,
           nextWakeAtMs: nextRunIso ? new Date(nextRunIso).getTime() : undefined,
@@ -173,6 +201,7 @@ export function registerCronRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       if (isHermesAdopt(adoptId)) return res.json({ runtime: "hermes", capabilities: hermesCron.capabilities() });
+      if (isJiuwenClawAdoptId(adoptId)) return res.json({ runtime: "jiuwenclaw", capabilities: jiuwenClawCronProvider.capabilities() });
       return res.json({ runtime: "openclaw", capabilities: openClawCronProvider.capabilities() });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || e || "capabilities failed") });
@@ -197,6 +226,18 @@ export function registerCronRoutes(app: express.Express) {
         if (query) jobs = jobs.filter((j) => j.name.toLowerCase().includes(query) || (j.description || "").toLowerCase().includes(query));
         const total = jobs.length;
         return res.json({ runtime: "hermes", capabilities: hermesCron.capabilities(), jobs: jobs.slice(offset, offset + limit), total, limit, offset });
+      }
+
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const listed = await jiuwenClawCronProvider.listJobs(toJiuwenClawHandle(claw));
+        if (!listed.ok) return res.status(providerErrorStatus(listed.error.kind)).json({ error: listed.error.detail });
+        let jobs = listed.value;
+        if (query) jobs = jobs.filter((j) => String(j.name || "").toLowerCase().includes(query) || String(j.description || "").toLowerCase().includes(query));
+        if (enabled === "enabled") jobs = jobs.filter((j) => j.enabled !== false);
+        if (enabled === "disabled") jobs = jobs.filter((j) => j.enabled === false);
+        if (["interval", "once", "cron"].includes(scheduleKind)) jobs = jobs.filter((j) => String(j.schedule?.kind || "") === scheduleKind);
+        const total = jobs.length;
+        return res.json({ runtime: "jiuwenclaw", capabilities: jiuwenClawCronProvider.capabilities(), jobs: jobs.slice(offset, offset + limit), total, limit, offset });
       }
 
       const listed = await openClawCronProvider.listJobs(toOpenClawHandle(claw));
@@ -225,6 +266,27 @@ export function registerCronRoutes(app: express.Express) {
       const offset = Math.max(0, Number(req.query.offset || 0));
       const jobId = String(req.query.jobId || "").trim();
       const scope = String(req.query.scope || "all").trim();
+
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const handle = toJiuwenClawHandle(claw);
+        const listed = await jiuwenClawCronProvider.listJobs(handle);
+        if (!listed.ok) return res.status(providerErrorStatus(listed.error.kind)).json({ error: listed.error.detail });
+        const targetJobs = jobId ? listed.value.filter((j) => String(j.id) === jobId) : listed.value;
+        let runs: any[] = [];
+        for (const job of targetJobs.slice(0, 50)) {
+          const runResult = await jiuwenClawCronProvider.listRuns(handle, job.id, 100);
+          if (!runResult.ok) {
+            console.warn("[CRON-PROVIDER] JiuwenClaw listRuns failed for job", { adoptId, jobId: job.id, error: runResult.error });
+            continue;
+          }
+          runs.push(...runResult.value.map((run) => ({ ...run, jobName: job.name })));
+        }
+        if (["ok", "error", "skipped", "timeout", "canceled"].includes(scope)) runs = runs.filter((r: any) => String(r?.status || "") === scope);
+        runs.sort((a: any, b: any) => Date.parse(String(b?.startedAt || "")) - Date.parse(String(a?.startedAt || "")));
+        const total = runs.length;
+        return res.json({ runs: runs.slice(offset, offset + limit), total, limit, offset });
+      }
+
       const handle = toOpenClawHandle(claw);
 
       const listed = await openClawCronProvider.listJobs(handle);
@@ -255,6 +317,17 @@ export function registerCronRoutes(app: express.Express) {
       const claw = await requireClawOwner(req, res, adoptId);
       if (!claw) return;
       if (isHermesAdopt(adoptId)) return res.status(501).json({ error: "Hermes cron preview is not supported yet" });
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const result = await jiuwenClawCronProvider.previewRuns({
+          adoptId,
+          schedule: req.body?.schedule,
+          timezone: req.body?.timezone,
+          count: req.body?.count || 5,
+          wakeOffsetSeconds: req.body?.wakeOffsetSeconds,
+        });
+        if (!result.ok) return res.status(400).json({ error: result.error.detail });
+        return res.json(result.value);
+      }
       const result = await openClawCronProvider.previewRuns({
         adoptId,
         schedule: req.body?.schedule,
@@ -297,6 +370,22 @@ export function registerCronRoutes(app: express.Express) {
         return res.json({ runtime: "hermes", job: created });
       }
 
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const handle = toJiuwenClawHandle(claw);
+        const input = cronJobInputFromRequest(job);
+        const existing = await jiuwenClawCronProvider.listJobs(handle);
+        if (existing.ok && existing.value.length >= 5) {
+          return res.status(400).json({ error: `每个智能体最多 5 个定时任务，当前已有 ${existing.value.length} 个` });
+        }
+        const result = await jiuwenClawCronProvider.addJob(handle, input);
+        if (!result.ok) return res.status(providerErrorStatus(result.error.kind)).json({ error: result.error.detail });
+        const target = input.delivery.targets[0];
+        if (target?.channelId) {
+          await saveCronDeliveryConfig(adoptId, result.value.name || input.name, target.channelId, result.value.id);
+        }
+        return res.json({ runtime: "jiuwenclaw", job: result.value });
+      }
+
       const handle = toOpenClawHandle(claw);
       const input = cronJobInputFromRequest(job);
       const safetyError = validateCronInputSafety(input);
@@ -311,8 +400,9 @@ export function registerCronRoutes(app: express.Express) {
       if (!result.ok) return res.status(providerErrorStatus(result.error.kind)).json({ error: result.error.detail });
 
       const target = input.delivery.targets[0];
+      const deliveryManagedBy = String(result.value.meta?.deliveryManagedBy || "");
       try {
-        if (target?.channelId) {
+        if (target?.channelId && deliveryManagedBy !== "openclaw-native") {
           await saveCronDeliveryConfig(adoptId, result.value.name || input.name, target.channelId, result.value.id);
         }
       } catch (saveError: any) {
@@ -372,8 +462,23 @@ export function registerCronRoutes(app: express.Express) {
         return res.json({ runtime: "hermes", job: out });
       }
 
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const result = await jiuwenClawCronProvider.updateJob(toJiuwenClawHandle(claw), id, patch);
+        if (!result.ok) return res.status(providerErrorStatus(result.error.kind)).json({ error: result.error.detail });
+        return res.json({ runtime: "jiuwenclaw", job: result.value });
+      }
+
       const result = await openClawCronProvider.updateJob(toOpenClawHandle(claw), id, patch);
       if (!result.ok) return res.status(providerErrorStatus(result.error.kind)).json({ error: result.error.detail });
+      if (patch.delivery !== undefined) {
+        const target = cronDeliveryFromRequest(patch.delivery).targets[0];
+        const deliveryManagedBy = String(result.value.meta?.deliveryManagedBy || "");
+        if (deliveryManagedBy === "openclaw-native") {
+          await deleteCronDeliveryConfig(adoptId, id);
+        } else if (target?.channelId) {
+          await saveCronDeliveryConfig(adoptId, result.value.name, target.channelId, id);
+        }
+      }
       return res.json({ runtime: "openclaw", job: result.value });
     } catch (e: any) {
       return res.status(500).json({ error: String(e?.message || e || "cron update failed") });
@@ -391,6 +496,12 @@ export function registerCronRoutes(app: express.Express) {
       if (isHermesAdopt(adoptId)) {
         const out = await hermesCron.triggerJob(toHermesHandle(claw), id);
         return res.json({ runtime: "hermes", job: out });
+      }
+
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const result = await jiuwenClawCronProvider.runJobNow(toJiuwenClawHandle(claw), id);
+        if (!result.ok) return res.status(providerErrorStatus(result.error.kind)).json({ error: result.error.detail });
+        return res.json({ runtime: "jiuwenclaw", ok: true, ...result.value, watcher: "unsupported" });
       }
 
       const handle = toOpenClawHandle(claw);
@@ -432,6 +543,13 @@ export function registerCronRoutes(app: express.Express) {
         await hermesCron.removeJob(toHermesHandle(claw), id);
         await deleteCronDeliveryConfig(adoptId, id);
         return res.json({ runtime: "hermes", ok: true });
+      }
+
+      if (isJiuwenClawAdoptId(adoptId)) {
+        const result = await jiuwenClawCronProvider.removeJob(toJiuwenClawHandle(claw), id);
+        if (!result.ok) return res.status(providerErrorStatus(result.error.kind)).json({ error: result.error.detail });
+        await deleteCronDeliveryConfig(adoptId, id);
+        return res.json({ runtime: "jiuwenclaw", ok: true });
       }
 
       const result = await openClawCronProvider.removeJob(toOpenClawHandle(claw), id);

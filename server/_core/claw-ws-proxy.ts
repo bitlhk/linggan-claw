@@ -26,9 +26,12 @@ import {
   INTERNAL_BASE_URL,
   appendLogAsync,
   buildRuntimeSessionKey,
+  buildSessionRegistryScope,
+  lookupSessionRegistry,
   openClawAgentDir,
   openClawWorkspaceDir,
   readSessionEpoch,
+  upsertSessionRegistry,
 } from "./helpers";
 import { ResponseAccumulator } from "./response-accumulator";
 import { normalizeWsEvent } from "./runtime";
@@ -328,12 +331,17 @@ export function registerWSProxy(server: Server) {
         // epoch>0 → agent:xxx:main:e{epoch}（reset 后用新 key 实现真正"新会话"）
         if (msg.type === "res" && msg.ok === true && !ready) {
           const epoch = readSessionEpoch(meta.adoptId);
-          const mainSessionKey = buildRuntimeSessionKey({
+          const sessionScope = buildSessionRegistryScope(meta.channel, meta.conversationId);
+          const foundSessionKey = lookupSessionRegistry(meta.adoptId, meta.agentId, epoch, sessionScope);
+          const mainSessionKey = foundSessionKey || buildRuntimeSessionKey({
             runtimeAgentId: meta.agentId,
             channel: meta.channel,
             conversationId: meta.conversationId,
             epoch,
           });
+          if (!foundSessionKey) {
+            upsertSessionRegistry(meta.adoptId, meta.agentId, mainSessionKey, epoch, sessionScope);
+          }
           console.log("[WS] using session:", mainSessionKey, "epoch:", epoch);
           gw!.send(JSON.stringify({ type: "req", id: "init-session", method: "sessions.create", params: { agentId: meta.agentId, key: mainSessionKey } }));
           return;

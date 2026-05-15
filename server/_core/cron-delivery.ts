@@ -1,9 +1,9 @@
 /**
- * Lingxia-owned cron delivery.
+ * Legacy Lingxia-owned cron delivery.
  *
- * OpenClaw executes scheduled agent turns; Lingxia owns channel delivery.
- * This poller watches completed OpenClaw cron runs and sends the summary to
- * the user's configured ChannelProvider target.
+ * New OpenClaw + WeChat jobs use OpenClaw's native announce delivery. This
+ * poller remains for existing sidecar jobs and channels whose OpenClaw-native
+ * delivery contract has not been verified yet.
  */
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { getChannelProvider, normalizeChannelId } from "./cron/channel-provider-registry";

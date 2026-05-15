@@ -108,6 +108,50 @@ describe("OpenClawCronProvider validation and reads", () => {
     }));
   });
 
+  it("uses OpenClaw native WeChat announce delivery when WeChat is bound", async () => {
+    const runtime = runtimeStub({
+      "cron.add": {
+        id: "job-wechat",
+        agentId: "trial_lgc-test",
+        name: "微信晨报",
+        enabled: true,
+        createdAtMs: Date.parse("2026-04-30T00:00:00.000Z"),
+        updatedAtMs: Date.parse("2026-04-30T00:00:00.000Z"),
+        schedule: { kind: "cron", expr: "0 9 * * *" },
+        payload: { kind: "agentTurn", message: "生成金融晨报" },
+        state: {},
+      },
+    });
+    const provider = new OpenClawCronProvider({
+      runtime,
+      getBoundChannels: async () => ["wechat"],
+      getWeixinStatus: () => ({
+        bound: true,
+        accountId: "acct-1",
+        userId: "user-1@im.wechat",
+      }),
+    });
+    const result = await provider.addJob(handle, {
+      ...input,
+      name: "微信晨报",
+      delivery: { targets: [{ channelId: "wechat", channelLabel: "微信" }] },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(runtime.callRpc).toHaveBeenCalledWith("cron.add", expect.objectContaining({
+      delivery: {
+        mode: "announce",
+        channel: "openclaw-weixin",
+        accountId: "acct-1",
+        to: "user-1@im.wechat",
+      },
+    }));
+    if (result.ok) {
+      expect(result.value.delivery.targets[0]?.channelId).toBe("wechat");
+      expect(result.value.meta?.deliveryManagedBy).toBe("openclaw-native");
+    }
+  });
+
   it("listRuns is read-only and only calls cron.runs", async () => {
     const runtime = runtimeStub({
       "cron.runs": { runs: [{ id: "run-1", ts: Date.parse("2026-04-30T00:00:00.000Z"), status: "ok", summary: "done" }] },
@@ -163,5 +207,29 @@ describe("OpenClawCronProvider validation and reads", () => {
     expect((job.delivery as any).mode).toBeUndefined();
     expect((job.delivery as any).target).toBeUndefined();
     expect((job.delivery as any).weixin).toBeUndefined();
+  });
+
+  it("reads OpenClaw native WeChat delivery from raw cron jobs", () => {
+    const job = openClawJobToCronJob({
+      id: "job-native-wechat",
+      agentId: "trial_lgc-test",
+      name: "微信原生投递",
+      enabled: true,
+      createdAtMs: Date.parse("2026-04-30T00:00:00.000Z"),
+      updatedAtMs: Date.parse("2026-04-30T00:01:00.000Z"),
+      schedule: { kind: "cron", expr: "0 9 * * *" },
+      payload: { kind: "agentTurn", message: "检查天气" },
+      delivery: {
+        mode: "announce",
+        channel: "openclaw-weixin",
+        accountId: "acct-1",
+        to: "user-1@im.wechat",
+      },
+      state: {},
+    }, handle);
+
+    expect(job.delivery.targets[0]?.channelId).toBe("wechat");
+    expect(job.meta?.deliveryMissing).toBe(false);
+    expect(job.meta?.deliveryManagedBy).toBe("openclaw-native");
   });
 });

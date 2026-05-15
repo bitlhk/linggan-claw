@@ -3,12 +3,95 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync
 import { execSync } from "child_process";
 import path from "path";
 import { strictLimiter } from "./security";
-import { APP_ROOT, OPENCLAW_HOME, OPENCLAW_JSON_PATH, openClawAgentDir, openClawSkillMarketDir, openClawWorkspaceDir, requireClawOwner } from "./helpers";
+import {
+  APP_ROOT,
+  OPENCLAW_HOME,
+  OPENCLAW_JSON_PATH,
+  buildSessionRegistryScope,
+  openClawAgentDir,
+  openClawSkillMarketDir,
+  openClawWorkspaceDir,
+  readSessionEpoch,
+  requireClawOwner,
+  upsertSessionRegistry,
+} from "./helpers";
 import { createContext } from "./context";
 import { skillInstaller } from "./skills/skill-installer";
 import { MAX_SKILL_PACKAGE_BYTES, parseSkillPackageBuffer } from "./skills/skill-source";
 
 type UsageBucket = { total: number; days: Record<string, number>; lastTs: string; userId: number };
+type ChatHistoryMessage = { id: string; role: "user" | "assistant"; text: string; timeLabel: string; timestamp: number };
+
+function normalizeHistoryText(value: unknown): string {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function truncateHistoryText(value: unknown, max = 28): string {
+  const text = normalizeHistoryText(value);
+  if (!text) return "";
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function formatHistoryTimeLabel(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
+  return new Date(timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function stripPlatformLanguagePolicy(text: string): string {
+  return text
+    .replace(/\[[^\]]*Employee Agent Platform Language Policy\][\s\S]*?\[\/Employee Agent Platform Language Policy\]\s*/g, "")
+    .replace(/^\[[A-Za-z]{3}\s+\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}\s+GMT[+-]\d+\]\s*/g, "")
+    .trim();
+}
+
+function textFromOpenClawContent(content: unknown, role: string): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const item of content as any[]) {
+    if (!item || typeof item !== "object") continue;
+    const type = String(item.type || "");
+    if (type === "thinking" || type === "tool_use" || type === "tool_result") continue;
+    if (typeof item.text === "string") parts.push(item.text);
+    else if (role === "assistant" && typeof item.content === "string" && (type === "output_text" || type === "text")) parts.push(item.content);
+  }
+  return parts.join("\n\n").trim();
+}
+
+function extractOpenClawChatMessages(sessionFile: string, maxMessages = 200): ChatHistoryMessage[] {
+  if (!sessionFile || !existsSync(sessionFile)) return [];
+  const messages: ChatHistoryMessage[] = [];
+  const lines = readFileSync(sessionFile, "utf8").split("\n");
+  for (const line of lines) {
+    if (!line) continue;
+    let event: any;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (event?.type !== "message") continue;
+    const role = String(event?.message?.role || "");
+    if (role !== "user" && role !== "assistant") continue;
+    let text = textFromOpenClawContent(event?.message?.content, role);
+    if (role === "user") text = stripPlatformLanguagePolicy(text);
+    text = text.trim();
+    if (!text) continue;
+    const timestamp = Number(event?.message?.timestamp || event?.timestamp || 0) || 0;
+    messages.push({
+      id: `hist-${String(event?.id || messages.length)}`,
+      role,
+      text,
+      timeLabel: formatHistoryTimeLabel(timestamp),
+      timestamp,
+    });
+  }
+  return messages.slice(-maxMessages);
+}
+
+function parseWebSessionKey(sessionKey: string, runtimeAgentId: string): { conversationId: string; epoch?: number } | null {
+  const parts = String(sessionKey || "").split(":");
+  if (parts[0] !== "agent" || parts[1] !== runtimeAgentId || parts[2] !== "web" || !parts[3]) return null;
+  const epochPart = parts[4] || "";
+  const epochMatch = /^e(\d+)$/.exec(epochPart);
+  return { conversationId: parts[3], epoch: epochMatch ? Number(epochMatch[1]) : undefined };
+}
 
 function addUsageEvent(params: {
   byAdopt: Record<string, UsageBucket>;
@@ -96,6 +179,167 @@ export function registerMiscRoutes(app: express.Express) {
       res.json({ adoptId, dbAgentId, runtimeAgentId, skillsDir, trialAgentDirExists: existsSync(trialAgentDir) });
     } catch (e) {
       res.status(500).json({ error: "runtime info failed" });
+    }
+  });
+
+  app.get("/api/claw/chat-history/sessions", async (req, res) => {
+    try {
+      const adoptId = String(req.query.adoptId || "").trim();
+      const limit = Math.min(Math.max(Number(req.query.limit || 50) || 50, 1), 100);
+      if (!adoptId) {
+        res.status(400).json({ error: "adoptId required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+
+      const dbAgentId = String((claw as any).agentId || "").trim();
+      const trialAgentId = `trial_${adoptId}`;
+      const runtimeAgentId = existsSync(openClawAgentDir(trialAgentId)) ? trialAgentId : dbAgentId;
+      const sessionsPath = path.join(openClawAgentDir(runtimeAgentId), "sessions", "sessions.json");
+      if (!existsSync(sessionsPath)) {
+        res.json({ sessions: [] });
+        return;
+      }
+
+      const rawIndex = JSON.parse(readFileSync(sessionsPath, "utf8") || "{}") || {};
+      const byConversation = new Map<string, any>();
+      const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
+      const resolvedSessionsDir = path.resolve(sessionsDir);
+      for (const [sessionKey, raw] of Object.entries(rawIndex) as Array<[string, any]>) {
+        const parsed = parseWebSessionKey(sessionKey, runtimeAgentId);
+        if (!parsed) continue;
+        const sessionId = String(raw?.sessionId || "").trim();
+        if (!sessionId) continue;
+        const sessionFile = String(raw?.sessionFile || path.join(sessionsDir, `${sessionId}.jsonl`));
+        const resolvedSessionFile = path.resolve(sessionFile);
+        if (!resolvedSessionFile.startsWith(resolvedSessionsDir + path.sep)) continue;
+        const updatedAt = Number(raw?.updatedAt || raw?.lastInteractionAt || raw?.endedAt || raw?.startedAt || 0) || 0;
+        const existing = byConversation.get(parsed.conversationId);
+        if (!existing || updatedAt > existing.updatedAt) {
+          byConversation.set(parsed.conversationId, {
+            conversationId: parsed.conversationId,
+            sessionKey,
+            sessionId,
+            sessionFile: resolvedSessionFile,
+            updatedAt,
+            createdAt: Number(raw?.sessionStartedAt || raw?.startedAt || updatedAt || 0) || updatedAt,
+            messageCount: 0,
+            title: "新对话",
+            preview: "",
+          });
+        }
+      }
+
+      const sessions = Array.from(byConversation.values())
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, limit)
+        .map((entry) => {
+          const messages = extractOpenClawChatMessages(entry.sessionFile, 80);
+          const firstUser = messages.find((m) => m.role === "user");
+          const last = [...messages].reverse().find((m) => normalizeHistoryText(m.text));
+          return {
+            conversationId: entry.conversationId,
+            sessionKey: entry.sessionKey,
+            sessionId: entry.sessionId,
+            title: truncateHistoryText(firstUser?.text || "", 24) || "新对话",
+            preview: truncateHistoryText(last?.text || "", 42),
+            messageCount: messages.length,
+            createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt,
+          };
+        })
+        .filter((entry) => entry.messageCount > 0);
+
+      res.json({ sessions });
+    } catch (error: any) {
+      console.warn("[chat-history] list failed", error?.message || error);
+      res.status(500).json({ error: "chat_history_list_failed" });
+    }
+  });
+
+  app.get("/api/claw/chat-history/messages", async (req, res) => {
+    try {
+      const adoptId = String(req.query.adoptId || "").trim();
+      const sessionKey = String(req.query.sessionKey || "").trim();
+      if (!adoptId || !sessionKey) {
+        res.status(400).json({ error: "adoptId and sessionKey required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+
+      const dbAgentId = String((claw as any).agentId || "").trim();
+      const trialAgentId = `trial_${adoptId}`;
+      const runtimeAgentId = existsSync(openClawAgentDir(trialAgentId)) ? trialAgentId : dbAgentId;
+      const parsed = parseWebSessionKey(sessionKey, runtimeAgentId);
+      if (!parsed) {
+        res.status(403).json({ error: "session_not_allowed" });
+        return;
+      }
+
+      const sessionsPath = path.join(openClawAgentDir(runtimeAgentId), "sessions", "sessions.json");
+      if (!existsSync(sessionsPath)) {
+        res.status(404).json({ error: "sessions_index_missing" });
+        return;
+      }
+      const rawIndex = JSON.parse(readFileSync(sessionsPath, "utf8") || "{}") || {};
+      const raw = rawIndex[sessionKey];
+      const sessionId = String(raw?.sessionId || "").trim();
+      if (!sessionId) {
+        res.status(404).json({ error: "session_missing" });
+        return;
+      }
+      const fallbackSessionFile = path.join(openClawAgentDir(runtimeAgentId), "sessions", `${sessionId}.jsonl`);
+      const sessionFile = String(raw?.sessionFile || fallbackSessionFile);
+      const sessionsDir = path.join(openClawAgentDir(runtimeAgentId), "sessions");
+      const resolvedFile = path.resolve(sessionFile);
+      if (!resolvedFile.startsWith(path.resolve(sessionsDir) + path.sep)) {
+        res.status(403).json({ error: "session_file_not_allowed" });
+        return;
+      }
+      const messages = extractOpenClawChatMessages(resolvedFile, 200);
+      res.json({ conversationId: parsed.conversationId, sessionKey, sessionId, messages });
+    } catch (error: any) {
+      console.warn("[chat-history] messages failed", error?.message || error);
+      res.status(500).json({ error: "chat_history_messages_failed" });
+    }
+  });
+
+  app.post("/api/claw/chat-history/activate", async (req, res) => {
+    try {
+      const adoptId = String(req.body?.adoptId || "").trim();
+      const sessionKey = String(req.body?.sessionKey || "").trim();
+      if (!adoptId || !sessionKey) {
+        res.status(400).json({ error: "adoptId and sessionKey required" });
+        return;
+      }
+      const claw = await requireClawOwner(req, res, adoptId);
+      if (!claw) return;
+
+      const dbAgentId = String((claw as any).agentId || "").trim();
+      const trialAgentId = `trial_${adoptId}`;
+      const runtimeAgentId = existsSync(openClawAgentDir(trialAgentId)) ? trialAgentId : dbAgentId;
+      const parsed = parseWebSessionKey(sessionKey, runtimeAgentId);
+      if (!parsed) {
+        res.status(403).json({ error: "session_not_allowed" });
+        return;
+      }
+
+      const sessionsPath = path.join(openClawAgentDir(runtimeAgentId), "sessions", "sessions.json");
+      const rawIndex = existsSync(sessionsPath) ? JSON.parse(readFileSync(sessionsPath, "utf8") || "{}") || {} : {};
+      if (!rawIndex[sessionKey]?.sessionId) {
+        res.status(404).json({ error: "session_missing" });
+        return;
+      }
+
+      const currentEpoch = readSessionEpoch(adoptId);
+      const scope = buildSessionRegistryScope("web", parsed.conversationId);
+      upsertSessionRegistry(adoptId, runtimeAgentId, sessionKey, currentEpoch, scope);
+      res.json({ ok: true, conversationId: parsed.conversationId, sessionKey, epoch: currentEpoch });
+    } catch (error: any) {
+      console.warn("[chat-history] activate failed", error?.message || error);
+      res.status(500).json({ error: "chat_history_activate_failed" });
     }
   });
 

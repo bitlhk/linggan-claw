@@ -28,6 +28,7 @@ export type UseLingxiaChatOptions = {
   memoryEnabled?: boolean;
   contextTurns?: number;
   runtimeMode?: "fast" | "plan";
+  historyStorageKey?: string;
   now?: () => number;
 };
 
@@ -38,6 +39,7 @@ export type UseLingxiaChatResult = {
   send(message: string): Promise<void>;
   abort(reason?: string): void;
   clear(): void;
+  restore(messages: LingxiaChatMessage[]): void;
   dispatchEvent(event: ChatEvent, targetMessageId?: string): void;
 };
 
@@ -72,6 +74,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
     memoryEnabled,
     contextTurns,
     runtimeMode = "fast",
+    historyStorageKey,
     now = Date.now,
   } = options;
 
@@ -89,10 +92,37 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
   const firstEventWaiterRef = useRef<FirstEventWaiter | null>(null);
   const activeSendStartedAtRef = useRef<number | undefined>(undefined);
   const inFlightRecoveringRef = useRef(false);
+  const skipNextHistoryPersistRef = useRef<string>("");
 
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    if (!historyStorageKey) return;
+    skipNextHistoryPersistRef.current = historyStorageKey;
+    try {
+      const saved = localStorage.getItem(historyStorageKey);
+      setMessages(saved ? JSON.parse(saved) : []);
+    } catch {
+      setMessages([]);
+    }
+  }, [historyStorageKey]);
+
+  useEffect(() => {
+    if (!historyStorageKey) return;
+    if (skipNextHistoryPersistRef.current === historyStorageKey) {
+      skipNextHistoryPersistRef.current = "";
+      return;
+    }
+    try {
+      if (messages.length === 0) {
+        localStorage.removeItem(historyStorageKey);
+      } else {
+        localStorage.setItem(historyStorageKey, JSON.stringify(messages.slice(-100)));
+      }
+    } catch {}
+  }, [messages, historyStorageKey]);
 
   const transports = useMemo(() => {
     const http = new HttpChatTransport(apiBase);
@@ -357,6 +387,14 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
     setMessages([]);
   }, [abort]);
 
+  const restore = useCallback((nextMessages: LingxiaChatMessage[]) => {
+    abort("restore");
+    activeAssistantIdRef.current = undefined;
+    activeSendStartedAtRef.current = undefined;
+    inFlightRecoveringRef.current = false;
+    setMessages(Array.isArray(nextMessages) ? nextMessages.slice(-100) : []);
+  }, [abort]);
+
   return {
     messages,
     isStreaming,
@@ -364,6 +402,7 @@ export function useLingxiaChat(options: UseLingxiaChatOptions): UseLingxiaChatRe
     send,
     abort,
     clear,
+    restore,
     dispatchEvent,
   };
 }
