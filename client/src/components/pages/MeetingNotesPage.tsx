@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Clipboard, Download, FileText, Mic2, Pencil, Send, Square, Trash2, Upload, Wand2 } from "lucide-react";
+import { ArrowLeft, Clipboard, Download, FileText, History, Mic2, Pencil, Plus, Send, Square, Trash2, Upload, Wand2, X } from "lucide-react";
 
 type MeetingNotesPageProps = {
   adoptId: string;
+  onBack?: () => void;
 };
 
 const MIN_RECORD_SECONDS = 5;
@@ -88,7 +89,7 @@ function buildMarkdown(record: Pick<MeetingRecord, "title" | "createdAt" | "dura
   ].join("\n");
 }
 
-export function MeetingNotesPage({ adoptId }: MeetingNotesPageProps) {
+export function MeetingNotesPage({ adoptId, onBack }: MeetingNotesPageProps) {
   const canRecord = typeof window !== "undefined" && window.isSecureContext;
   const [status, setStatus] = useState<RecordingState>("idle");
   const [error, setError] = useState("");
@@ -102,11 +103,13 @@ export function MeetingNotesPage({ adoptId }: MeetingNotesPageProps) {
   const [followupStatus, setFollowupStatus] = useState<FollowupState>("idle");
   const [followupError, setFollowupError] = useState("");
   const [managingFollowupId, setManagingFollowupId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const followupInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const currentTitle = useMemo(() => {
     if (current?.title) return current.title;
@@ -312,10 +315,44 @@ export function MeetingNotesPage({ adoptId }: MeetingNotesPageProps) {
     await navigator.clipboard.writeText(text);
   }, []);
 
+  const busy = status === "uploading" || status === "processing";
+  const recording = status === "recording";
+  const asking = followupStatus === "asking";
+
   const replaceMeetingRecord = useCallback((record: MeetingRecord) => {
     setCurrent(record);
     setMeetings((prev) => prev.map((item) => item.id === record.id ? record : item));
   }, []);
+
+  const startNewMeeting = useCallback(() => {
+    if (recording || busy) return;
+    setCurrent(null);
+    setStartedAt(null);
+    setElapsedSec(0);
+    setStatus("idle");
+    setError("");
+    setFollowupInput("");
+    setFollowupError("");
+    setFollowupStatus("idle");
+  }, [busy, recording]);
+
+  const selectMeeting = useCallback((item: MeetingRecord) => {
+    setCurrent(item);
+    setMeetingType(item.meetingType || "general");
+    setStartedAt(new Date(item.createdAt).getTime());
+    setElapsedSec(item.durationSec || 0);
+    setStatus("idle");
+    setError("");
+    setFollowupInput("");
+    setFollowupError("");
+    setHistoryOpen(false);
+  }, []);
+
+  const useQuickAction = useCallback((action: string) => {
+    if (!current || asking) return;
+    setFollowupInput(action);
+    window.setTimeout(() => followupInputRef.current?.focus(), 0);
+  }, [asking, current]);
 
   const renameFollowup = useCallback(async (followup: MeetingFollowup) => {
     if (!current || managingFollowupId) return;
@@ -371,17 +408,24 @@ export function MeetingNotesPage({ adoptId }: MeetingNotesPageProps) {
     }
   }, [adoptId, current, loadMeetings, managingFollowupId, replaceMeetingRecord]);
 
-  const busy = status === "uploading" || status === "processing";
-  const recording = status === "recording";
-  const asking = followupStatus === "asking";
-
   return (
     <main className="h-full min-h-0 overflow-y-auto stealth-scrollbar" style={{ background: "var(--oc-bg)", color: "var(--oc-text-primary)" }}>
       <div className="max-w-6xl mx-auto px-5 py-5 space-y-4">
         <section className="settings-card" style={{ padding: 18 }}>
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {onBack ? (
+                  <button
+                    type="button"
+                    onClick={onBack}
+                    title="返回办公空间"
+                    className="inline-flex items-center justify-center rounded-md p-1.5"
+                    style={{ color: "var(--oc-text-secondary)", border: "1px solid var(--oc-border)", background: "var(--oc-panel)" }}
+                  >
+                    <ArrowLeft size={15} />
+                  </button>
+                ) : null}
                 <Mic2 size={18} style={{ color: "var(--oc-accent)" }} />
                 <h2 className="text-base font-semibold" style={{ color: "var(--oc-text-primary)" }}>会议纪要</h2>
               </div>
@@ -389,9 +433,32 @@ export function MeetingNotesPage({ adoptId }: MeetingNotesPageProps) {
                 录音结束后上传到当前工作空间，完成 ASR 转写，再用独立 OpenClaw 会话生成纪要。
               </p>
             </div>
-            <span className="text-xs font-mono shrink-0" style={{ color: "var(--oc-text-tertiary)" }}>
-              {adoptId}
-            </span>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={startNewMeeting}
+                disabled={recording || busy}
+                className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm"
+                style={{
+                  background: "var(--oc-panel)",
+                  border: "1px solid var(--oc-border)",
+                  color: recording || busy ? "var(--oc-text-tertiary)" : "var(--oc-text-secondary)",
+                  cursor: recording || busy ? "not-allowed" : "pointer",
+                }}
+              >
+                <Plus size={15} />
+                新会议
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(true)}
+                className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm"
+                style={{ background: "var(--oc-panel)", border: "1px solid var(--oc-border)", color: "var(--oc-text-secondary)" }}
+              >
+                <History size={15} />
+                历史
+              </button>
+            </div>
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-2">
@@ -479,16 +546,40 @@ export function MeetingNotesPage({ adoptId }: MeetingNotesPageProps) {
           </div>
         </section>
 
-        <section className="grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-4">
+        <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="settings-card min-h-[420px]" style={{ padding: 18 }}>
+            <div className="flex items-center gap-2 mb-4">
+              <FileText size={16} style={{ color: "var(--oc-text-secondary)" }} />
+              <h3 className="text-sm font-semibold" style={{ color: "var(--oc-text-primary)" }}>原始转写</h3>
+            </div>
+            <div
+              className="rounded-md min-h-[330px] p-4 text-sm leading-7 whitespace-pre-wrap overflow-y-auto stealth-scrollbar"
+              style={{
+                background: "var(--oc-panel)",
+                border: "1px solid var(--oc-border)",
+                color: current?.transcript ? "var(--oc-text-primary)" : "var(--oc-text-tertiary)",
+              }}
+            >
+              {busy ? "正在处理录音，请稍候..." : current?.transcript || "暂无转写"}
+            </div>
+            {current ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {current.audioUrl ? <a className="text-xs" style={{ color: "var(--oc-accent)" }} href={current.audioUrl}>录音文件</a> : null}
+                {current.transcriptUrl ? <a className="text-xs" style={{ color: "var(--oc-accent)" }} href={current.transcriptUrl}>转写文件</a> : null}
+              </div>
+            ) : null}
+          </div>
+
           <div className="settings-card min-h-[420px]" style={{ padding: 18 }}>
             <div className="flex items-center justify-between gap-3 mb-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <Wand2 size={16} style={{ color: "var(--oc-text-secondary)" }} />
-                  <h3 className="text-sm font-semibold truncate" style={{ color: "var(--oc-text-primary)" }}>{currentTitle}</h3>
+                  <h3 className="text-sm font-semibold truncate" style={{ color: "var(--oc-text-primary)" }}>AI 摘要</h3>
                 </div>
                 {current ? (
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>
+                    <span className="truncate">{currentTitle}</span>
                     <span>{current.meetingTypeLabel || "普通会议"}</span>
                     <span>{new Date(current.createdAt).toLocaleString()}</span>
                     <span>待办 {current.actionItemsCount ?? 0} 项</span>
@@ -514,31 +605,12 @@ export function MeetingNotesPage({ adoptId }: MeetingNotesPageProps) {
             >
               {busy ? "正在处理录音，请稍候..." : current?.summary || "录音结束后自动生成会议纪要"}
             </div>
-          </div>
-
-          <aside className="settings-card" style={{ padding: 18 }}>
-            <div className="flex items-center gap-2 mb-4">
-              <FileText size={16} style={{ color: "var(--oc-text-secondary)" }} />
-              <h3 className="text-sm font-semibold" style={{ color: "var(--oc-text-primary)" }}>原始转写</h3>
-            </div>
-            <div
-              className="rounded-md min-h-[260px] p-3 text-sm leading-6 whitespace-pre-wrap overflow-y-auto stealth-scrollbar"
-              style={{
-                background: "var(--oc-panel)",
-                border: "1px solid var(--oc-border)",
-                color: current?.transcript ? "var(--oc-text-primary)" : "var(--oc-text-tertiary)",
-              }}
-            >
-              {current?.transcript || "暂无转写"}
-            </div>
             {current ? (
               <div className="mt-3 flex flex-wrap gap-2">
-                {current.audioUrl ? <a className="text-xs" style={{ color: "var(--oc-accent)" }} href={current.audioUrl}>录音文件</a> : null}
-                {current.transcriptUrl ? <a className="text-xs" style={{ color: "var(--oc-accent)" }} href={current.transcriptUrl}>转写文件</a> : null}
                 {current.summaryUrl ? <a className="text-xs" style={{ color: "var(--oc-accent)" }} href={current.summaryUrl}>纪要文件</a> : null}
               </div>
             ) : null}
-          </aside>
+          </div>
         </section>
 
         <section className="settings-card" style={{ padding: 18 }}>
@@ -550,68 +622,9 @@ export function MeetingNotesPage({ adoptId }: MeetingNotesPageProps) {
             {asking ? <span className="text-xs" style={{ color: "var(--oc-text-tertiary)" }}>处理中...</span> : null}
           </div>
 
-          <div className="flex flex-wrap gap-2 mb-3">
-            {QUICK_ACTIONS.map((action) => (
-              <button
-                key={action}
-                type="button"
-                disabled={!current || asking}
-                onClick={() => void askMeeting(action)}
-                className="rounded-md px-3 py-1.5 text-xs"
-                style={{
-                  background: "var(--oc-panel)",
-                  border: "1px solid var(--oc-border)",
-                  color: current && !asking ? "var(--oc-text-secondary)" : "var(--oc-text-tertiary)",
-                  cursor: current && !asking ? "pointer" : "not-allowed",
-                }}
-              >
-                {action}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-2">
-            <textarea
-              value={followupInput}
-              onChange={(event) => setFollowupInput(event.target.value)}
-              disabled={!current || asking}
-              rows={2}
-              placeholder={current ? "例如：帮我生成发给客户的跟进微信，或提取我负责的事项" : "先选择或生成一条会议纪要"}
-              className="flex-1 rounded-md px-3 py-2 text-sm resize-none"
-              style={{
-                background: "var(--oc-panel)",
-                border: "1px solid var(--oc-border)",
-                color: "var(--oc-text-primary)",
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void askMeeting(followupInput);
-                }
-              }}
-            />
-            <button
-              type="button"
-              disabled={!current || !followupInput.trim() || asking}
-              onClick={() => void askMeeting(followupInput)}
-              className="inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium"
-              style={{
-                background: "var(--oc-accent)",
-                border: "1px solid var(--oc-accent)",
-                color: "white",
-                opacity: !current || !followupInput.trim() || asking ? 0.55 : 1,
-                cursor: !current || !followupInput.trim() || asking ? "not-allowed" : "pointer",
-              }}
-            >
-              <Send size={15} />
-              发送
-            </button>
-          </div>
-          {followupError ? <div className="mt-2 text-xs" style={{ color: "var(--banking-danger)" }}>{followupError}</div> : null}
-
           {current?.followups?.length ? (
-            <div className="mt-4 space-y-3">
-              {current.followups.map((item) => (
+            <div className="mb-4 space-y-3">
+              {current.followups.slice().reverse().map((item) => (
                 <div key={item.id} className="rounded-md p-3" style={{ background: "var(--oc-panel)", border: "1px solid var(--oc-border)" }}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -663,41 +676,111 @@ export function MeetingNotesPage({ adoptId }: MeetingNotesPageProps) {
               ))}
             </div>
           ) : null}
+
+          <div className="flex flex-wrap gap-2 mb-3">
+            {QUICK_ACTIONS.map((action) => (
+              <button
+                key={action}
+                type="button"
+                disabled={!current || asking}
+                onClick={() => useQuickAction(action)}
+                className="rounded-md px-3 py-1.5 text-xs"
+                style={{
+                  background: "var(--oc-panel)",
+                  border: "1px solid var(--oc-border)",
+                  color: current && !asking ? "var(--oc-text-secondary)" : "var(--oc-text-tertiary)",
+                  cursor: current && !asking ? "pointer" : "not-allowed",
+                }}
+              >
+                {action}
+              </button>
+            ))}
+          </div>
+
+          <div
+            className="sticky bottom-0 z-10 -mx-1 rounded-md p-1"
+            style={{ background: "color-mix(in oklab, var(--oc-bg-surface) 92%, transparent)" }}
+          >
+          <div className="flex flex-col sm:flex-row gap-2">
+            <textarea
+              ref={followupInputRef}
+              value={followupInput}
+              onChange={(event) => setFollowupInput(event.target.value)}
+              disabled={!current || asking}
+              rows={2}
+              placeholder={current ? "例如：帮我生成发给客户的跟进微信，或提取我负责的事项" : "先选择或生成一条会议纪要"}
+              className="flex-1 rounded-md px-3 py-2 text-sm resize-none"
+              style={{
+                background: "var(--oc-panel)",
+                border: "1px solid var(--oc-border)",
+                color: "var(--oc-text-primary)",
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void askMeeting(followupInput);
+                }
+              }}
+            />
+            <button
+              type="button"
+              disabled={!current || !followupInput.trim() || asking}
+              onClick={() => void askMeeting(followupInput)}
+              className="inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium"
+              style={{
+                background: "var(--oc-accent)",
+                border: "1px solid var(--oc-accent)",
+                color: "white",
+                opacity: !current || !followupInput.trim() || asking ? 0.55 : 1,
+                cursor: !current || !followupInput.trim() || asking ? "not-allowed" : "pointer",
+              }}
+            >
+              <Send size={15} />
+              发送
+            </button>
+          </div>
+          </div>
+          {followupError ? <div className="mt-2 text-xs" style={{ color: "var(--banking-danger)" }}>{followupError}</div> : null}
         </section>
 
-        <section className="settings-card" style={{ padding: 18 }}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-            <h3 className="text-sm font-semibold" style={{ color: "var(--oc-text-primary)" }}>历史会议</h3>
+      </div>
+      {historyOpen ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/35" onClick={() => setHistoryOpen(false)}>
+          <aside
+            className="h-full w-full max-w-[420px] overflow-y-auto p-4 shadow-xl stealth-scrollbar"
+            style={{ background: "var(--oc-bg-surface)", borderLeft: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">历史会议</h3>
+                <p className="mt-1 text-xs" style={{ color: "var(--oc-text-tertiary)" }}>选择一条会议纪要继续处理</p>
+              </div>
+              <button type="button" onClick={() => setHistoryOpen(false)} className="lingxia-toolbar-icon" title="关闭">
+                <X size={16} />
+              </button>
+            </div>
             <input
               value={historyQuery}
               onChange={(event) => setHistoryQuery(event.target.value)}
               placeholder="搜索标题、类型、转写、纪要"
-              className="w-full sm:w-72 rounded-md px-3 py-2 text-sm"
+              className="mt-4 w-full rounded-md px-3 py-2 text-sm"
               style={{
                 background: "var(--oc-panel)",
                 border: "1px solid var(--oc-border)",
                 color: "var(--oc-text-primary)",
               }}
             />
-          </div>
-          {meetings.length === 0 ? (
-            <div className="text-sm" style={{ color: "var(--oc-text-tertiary)" }}>暂无会议纪要</div>
-          ) : filteredMeetings.length === 0 ? (
-            <div className="text-sm" style={{ color: "var(--oc-text-tertiary)" }}>没有匹配的会议纪要</div>
-          ) : (
-            <div className="space-y-2">
-              {filteredMeetings.map((item) => (
+            <div className="mt-4 space-y-2">
+              {meetings.length === 0 ? (
+                <div className="text-sm" style={{ color: "var(--oc-text-tertiary)" }}>暂无会议纪要</div>
+              ) : filteredMeetings.length === 0 ? (
+                <div className="text-sm" style={{ color: "var(--oc-text-tertiary)" }}>没有匹配的会议纪要</div>
+              ) : filteredMeetings.map((item) => (
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => {
-                    setCurrent(item);
-                    setMeetingType(item.meetingType || "general");
-                    setStartedAt(new Date(item.createdAt).getTime());
-                    setElapsedSec(item.durationSec || 0);
-                    setStatus("idle");
-                    setError("");
-                  }}
+                  onClick={() => selectMeeting(item)}
                   className="w-full rounded-md px-3 py-2 text-left"
                   style={{ background: current?.id === item.id ? "var(--oc-bg-active)" : "var(--oc-panel)", border: "1px solid var(--oc-border)", color: "var(--oc-text-primary)" }}
                 >
@@ -716,9 +799,9 @@ export function MeetingNotesPage({ adoptId }: MeetingNotesPageProps) {
                 </button>
               ))}
             </div>
-          )}
-        </section>
-      </div>
+          </aside>
+        </div>
+      ) : null}
     </main>
   );
 }

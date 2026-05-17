@@ -1,17 +1,17 @@
-import { MessageSquareText, Brain, Sparkles, Radio, CalendarClock, Settings2, Users, FolderTree, Store, Mic2 } from "lucide-react";
-export type PageKey = "chat" | "skills" | "weixin" | "agent" | "workspace" | "schedule" | "collab" | "meeting" | "settings";
+import { MessageSquareText, Brain, Sparkles, Radio, CalendarClock, Settings2, Users, FolderTree, Store, BriefcaseBusiness } from "lucide-react";
+export type PageKey = "chat" | "skills" | "weixin" | "agent" | "workspace" | "office" | "schedule" | "collab" | "meeting" | "settings";
 const items: { key: PageKey; label: string; icon: any; adminOnly?: boolean }[] = [
   { key: "chat", label: "聊天", icon: MessageSquareText },
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "weixin", label: "频道", icon: Radio },
   { key: "agent", label: "记忆", icon: Brain },
   { key: "collab", label: "协作", icon: Users },
-  { key: "workspace", label: "工作空间", icon: FolderTree },
+  { key: "workspace", label: "文件", icon: FolderTree },
+  { key: "office", label: "办公空间", icon: BriefcaseBusiness },
   { key: "schedule", label: "定时任务", icon: CalendarClock },
-  { key: "meeting", label: "会议纪要", icon: Mic2 },
   { key: "settings", label: "设置", icon: Settings2 },
 ];
-const bottomItemKeys = new Set<PageKey>(["meeting", "settings"]);
+const bottomItemKeys = new Set<PageKey>(["settings"]);
 const mainItems = items.filter((it) => !bottomItemKeys.has(it.key));
 const bottomItems = items.filter((it) => bottomItemKeys.has(it.key));
 

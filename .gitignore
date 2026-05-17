@@ -120,6 +120,10 @@ backups/
 
 # 数据目录（含用户数据）
 data/
+!data/
+data/*
+!data/office-templates/
+!data/office-templates/**
 !client/src/data/
 !client/src/data/**
 !server/_core/agent/data/

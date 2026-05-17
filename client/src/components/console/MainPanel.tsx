@@ -2,6 +2,7 @@ import { SkillsPage } from "@/components/pages/SkillsPage";
 import { ChannelsPage } from "@/components/pages/ChannelsPage";
 import { AgentPage } from "@/components/pages/AgentPage";
 import { WorkspacePage } from "@/components/pages/WorkspacePage";
+import { OfficeSpacePage } from "@/components/pages/OfficeSpacePage";
 import { SchedulePageV2 } from "@/components/pages/SchedulePageV2";
 import { SettingsPage } from "@/components/pages/SettingsPage";
 import { MeetingNotesPage } from "@/components/pages/MeetingNotesPage";
@@ -36,6 +37,7 @@ export function MainPanel({
   }
   if (activePage === "agent") return <AgentPage adoptId={adoptId || ""} skills={safeSkills.data as any} />;
   if (activePage === "workspace") return <WorkspacePage adoptId={adoptId || ""} />;
+  if (activePage === "office") return <OfficeSpacePage adoptId={adoptId || ""} />;
   if (activePage === "schedule") return <SchedulePageV2 adoptId={adoptId || ""} />;
   if (activePage === "meeting") return <MeetingNotesPage adoptId={adoptId || ""} />;
   if (activePage === "collab") return <CollabPage adoptId={adoptId || ""} />;

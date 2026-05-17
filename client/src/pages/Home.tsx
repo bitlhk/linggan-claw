@@ -432,7 +432,8 @@ export default function Home() {
       if (v) {
         sessionStorage.removeItem("home_initial_page");
         if (v === "agentLab") return "chat";
-        if (v === "docs") return "meeting";
+        if (v === "docs") return "workspace";
+        if (v === "meeting") return "office";
         return v as PageKey;
       }
     } catch {}

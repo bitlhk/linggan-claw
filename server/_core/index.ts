@@ -35,6 +35,8 @@ import { registerCoreFileRoutes } from "./claw-core-files";
 import { registerMemoryRoutes } from "./claw-memory";
 import { registerDownloadRoutes } from "./claw-downloads";
 import { registerFilesRoutes } from "./claw-files";
+import { registerOfficeExcelRoutes } from "./office-excel";
+import { registerOfficePptRoutes } from "./office-ppt";
 import { registerSandboxRoutes } from "./claw-sandbox";
 import { registerChatStreamRoutes } from "./claw-chat";
 import { registerRecoverRoutes } from "./claw-recover";
@@ -208,6 +210,8 @@ async function startServer() {
   registerMemoryRoutes(app);
   registerDownloadRoutes(app);
   registerFilesRoutes(app);
+  registerOfficeExcelRoutes(app);
+  registerOfficePptRoutes(app);
   registerSandboxRoutes(app);
   registerChatStreamRoutes(app);
   registerRecoverRoutes(app);
